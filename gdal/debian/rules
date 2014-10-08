@@ -9,3 +9,10 @@
 
 override_dh_auto_configure:
 	dh_auto_configure -- --without-ld-shared --disable-shared --enable-static --with-ogdi=no
+
+override_dh_auto_build:
+	dh_auto_build -- apps-target
+
+override_dh_auto_install:
+	mkdir -p debian/tmp/usr/bin
+	cp apps/ogr2ogr debian/tmp/usr/bin/ogr2ogr2
