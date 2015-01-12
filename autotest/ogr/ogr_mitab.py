@@ -32,6 +32,7 @@ import random
 import sys
 import string
 import shutil
+import time
 
 sys.path.append( '../pymod' )
 
@@ -643,45 +644,140 @@ def ogr_mitab_20():
         return 'skip'
 
     # Pass i==0: without MITAB_BOUNDS_FILE
-    # Pass i==1: with MITAB_BOUNDS_FILE : first load
-    # Pass i==2: with MITAB_BOUNDS_FILE : should use already loaded file
+    # Pass i==1: with MITAB_BOUNDS_FILE and French bounds : first load
+    # Pass i==2: with MITAB_BOUNDS_FILE and French bounds : should use already loaded file
     # Pass i==3: without MITAB_BOUNDS_FILE : should unload the file
     # Pass i==4: use BOUNDS layer creation option
-    for i in range(5):
-        if i == 1 or i == 2:
-            gdal.SetConfigOption('MITAB_BOUNDS_FILE', 'data/mitab_bounds.txt')
+    # Pass i==5: with MITAB_BOUNDS_FILE and European bounds
+    # Pass i==6: with MITAB_BOUNDS_FILE and generic EPSG:2154 (Europe bounds expected)
+    for fmt in [ 'tab', 'mif']:
+        for i in range(7):
+            if i == 1 or i == 2 or i == 5 or i == 6:
+                gdal.SetConfigOption('MITAB_BOUNDS_FILE', 'data/mitab_bounds.txt')
+            ds = ogr.GetDriverByName('MapInfo File').CreateDataSource('/vsimem/ogr_mitab_20.' + fmt)
+            sr = osr.SpatialReference()
+            if i == 1 or i == 2: # French bounds
+                sr.SetFromUserInput("""PROJCS["RGF93 / Lambert-93",
+        GEOGCS["RGF93",
+            DATUM["Reseau_Geodesique_Francais_1993",
+                SPHEROID["GRS 80",6378137,298.257222101],
+                TOWGS84[0,0,0,0,0,0,0]],
+            PRIMEM["Greenwich",0],
+            UNIT["degree",0.0174532925199433]],
+        PROJECTION["Lambert_Conformal_Conic_2SP"],
+        PARAMETER["standard_parallel_1",49.00000000002],
+        PARAMETER["standard_parallel_2",44],
+        PARAMETER["latitude_of_origin",46.5],
+        PARAMETER["central_meridian",3],
+        PARAMETER["false_easting",700000],
+        PARAMETER["false_northing",6600000],
+        UNIT["Meter",1.0],
+        AUTHORITY["EPSG","2154"]]""")
+            elif i == 5: # European bounds
+                sr.SetFromUserInput("""PROJCS["RGF93 / Lambert-93",
+        GEOGCS["RGF93",
+            DATUM["Reseau_Geodesique_Francais_1993",
+                SPHEROID["GRS 80",6378137,298.257222101],
+                TOWGS84[0,0,0,0,0,0,0]],
+            PRIMEM["Greenwich",0],
+            UNIT["degree",0.0174532925199433]],
+        PROJECTION["Lambert_Conformal_Conic_2SP"],
+        PARAMETER["standard_parallel_1",49.00000000001],
+        PARAMETER["standard_parallel_2",44],
+        PARAMETER["latitude_of_origin",46.5],
+        PARAMETER["central_meridian",3],
+        PARAMETER["false_easting",700000],
+        PARAMETER["false_northing",6600000],
+        UNIT["Meter",1.0],
+        AUTHORITY["EPSG","2154"]]""")
+            else:
+                sr.ImportFromEPSG(2154)
+            if i == 4:
+                lyr = ds.CreateLayer('test', srs = sr, options = ['BOUNDS=75000,6000000,1275000,7200000'])
+            else:
+                lyr = ds.CreateLayer('test', srs = sr)
+            lyr.CreateField(ogr.FieldDefn('ID', ogr.OFTInteger))
+            feat = ogr.Feature(lyr.GetLayerDefn())
+            feat.SetGeometryDirectly(ogr.CreateGeometryFromWkt("POINT (700000.001 6600000.001)"))
+            lyr.CreateFeature(feat)
+            ds = None
+            gdal.SetConfigOption('MITAB_BOUNDS_FILE', None)
+            
+            ds = ogr.Open('/vsimem/ogr_mitab_20.' + fmt)
+            lyr = ds.GetLayer(0)
+            feat = lyr.GetNextFeature()
+            if i == 6 and lyr.GetSpatialRef().ExportToWkt().find('49.00000000001') < 0:
+                gdaltest.post_reason('fail')
+                print(fmt)
+                print(i)
+                print(lyr.GetSpatialRef().ExportToWkt())
+                return 'fail'
+            # Strict text comparison to check precision
+            if fmt == 'tab':
+                if i == 1 or i == 2 or i == 4:
+                    if feat.GetGeometryRef().ExportToWkt() != 'POINT (700000.001 6600000.001)':
+                        gdaltest.post_reason('fail')
+                        print(fmt)
+                        print(i)
+                        feat.DumpReadable()
+                        return 'fail'
+                else:
+                    if feat.GetGeometryRef().ExportToWkt() == 'POINT (700000.001 6600000.001)':
+                        gdaltest.post_reason('fail')
+                        print(fmt)
+                        print(i)
+                        feat.DumpReadable()
+                        return 'fail'
+
+            ds = None
+
+            ogr.GetDriverByName('MapInfo File').DeleteDataSource('/vsimem/ogr_mitab_20.' + fmt)
+
+    gdal.SetConfigOption('MITAB_BOUNDS_FILE', 'tmp/mitab_bounds.txt')
+    for i in range(2):
+        if i == 1 and not sys.platform.startswith('linux'):
+            time.sleep(1)
+
+        f = open('tmp/mitab_bounds.txt', 'wb')
+        if i == 0:
+            f.write(
+"""Source = CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49, 700000, 6600000
+Destination=CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49.00000000001, 700000, 6600000 Bounds (-792421, 5278231) (3520778, 9741029)""")
+        else:
+            f.write(
+"""Source = CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49, 700000, 6600000
+Destination=CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49.00000000002, 700000, 6600000 Bounds (75000, 6000000) (1275000, 7200000)""")
+        f.close()
+
+        if i == 1 and sys.platform.startswith('linux'):
+            os.system('touch -d "1 minute ago" tmp/mitab_bounds.txt')
+
         ds = ogr.GetDriverByName('MapInfo File').CreateDataSource('/vsimem/ogr_mitab_20.tab')
         sr = osr.SpatialReference()
         sr.ImportFromEPSG(2154)
-        if i == 4:
-            lyr = ds.CreateLayer('test', srs = sr, options = ['BOUNDS=75000,6000000,1275000,7200000'])
-        else:
-            lyr = ds.CreateLayer('test', srs = sr)
+        lyr = ds.CreateLayer('test', srs = sr)
         lyr.CreateField(ogr.FieldDefn('ID', ogr.OFTInteger))
-        feat = ogr.Feature(lyr.GetLayerDefn())
-        feat.SetGeometryDirectly(ogr.CreateGeometryFromWkt("POINT (700000.001 6600000.001)"))
-        lyr.CreateFeature(feat)
         ds = None
-        gdal.SetConfigOption('MITAB_BOUNDS_FILE', None)
-        
         ds = ogr.Open('/vsimem/ogr_mitab_20.tab')
         lyr = ds.GetLayer(0)
         feat = lyr.GetNextFeature()
-        # Strict text comparison to check precision
-        if i == 1 or i == 2 or i == 4:
-            if feat.GetGeometryRef().ExportToWkt() != 'POINT (700000.001 6600000.001)':
-                print(i)
-                feat.DumpReadable()
-                return 'fail'
+        if i == 0:
+            expected = '49.00000000001'
         else:
-            if feat.GetGeometryRef().ExportToWkt() == 'POINT (700000.001 6600000.001)':
-                print(i)
-                feat.DumpReadable()
-                return 'fail'
-
+            expected = '49.00000000002'
+        if lyr.GetSpatialRef().ExportToWkt().find(expected) < 0:
+            gdaltest.post_reason('fail')
+            print(lyr.GetSpatialRef().ExportToWkt())
+            print(i)
+            gdal.SetConfigOption('MITAB_BOUNDS_FILE', None)
+            os.unlink('tmp/mitab_bounds.txt')
+            return 'fail'
         ds = None
-
         ogr.GetDriverByName('MapInfo File').DeleteDataSource('/vsimem/ogr_mitab_20.tab')
+
+
+    gdal.SetConfigOption('MITAB_BOUNDS_FILE', None)
+    os.unlink('tmp/mitab_bounds.txt')
 
     return 'success'
 
@@ -881,12 +977,16 @@ def ogr_mitab_25():
             lyr.CreateFeature(feat)
         ds = None
 
+        if sys.platform.startswith('linux'):
+            for ext in ('map', 'tab', 'dat', 'id'):
+                os.system('touch -d "1 minute ago" %s' % filename[0:-3]+ext)
+
         mtime_dict = {}
         for ext in ('map', 'tab', 'dat', 'id'):
             mtime_dict[ext] = os.stat(filename[0:-3] + ext).st_mtime
 
-        import time
-        time.sleep(1)
+        if not sys.platform.startswith('linux'):
+            time.sleep(1)
 
         # Try without doing anything
         ds = ogr.Open(filename, update = 1)
@@ -1314,11 +1414,555 @@ def ogr_mitab_29():
         y = n % N2
         lyr.SetSpatialFilterRect(x-0.01,y-0.01,x+0.01,y+0.01)
         if lyr.GetFeatureCount() != 1:
+            print(n)
+            print(lyr.GetFeatureCount())
+            print(x-0.01,y-0.01,x+0.01,y+0.01)
             gdaltest.post_reason('fail')
             return 'fail'
     ds = None
 
     ogr.GetDriverByName('MapInfo File').DeleteDataSource('tmp/compr_symb_deleted_records.tab')
+
+    return 'success'
+
+###############################################################################
+# Test SyncToDisk() in create mode
+
+def ogr_mitab_30(update = 0):
+
+    filename = 'tmp/ogr_mitab_30.tab'
+
+    ds = ogr.GetDriverByName('MapInfo File').CreateDataSource(filename)
+    lyr = ds.CreateLayer('test', options=['BOUNDS=0,0,100,100'])
+    lyr.CreateField(ogr.FieldDefn('ID', ogr.OFTInteger))
+    if lyr.SyncToDisk() != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    ds2 = ogr.Open(filename)
+    lyr2 = ds2.GetLayer(0)
+    if lyr2.GetFeatureCount() != 0 or lyr2.GetLayerDefn().GetFieldCount() != 1:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds2 = None
+
+    # Check that the files are not updated in between
+    if sys.platform.startswith('linux'):
+        for ext in ('map', 'tab', 'dat', 'id'):
+            os.system('touch -d "1 minute ago" %s' % filename[0:-3]+ext)
+
+    stat = {}
+    for ext in ('map', 'tab', 'dat', 'id'):
+        stat[ext] = gdal.VSIStatL(filename[0:-3]+ext)
+
+    if not sys.platform.startswith('linux'):
+        time.sleep(1)
+
+    if lyr.SyncToDisk() != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    for ext in ('map', 'tab', 'dat', 'id'):
+        stat2 = gdal.VSIStatL(filename[0:-3]+ext)
+        if stat[ext].size != stat2.size or stat[ext].mtime != stat2.mtime:
+            gdaltest.post_reason('fail')
+            return 'fail'
+
+    if update == 1:
+        ds = None
+        ds = ogr.Open(filename, update = 1)
+        lyr = ds.GetLayer(0)
+
+    for j in range(100):
+        feat = ogr.Feature(lyr.GetLayerDefn())
+        feat.SetField('ID', j+1)
+        feat.SetGeometryDirectly(ogr.CreateGeometryFromWkt('POINT (%d %d)' % (j,j)))
+        lyr.CreateFeature(feat)
+        feat = None
+        
+        if not (j <= 10 or (j % 5) == 0):
+            continue
+        
+        for i in range(2):
+            if lyr.SyncToDisk() != 0:
+                gdaltest.post_reason('fail')
+                return 'fail'
+                
+            if i == 0:
+                for ext in ('map', 'tab', 'dat', 'id'):
+                    stat[ext] = gdal.VSIStatL(filename[0:-3]+ext)
+            else:
+                for ext in ('map', 'tab', 'dat', 'id'):
+                    stat2 = gdal.VSIStatL(filename[0:-3]+ext)
+                    if stat[ext].size != stat2.size:
+                        print(ext)
+                        print(j)
+                        print(i)
+                        gdaltest.post_reason('fail')
+                        return 'fail'
+
+            ds2 = ogr.Open(filename)
+            lyr2 = ds2.GetLayer(0)
+            if lyr2.GetFeatureCount() != j+1:
+                print(j)
+                print(i)
+                gdaltest.post_reason('fail')
+                return 'fail'
+            feat2 = lyr2.GetFeature(j+1)
+            if feat2.GetField('ID') != j+1 or feat2.GetGeometryRef().ExportToWkt() != 'POINT (%d %d)' % (j,j):
+                print(j)
+                print(i)
+                feat2.DumpReadable()
+                gdaltest.post_reason('fail')
+                return 'fail'
+            lyr2.ResetReading()
+            for k in range(j+1):
+                feat2 = lyr2.GetNextFeature()
+            if feat2.GetField('ID') != j+1 or feat2.GetGeometryRef().ExportToWkt() != 'POINT (%d %d)' % (j,j):
+                print(j)
+                print(i)
+                feat2.DumpReadable()
+                gdaltest.post_reason('fail')
+                return 'fail'
+            ds2 = None
+
+    ds = None
+    ogr.GetDriverByName('MapInfo File').DeleteDataSource(filename)
+
+    return 'success'
+
+###############################################################################
+# Test SyncToDisk() in update mode
+
+def ogr_mitab_31():
+    return ogr_mitab_30(update = 1)
+
+###############################################################################
+# Check read support of non-spatial .tab/.data without .map or .id (#5718)
+# We only check read-only behaviour though.
+
+def ogr_mitab_32():
+
+    for update in (0,1):
+        ds = ogr.Open('data/aspatial-table.tab', update = update)
+        lyr = ds.GetLayer(0)
+        if lyr.GetFeatureCount() != 2:
+            print(update)
+            gdaltest.post_reason('fail')
+            return 'fail'
+        f = lyr.GetNextFeature()
+        if f.GetField('a') != 1 or f.GetField('b') != 2 or f.GetField('d') != 'hello':
+            print(update)
+            gdaltest.post_reason('fail')
+            return 'fail'
+        f = lyr.GetFeature(2)
+        if f.GetField('a') != 4:
+            print(update)
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+
+    return 'success'
+
+###############################################################################
+# Test opening and modifying a file created with MapInfo that consists of
+# a single object block, without index block
+
+def ogr_mitab_33():
+
+    for update in (0,1):
+        ds = ogr.Open('data/single_point_mapinfo.tab', update = update)
+        lyr = ds.GetLayer(0)
+        if lyr.GetFeatureCount() != 1:
+            print(update)
+            gdaltest.post_reason('fail')
+            return 'fail'
+        f = lyr.GetNextFeature()
+        if f.GetField('toto') != '':
+            print(update)
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+
+    # Test adding a new object
+    shutil.copy('data/single_point_mapinfo.tab', 'tmp')
+    shutil.copy('data/single_point_mapinfo.dat', 'tmp')
+    shutil.copy('data/single_point_mapinfo.id', 'tmp')
+    shutil.copy('data/single_point_mapinfo.map', 'tmp')
+    
+    ds = ogr.Open('tmp/single_point_mapinfo.tab', update = 1)
+    lyr = ds.GetLayer(0)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometryDirectly(ogr.CreateGeometryFromWkt('POINT(1363180 7509810)'))
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('tmp/single_point_mapinfo.tab')
+    lyr = ds.GetLayer(0)
+    if lyr.GetFeatureCount() != 2:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    # Test replacing the existing object
+    shutil.copy('data/single_point_mapinfo.tab', 'tmp')
+    shutil.copy('data/single_point_mapinfo.dat', 'tmp')
+    shutil.copy('data/single_point_mapinfo.id', 'tmp')
+    shutil.copy('data/single_point_mapinfo.map', 'tmp')
+    
+    ds = ogr.Open('tmp/single_point_mapinfo.tab', update = 1)
+    lyr = ds.GetLayer(0)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetFID(1)
+    f.SetGeometryDirectly(ogr.CreateGeometryFromWkt('POINT(1363180 7509810)'))
+    lyr.SetFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('tmp/single_point_mapinfo.tab')
+    lyr = ds.GetLayer(0)
+    if lyr.GetFeatureCount() != 1:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    ogr.GetDriverByName('MapInfo File').DeleteDataSource('tmp/single_point_mapinfo.tab')
+
+    return 'success'
+
+###############################################################################
+# Test updating a line that spans over several coordinate blocks
+
+def ogr_mitab_34():
+    
+    filename = '/vsimem/ogr_mitab_34.tab'
+    ds = ogr.GetDriverByName('MapInfo File').CreateDataSource(filename)
+    lyr = ds.CreateLayer('ogr_mitab_34', options = ['BOUNDS=-1000,0,1000,3000'])
+    lyr.CreateField(ogr.FieldDefn('dummy', ogr.OFTString))
+    geom = ogr.Geometry(ogr.wkbLineString)
+    for i in range(1000):
+        geom.AddPoint_2D(i, i)
+    for j in range(2):
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetGeometry(geom)
+        lyr.CreateFeature(f)
+        f = None
+    ds = None
+
+    ds = ogr.Open(filename, update = 1)
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    lyr.GetNextFeature() # seek to another object
+    geom = f.GetGeometryRef()
+    geom.SetPoint_2D(0, -1000, 3000)
+    lyr.SetFeature(f)
+    ds = None
+    
+    ds = ogr.Open(filename)
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    geom = f.GetGeometryRef()
+    if abs(geom.GetX(0) - -1000) > 1e-2 or abs(geom.GetY(0) - 3000) > 1e-2:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    for i in range(999):
+        if abs(geom.GetX(i+1) - (i+1)) > 1e-2 or abs(geom.GetY(i+1) - (i+1)) > 1e-2:
+            gdaltest.post_reason('fail')
+            return 'fail'
+    f = lyr.GetNextFeature()
+    geom = f.GetGeometryRef()
+    for i in range(1000):
+        if abs(geom.GetX(i) - (i)) > 1e-2 or abs(geom.GetY(i) - (i)) > 1e-2:
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+
+    ogr.GetDriverByName('MapInfo File').DeleteDataSource(filename)
+
+    return 'success'
+
+###############################################################################
+# Test SRS support
+
+def get_srs_from_coordsys(coordsys):
+    mif_filename = '/vsimem/foo.mif'
+    f = gdal.VSIFOpenL(mif_filename, "wb")
+    content = """Version 300
+Charset "Neutral"
+Delimiter ","
+%s
+Columns 1
+  foo Char(254)
+Data
+
+NONE
+""" % coordsys
+    gdal.VSIFWriteL(content, 1, len(content),f)
+    gdal.VSIFCloseL(f)
+
+    f = gdal.VSIFOpenL(mif_filename[0:-3]+"mid", "wb")
+    content = '""\n'
+    gdal.VSIFWriteL(content, 1, len(content),f)
+    gdal.VSIFCloseL(f)
+
+    ds = ogr.Open(mif_filename)
+    srs = ds.GetLayer(0).GetSpatialRef()
+    if srs is not None:
+        srs = srs.Clone()
+
+    gdal.Unlink(mif_filename)
+    gdal.Unlink(mif_filename[0:-3]+"mid")
+
+    return srs
+
+def get_coordsys_from_srs(srs):
+    mif_filename = '/vsimem/foo.mif'
+    ds = ogr.GetDriverByName('MapInfo File').CreateDataSource(mif_filename)
+    lyr = ds.CreateLayer('foo', srs = srs)
+    lyr.CreateField(ogr.FieldDefn('foo'))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    lyr.CreateFeature(f)
+    ds = None
+    f = gdal.VSIFOpenL(mif_filename, "rb")
+    data = gdal.VSIFReadL(1, 10000, f)
+    gdal.VSIFCloseL(f)
+    gdal.Unlink(mif_filename)
+    gdal.Unlink(mif_filename[0:-3]+"mid")
+    data = data[data.find('CoordSys'):]
+    data = data[0:data.find('\n')]
+    return data
+
+def ogr_mitab_35():
+
+    # Local/non-earth
+    srs = osr.SpatialReference()
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys NonEarth Units "m"':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+
+    srs = osr.SpatialReference('LOCAL_CS["foo"]')
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys NonEarth Units "m"':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'LOCAL_CS["Nonearth",UNIT["Meter",1.0]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+
+    # Test units
+    for mif_unit in [ 'mi', 'km', 'in', 'ft', 'yd', 'mm', 'cm', 'm', 'survey ft', 'nmi', 'li', 'ch', 'rd' ]:
+        coordsys = 'CoordSys NonEarth Units "%s"' % mif_unit
+        srs = get_srs_from_coordsys( coordsys )
+        #print(srs)
+        got_coordsys = get_coordsys_from_srs(srs)
+        if coordsys != got_coordsys:
+            gdaltest.post_reason('fail')
+            print(coordsys)
+            print(srs)
+            print(got_coordsys)
+            return 'fail'
+
+    # Geographic
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 1, 104':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'GEOGCS["unnamed",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 1, 104':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+
+    # Projected
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(32631)
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 8, 104, "m", 3, 0, 0.9996, 500000, 0':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'PROJCS["unnamed",GEOGCS["unnamed",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",3],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["Meter",1.0]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 8, 104, "m", 3, 0, 0.9996, 500000, 0':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+
+    # Test round-tripping of projection methods
+    for coordsys in [ 'CoordSys Earth Projection 1, 104',
+                      'CoordSys Earth Projection 2, 104, "m", 1, 2',
+                      'CoordSys Earth Projection 3, 104, "m", 1, 2, 3, 4, 5, 6',
+                      'CoordSys Earth Projection 4, 104, "m", 1, 90, 90',
+                      'CoordSys Earth Projection 5, 104, "m", 1, 90, 90',
+                      'CoordSys Earth Projection 6, 104, "m", 1, 2, 3, 4, 5, 6',
+                      'CoordSys Earth Projection 7, 104, "m", 1, 2, 3, 4, 5, 6',
+                      'CoordSys Earth Projection 8, 104, "m", 1, 2, 3, 4, 5',
+                      'CoordSys Earth Projection 9, 104, "m", 1, 2, 3, 4, 5, 6',
+                      'CoordSys Earth Projection 10, 104, "m", 1',
+                      'CoordSys Earth Projection 11, 104, "m", 1',
+                      'CoordSys Earth Projection 12, 104, "m", 1',
+                      'CoordSys Earth Projection 13, 104, "m", 1',
+                      'CoordSys Earth Projection 14, 104, "m", 1',
+                      'CoordSys Earth Projection 15, 104, "m", 1',
+                      'CoordSys Earth Projection 16, 104, "m", 1',
+                      'CoordSys Earth Projection 17, 104, "m", 1',
+                      'CoordSys Earth Projection 18, 104, "m", 1, 2, 3, 4',
+                      'CoordSys Earth Projection 19, 104, "m", 1, 2, 3, 4, 5, 6',
+                      'CoordSys Earth Projection 20, 104, "m", 1, 2, 3, 4, 5',
+                      'CoordSys Earth Projection 21, 104, "m", 1, 2, 3, 4, 5',
+                      'CoordSys Earth Projection 22, 104, "m", 1, 2, 3, 4, 5',
+                      'CoordSys Earth Projection 23, 104, "m", 1, 2, 3, 4, 5',
+                      'CoordSys Earth Projection 24, 104, "m", 1, 2, 3, 4, 5',
+                      'CoordSys Earth Projection 25, 104, "m", 1, 2, 3, 4',
+                      'CoordSys Earth Projection 26, 104, "m", 1, 2',
+                      'CoordSys Earth Projection 27, 104, "m", 1, 2, 3, 4',
+                      'CoordSys Earth Projection 28, 104, "m", 1, 2, 90',
+                      #'CoordSys Earth Projection 29, 104, "m", 1, 90, 90', # alias of 4
+                      'CoordSys Earth Projection 30, 104, "m", 1, 2, 3, 4',
+                      #'CoordSys Earth Projection 31, 104, "m", 1, 2, 3, 4, 5', # alias of 20
+                      'CoordSys Earth Projection 32, 104, "m", 1, 2, 3, 4, 5, 6',
+                      'CoordSys Earth Projection 33, 104, "m", 1, 2, 3, 4',
+                      ]:
+        srs = get_srs_from_coordsys( coordsys )
+        #print(srs)
+        got_coordsys = get_coordsys_from_srs(srs)
+        #if got_coordsys.find(' Bounds') >= 0:
+        #    got_coordsys = got_coordsys[0:got_coordsys.find(' Bounds')]
+        if coordsys != got_coordsys:
+            gdaltest.post_reason('fail')
+            print(coordsys)
+            print(srs)
+            print(got_coordsys)
+            return 'fail'
+
+    # Test TOWGS84
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4322)
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 1, 103':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'GEOGCS["unnamed",DATUM["WGS_1972",SPHEROID["WGS 72",6378135,298.26],TOWGS84[0,8,10,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 1, 103':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+
+    # Test Lambert 93
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(2154)
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49, 700000, 6600000':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'PROJCS["RGF93 / Lambert-93",GEOGCS["RGF93",DATUM["Reseau_Geodesique_Francais_1993",SPHEROID["GRS 80",6378137,298.257222101],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["standard_parallel_1",49],PARAMETER["standard_parallel_2",44],PARAMETER["latitude_of_origin",46.5],PARAMETER["central_meridian",3],PARAMETER["false_easting",700000],PARAMETER["false_northing",6600000],UNIT["Meter",1.0],AUTHORITY["EPSG","2154"]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49, 700000, 6600000':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+
+    srs = osr.SpatialReference('PROJCS["RGF93 / Lambert-93",GEOGCS["RGF93",DATUM["Reseau_Geodesique_Francais_1993",SPHEROID["GRS 80",6378137,298.257222101],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["standard_parallel_1",49.00000000002],PARAMETER["standard_parallel_2",44],PARAMETER["latitude_of_origin",46.5],PARAMETER["central_meridian",3],PARAMETER["false_easting",700000],PARAMETER["false_northing",6600000],UNIT["Meter",1.0],AUTHORITY["EPSG","2154"]]')
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49.00000000002, 700000, 6600000':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    gdal.SetConfigOption('MITAB_BOUNDS_FILE', 'data/mitab_bounds.txt')
+    coordsys = get_coordsys_from_srs(srs)
+    gdal.SetConfigOption('MITAB_BOUNDS_FILE', None)
+    if coordsys != 'CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49.00000000002, 700000, 6600000 Bounds (75000, 6000000) (1275000, 7200000)':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+
+    # http://trac.osgeo.org/gdal/ticket/4115
+    srs = get_srs_from_coordsys('CoordSys Earth Projection 10, 157, "m", 0')
+    wkt = srs.ExportToWkt()
+    if wkt != 'PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["unnamed",DATUM["WGS_1984",SPHEROID["WGS 84 (MAPINFO Datum 157)",6378137.01,298.257223563],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["Meter",1.0],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext  +no_defs"]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+    # We don't round-trip currently
+
+    # MIF 999
+    srs = osr.SpatialReference("""GEOGCS["unnamed",
+        DATUM["MIF 999,1,1,2,3",
+            SPHEROID["WGS 72",6378135,298.26]],
+        UNIT["degree",0.0174532925199433]]""")
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 1, 999, 1, 1, 2, 3':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'GEOGCS["unnamed",DATUM["MIF 999,1,1,2,3",SPHEROID["WGS 72",6378135,298.26],TOWGS84[1,2,3,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
+
+    # MIF 9999
+    srs = osr.SpatialReference("""GEOGCS["unnamed",
+        DATUM["MIF 9999,1,1,2,3,4,5,6,7,3",
+            SPHEROID["WGS 72",6378135,298.26]],
+        UNIT["degree",0.0174532925199433]]""")
+    coordsys = get_coordsys_from_srs(srs)
+    if coordsys != 'CoordSys Earth Projection 1, 9999, 1, 1, 2, 3, 4, 5, 6, 7, 3':
+        gdaltest.post_reason('fail')
+        print(coordsys)
+        return 'fail'
+    srs = get_srs_from_coordsys(coordsys)
+    wkt = srs.ExportToWkt()
+    if wkt != 'GEOGCS["unnamed",DATUM["MIF 9999,1,1,2,3,4,5,6,7,3",SPHEROID["WGS 72",6378135,298.26],TOWGS84[1,2,3,-4,-5,-6,7]],PRIMEM["non-Greenwich",3],UNIT["degree",0.0174532925199433]]':
+        gdaltest.post_reason('fail')
+        print(wkt)
+        return 'fail'
 
     return 'success'
 
@@ -1366,9 +2010,14 @@ gdaltest_list = [
     ogr_mitab_27,
     ogr_mitab_28,
     ogr_mitab_29,
+    ogr_mitab_30,
+    ogr_mitab_31,
+    ogr_mitab_32,
+    ogr_mitab_33,
+    ogr_mitab_34,
+    ogr_mitab_35,
     ogr_mitab_cleanup
     ]
-
 
 if __name__ == '__main__':
 

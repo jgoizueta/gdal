@@ -205,7 +205,7 @@ class IMapInfoFile : public OGRLayer
     virtual int         GetFeatureCount (int bForce) = 0;
     virtual OGRFeature *GetNextFeature();
     virtual OGRFeature *GetFeature(long nFeatureId);
-    virtual OGRErr      CreateFeature(OGRFeature *poFeature);
+    virtual OGRErr      ICreateFeature(OGRFeature *poFeature);
     virtual int         TestCapability( const char * pszCap ) =0;
     virtual int         GetExtent(OGREnvelope *psExtent, int bForce) =0;
 
@@ -335,12 +335,15 @@ class TABFile: public IMapInfoFile
     virtual int         GetExtent(OGREnvelope *psExtent, int bForce);
 
     /* Implement OGRLayer's SetFeature() for random write, only with TABFile */
-    virtual OGRErr      SetFeature( OGRFeature * );
+    virtual OGRErr      ISetFeature( OGRFeature * );
     virtual OGRErr      DeleteFeature(long nFeatureId);
 
     virtual OGRErr      DeleteField( int iField );
     virtual OGRErr      ReorderFields( int* panMap );
     virtual OGRErr      AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn, int nFlags );
+    
+    virtual OGRErr      SyncToDisk();
+
     ///////////////
     // Read access specific stuff
     //
@@ -358,6 +361,10 @@ class TABFile: public IMapInfoFile
                           GBool bForce = TRUE );
     
     virtual OGRSpatialReference *GetSpatialRef();
+    
+    static OGRSpatialReference* GetSpatialRefFromTABProj(const TABProjInfo& sTABProj);
+    static int                  GetTABProjFromSpatialRef(const OGRSpatialReference* poSpatialRef,
+                                                         TABProjInfo& sTABProj, int& nParmCount);
 
     virtual int GetFeatureCountByType(int &numPoints, int &numLines,
                                       int &numRegions, int &numTexts,
@@ -1891,18 +1898,11 @@ typedef struct
 /*---------------------------------------------------------------------
  * The following are used for coordsys bounds lookup
  *--------------------------------------------------------------------*/
-typedef struct
-{
-    TABProjInfo sProj;          /* Projection/datum definition */
-    double      dXMin;          /* Default bounds for that coordsys */
-    double      dYMin;
-    double      dXMax;
-    double      dYMax;
-} MapInfoBoundsInfo;
 
 GBool   MITABLookupCoordSysBounds(TABProjInfo *psCS,
                                   double &dXMin, double &dYMin,
-                                  double &dXMax, double &dYMax);
+                                  double &dXMax, double &dYMax,
+                                  int bOnlyUserTable = FALSE);
 int     MITABLoadCoordSysTable(const char *pszFname);
 void    MITABFreeCoordSysTable();
 GBool   MITABCoordSysTableLoaded();

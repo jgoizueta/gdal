@@ -366,6 +366,8 @@ int TABFile::Open(const char *pszFname, TABAccess eAccess,
         m_poDefn = new OGRFeatureDefn(pszFeatureClassName);
         m_poDefn->Reference();
         CPLFree(pszFeatureClassName);
+
+        m_bNeedTABRewrite = TRUE;
     }
 
 
@@ -747,6 +749,7 @@ int TABFile::ParseTABFileFields()
                 numTok = CSLCount(papszTok);
                 nStatus = -1;
                 CPLAssert(m_poDefn);
+                poFieldDefn = NULL;
                 if (numTok >= 3 && EQUAL(papszTok[1], "char"))
                 {
                     /*-------------------------------------------------
@@ -889,6 +892,7 @@ int TABFile::ParseTABFileFields()
                      "Failed to parse field definition at line %d in file %s", 
                              iLine+1, m_pszFname);
                     CSLDestroy(papszTok);
+                    delete poFieldDefn;
                     return -1;
                 }
                 /*-----------------------------------------------------
@@ -944,8 +948,6 @@ int TABFile::ParseTABFileFields()
  *
  * Generate the .TAB file using mainly the attribute fields definition.
  *
- * This private method should be used only during the Close() call with
- * write access mode.
  *
  * Returns 0 on success, -1 on error.
  **********************************************************************/
@@ -953,16 +955,20 @@ int TABFile::WriteTABFile()
 {
     VSILFILE *fp;
 
-    if (m_eAccessMode == TABRead)
+    if (m_poMAPFile == NULL || m_eAccessMode == TABRead)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "WriteTABFile() can be used only with Write access.");
         return -1;
     }
-    if (m_eAccessMode == TABReadWrite && !m_bNeedTABRewrite )
+    if (!m_bNeedTABRewrite )
     {
         return 0;
     }
+
+    // First update file version number...
+    int nMapObjVersion = m_poMAPFile->GetMinTABFileVersion();
+    m_nVersion = MAX(m_nVersion, nMapObjVersion);
 
     if ( (fp = VSIFOpenL(m_pszFname, "wt")) != NULL)
     {
@@ -1055,6 +1061,8 @@ int TABFile::WriteTABFile()
         }
 
         VSIFCloseL(fp);
+
+        m_bNeedTABRewrite = FALSE;
     }
     else
     {
@@ -1080,12 +1088,8 @@ int TABFile::Close()
     // Commit the latest changes to the file...
     
     // In Write access, it's time to write the .TAB file.
-    if (m_eAccessMode != TABRead && m_poMAPFile)
+    if (m_eAccessMode != TABRead)
     {
-        // First update file version number...
-        int nMapObjVersion = m_poMAPFile->GetMinTABFileVersion();
-        m_nVersion = MAX(m_nVersion, nMapObjVersion);
-
         WriteTABFile();
     }
 
@@ -1650,11 +1654,11 @@ OGRErr TABFile::CreateFeature(TABFeature *poFeature)
 }
 
 /**********************************************************************
- *                   TABFile::SetFeature()
+ *                   TABFile::ISetFeature()
  *
  * Implementation of OGRLayer's SetFeature()
  **********************************************************************/
-OGRErr TABFile::SetFeature( OGRFeature *poFeature )
+OGRErr TABFile::ISetFeature( OGRFeature *poFeature )
 
 {
     CPLErrorReset();
@@ -2129,6 +2133,9 @@ int TABFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
     if (nStatus == 0 && bIndexed)
         nStatus = SetFieldIndexed(m_poDefn->GetFieldCount()-1);
 
+    if (nStatus == 0 && m_eAccessMode == TABReadWrite)
+        nStatus = WriteTABFile();
+
     CPLFree(pszCleanName);
     return nStatus;
 }
@@ -2573,6 +2580,17 @@ int TABFile::SetProjInfo(TABProjInfo *poPI)
     }
 
     /*-----------------------------------------------------------------
+     * Lookup default bounds and reset m_bBoundsSet flag
+     *----------------------------------------------------------------*/
+    double dXMin, dYMin, dXMax, dYMax;
+
+    m_bBoundsSet = FALSE;
+    if (MITABLookupCoordSysBounds(poPI, dXMin, dYMin, dXMax, dYMax) == TRUE)
+    {
+        SetBounds(dXMin, dYMin, dXMax, dYMax);
+    }
+
+    /*-----------------------------------------------------------------
      * Check that dataset has been created but no feature set yet.
      *----------------------------------------------------------------*/
     if (m_poMAPFile && m_nLastFeatureId < 1)
@@ -2586,17 +2604,6 @@ int TABFile::SetProjInfo(TABProjInfo *poPI)
                  "SetProjInfo() can be called only after dataset has been "
                  "created and before any feature is set.");
         return -1;
-    }
-
-    /*-----------------------------------------------------------------
-     * Lookup default bounds and reset m_bBoundsSet flag
-     *----------------------------------------------------------------*/
-    double dXMin, dYMin, dXMax, dYMax;
-
-    m_bBoundsSet = FALSE;
-    if (MITABLookupCoordSysBounds(poPI, dXMin, dYMin, dXMax, dYMax) == TRUE)
-    {
-        SetBounds(dXMin, dYMin, dXMax, dYMax);
     }
 
     return 0;
@@ -2634,8 +2641,13 @@ OGRErr TABFile::DeleteField( int iField )
             memmove(m_panIndexNo + iField, m_panIndexNo + iField + 1,
                     (m_poDefn->GetFieldCount() - 1 - iField) * sizeof(int));
         }
-    
-        return m_poDefn->DeleteFieldDefn( iField );
+
+        m_poDefn->DeleteFieldDefn( iField );
+
+        if (m_eAccessMode == TABReadWrite)
+            WriteTABFile();
+
+        return OGRERR_NONE;
     }
     else
         return OGRERR_FAILURE;
@@ -2673,7 +2685,12 @@ OGRErr TABFile::ReorderFields( int* panMap )
         CPLFree(m_panIndexNo);
         m_panIndexNo = panNewIndexedField;
 
-        return m_poDefn->ReorderFieldDefns( panMap );
+        m_poDefn->ReorderFieldDefns( panMap );
+
+        if (m_eAccessMode == TABReadWrite)
+            WriteTABFile();
+
+        return OGRERR_NONE;
     }
     else
         return OGRERR_FAILURE;
@@ -2719,10 +2736,36 @@ OGRErr TABFile::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn, int nF
         {
             poFieldDefn->SetWidth(m_poDATFile->GetFieldWidth(iField));
         }
+
+        if (m_eAccessMode == TABReadWrite)
+            WriteTABFile();
+
         return OGRERR_NONE;
     }
     else
         return OGRERR_FAILURE;
+}
+
+/************************************************************************/
+/*                            SyncToDisk()                             */
+/************************************************************************/
+
+OGRErr TABFile::SyncToDisk()
+{
+    /* Silently return */
+    if( m_eAccessMode == TABRead )
+        return OGRERR_NONE;
+
+    if( WriteTABFile() != 0 )
+        return OGRERR_FAILURE;
+
+    if( m_poMAPFile->SyncToDisk() != 0 )
+        return OGRERR_FAILURE;
+
+    if( m_poDATFile->SyncToDisk() != 0 )
+        return OGRERR_FAILURE;
+
+    return OGRERR_NONE;
 }
 
 /************************************************************************/

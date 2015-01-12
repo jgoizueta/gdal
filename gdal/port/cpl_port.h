@@ -231,6 +231,12 @@ typedef unsigned long    GUIntBig;
 
 #endif
 
+#if SIZEOF_VOIDP == 8
+typedef GIntBig          GPtrDiff_t;
+#else
+typedef int              GPtrDiff_t;
+#endif
+
 #if defined(__MSVCRT__) || (defined(WIN32) && defined(_MSC_VER))
   #define CPL_FRMT_GB_WITHOUT_PREFIX     "I64"
 #elif HAVE_LONG_LONG
@@ -294,7 +300,7 @@ typedef unsigned long    GUIntBig;
 #endif
 
 /* TODO : support for other compilers needed */
-#if defined(__GNUC__) || defined(_MSC_VER)
+#if (defined(__GNUC__) && !defined(__NO_INLINE__)) || defined(_MSC_VER)
 #define HAS_CPL_INLINE  1
 #define CPL_INLINE __inline
 #elif defined(__SUNPRO_CC)
@@ -600,6 +606,12 @@ static char *cvsid_aw() { return( cvsid_aw() ? ((char *) NULL) : cpl_cvsid ); }
 #else
   #define CPL_WARN_DEPRECATED(x)
 #endif
+#endif
+
+#ifdef WARN_STANDARD_PRINTF
+int vsnprintf(char *str, size_t size, const char* fmt, va_list args) CPL_WARN_DEPRECATED("Use CPLvsnprintf() instead");
+int snprintf(char *str, size_t size, const char* fmt, ...) CPL_PRINT_FUNC_FORMAT(3,4) CPL_WARN_DEPRECATED("Use CPLsnprintf() instead");
+int sprintf(char *str, const char* fmt, ...) CPL_PRINT_FUNC_FORMAT(2, 3) CPL_WARN_DEPRECATED("Use CPLsprintf() instead");
 #endif
 
 #endif /* ndef CPL_BASE_H_INCLUDED */

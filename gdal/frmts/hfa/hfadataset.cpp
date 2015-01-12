@@ -287,7 +287,10 @@ class CPL_DLL HFADataset : public GDALPamDataset
   protected:
     virtual CPLErr IRasterIO( GDALRWFlag, int, int, int, int,
                               void *, int, int, GDALDataType,
-                              int, int *, int, int, int );
+                              int, int *,
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg );
 
   public:
                 HFADataset();
@@ -1072,7 +1075,7 @@ CPLErr HFARasterAttributeTable::ValuesIO(GDALRWFlag eRWFlag, int iField, int iSt
             {
                 // copy them back to doubles
                 for( int i = 0; i < iLength; i++ )
-                    pdfData[i] = atof(papszColData[i]);
+                    pdfData[i] = CPLAtof(papszColData[i]);
             }
 
             // either we allocated them for write, or they were allocated
@@ -1383,7 +1386,7 @@ CPLErr HFARasterAttributeTable::ValuesIO(GDALRWFlag eRWFlag, int iField, int iSt
             {
                 // convert user supplied strings to doubles
                 for( int i = 0; i < iLength; i++ )
-                    padfColData[i] = atof(papszStrList[i]);
+                    padfColData[i] = CPLAtof(papszStrList[i]);
             }
 
             // call value IO to read/write doubles
@@ -2154,7 +2157,7 @@ void HFARasterBand::ReadAuxMetadata()
                       break;
 
                   char szValueAsString[100];
-                  sprintf( szValueAsString, "%.14g", dfValue );
+                  CPLsprintf( szValueAsString, "%.14g", dfValue );
 
                   if( iValue > 0 )
                       osValueList += ",";
@@ -2894,7 +2897,7 @@ CPLErr HFARasterBand::BuildOverviews( const char *pszResampling,
         int i, iResult = -1, nReqOvLevel;
 
         nReqOvLevel = 
-            GDALOvLevelAdjust(panOverviewList[iOverview],nRasterXSize);
+            GDALOvLevelAdjust2(panOverviewList[iOverview],nRasterXSize,nRasterYSize);
 
         for( i = 0; i < nOverviews && papoOvBands[iOverview] == NULL; i++ )
         {
@@ -2906,8 +2909,10 @@ CPLErr HFARasterBand::BuildOverviews( const char *pszResampling,
                 continue;
             }
 
-            nThisOvLevel = (int) (0.5 + GetXSize() 
-                    / (double) papoOverviewBands[i]->GetXSize());
+            nThisOvLevel = GDALComputeOvFactor(papoOverviewBands[i]->GetXSize(),
+                                               GetXSize(),
+                                               papoOverviewBands[i]->GetYSize(),
+                                               GetYSize());
 
             if( nReqOvLevel == nThisOvLevel )
                 papoOvBands[iOverview] = papoOverviewBands[i];
@@ -2980,8 +2985,8 @@ HFARasterBand::GetDefaultHistogram( double *pdfMin, double *pdfMax,
         const char *pszBinValues = 
             GetMetadataItem( "STATISTICS_HISTOBINVALUES" );
 
-        *pdfMin = atof(GetMetadataItem("STATISTICS_HISTOMIN"));
-        *pdfMax = atof(GetMetadataItem("STATISTICS_HISTOMAX"));
+        *pdfMin = CPLAtof(GetMetadataItem("STATISTICS_HISTOMIN"));
+        *pdfMax = CPLAtof(GetMetadataItem("STATISTICS_HISTOMAX"));
 
         *pnBuckets = 0;
         for( i = 0; pszBinValues[i] != '\0'; i++ )
@@ -4029,10 +4034,10 @@ CPLErr HFADataset::WriteProjection()
 
         for( iUnit = 0; apszUnitMap[iUnit] != NULL; iUnit += 2 )
         {
-            if( fabs(atof(apszUnitMap[iUnit+1]) - dfActualSize) < dfClosestDiff )
+            if( fabs(CPLAtof(apszUnitMap[iUnit+1]) - dfActualSize) < dfClosestDiff )
             {
                 iClosest = iUnit;
-                dfClosestDiff = fabs(atof(apszUnitMap[iUnit+1])-dfActualSize);
+                dfClosestDiff = fabs(CPLAtof(apszUnitMap[iUnit+1])-dfActualSize);
             }
         }
         
@@ -4347,7 +4352,7 @@ HFAPCSStructToWKT( const Eprj_Datum *psDatum,
                 iUnitIndex = 0;
             
             oSRS.SetLinearUnits( pszUnits, 
-                                 atof(apszUnitMap[iUnitIndex+1]) );
+                                 CPLAtof(apszUnitMap[iUnitIndex+1]) );
         }
         else
             oSRS.SetLinearUnits( SRS_UL_METER, 1.0 );
@@ -5382,7 +5387,9 @@ CPLErr HFADataset::IRasterIO( GDALRWFlag eRWFlag,
                               void *pData, int nBufXSize, int nBufYSize, 
                               GDALDataType eBufType,
                               int nBandCount, int *panBandMap, 
-                              int nPixelSpace, int nLineSpace, int nBandSpace )
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg )
 
 {
     if( hHFA->papoBand[panBandMap[0]-1]->fpExternal != NULL 
@@ -5390,13 +5397,13 @@ CPLErr HFADataset::IRasterIO( GDALRWFlag eRWFlag,
         return GDALDataset::BlockBasedRasterIO( 
             eRWFlag, nXOff, nYOff, nXSize, nYSize,
             pData, nBufXSize, nBufYSize, eBufType, 
-            nBandCount, panBandMap, nPixelSpace, nLineSpace, nBandSpace );
+            nBandCount, panBandMap, nPixelSpace, nLineSpace, nBandSpace, psExtraArg );
     else
         return 
             GDALDataset::IRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                                     pData, nBufXSize, nBufYSize, eBufType, 
                                     nBandCount, panBandMap, 
-                                    nPixelSpace, nLineSpace, nBandSpace );
+                                    nPixelSpace, nLineSpace, nBandSpace, psExtraArg );
 }
 
 /************************************************************************/

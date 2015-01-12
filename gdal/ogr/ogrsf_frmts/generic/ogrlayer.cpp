@@ -273,7 +273,11 @@ OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent, int bF
         else if (!bExtentSet)
         {
             poGeom->getEnvelope(psExtent);
-            bExtentSet = TRUE;
+            if( !(CPLIsNan(psExtent->MinX) || CPLIsNan(psExtent->MinY) ||
+                  CPLIsNan(psExtent->MaxX) || CPLIsNan(psExtent->MaxY)) )
+            {
+                bExtentSet = TRUE;
+            }
         }
         else
         {
@@ -547,10 +551,43 @@ OGRFeatureH OGR_L_GetNextFeature( OGRLayerH hLayer )
 }
 
 /************************************************************************/
+/*                    ConvertNonLinearGeomsIfNecessary()                */
+/************************************************************************/
+
+void OGRLayer::ConvertNonLinearGeomsIfNecessary( OGRFeature *poFeature )
+{
+    if( !TestCapability(OLCCurveGeometries) )
+    {
+        int nGeomFieldCount = GetLayerDefn()->GetGeomFieldCount();
+        for(int i=0;i<nGeomFieldCount;i++)
+        {
+            OGRGeometry* poGeom = poFeature->GetGeomFieldRef(i);
+            if( poGeom != NULL && OGR_GT_IsNonLinear(poGeom->getGeometryType()) )
+            {
+                OGRwkbGeometryType eTargetType = OGR_GT_GetLinear(poGeom->getGeometryType());
+                poFeature->SetGeomFieldDirectly(i,
+                    OGRGeometryFactory::forceTo(poFeature->StealGeometry(i), eTargetType));
+            }
+        }
+    }
+}
+
+/************************************************************************/
 /*                             SetFeature()                             */
 /************************************************************************/
 
-OGRErr OGRLayer::SetFeature( OGRFeature * )
+OGRErr OGRLayer::SetFeature( OGRFeature *poFeature )
+
+{
+    ConvertNonLinearGeomsIfNecessary(poFeature);
+    return ISetFeature(poFeature);
+}
+
+/************************************************************************/
+/*                             ISetFeature()                            */
+/************************************************************************/
+
+OGRErr OGRLayer::ISetFeature( OGRFeature * )
 
 {
     return OGRERR_UNSUPPORTED_OPERATION;
@@ -578,7 +615,18 @@ OGRErr OGR_L_SetFeature( OGRLayerH hLayer, OGRFeatureH hFeat )
 /*                           CreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRLayer::CreateFeature( OGRFeature * )
+OGRErr OGRLayer::CreateFeature( OGRFeature *poFeature )
+
+{
+    ConvertNonLinearGeomsIfNecessary(poFeature);
+    return ICreateFeature(poFeature);
+}
+
+/************************************************************************/
+/*                           ICreateFeature()                            */
+/************************************************************************/
+
+OGRErr OGRLayer::ICreateFeature( OGRFeature * )
 
 {
     return OGRERR_UNSUPPORTED_OPERATION;
@@ -1686,8 +1734,15 @@ const char* OGR_L_GetName( OGRLayerH hLayer )
 
 OGRwkbGeometryType OGRLayer::GetGeomType()
 {
-    return GetLayerDefn()->GetGeomType();
+    OGRFeatureDefn* poLayerDefn = GetLayerDefn();
+    if( poLayerDefn == NULL )
+    {
+        CPLDebug("OGR", "GetLayerType() returns NULL !");
+        return wkbUnknown;
+    }
+    return poLayerDefn->GetGeomType();
 }
+
 /************************************************************************/
 /*                         OGR_L_GetGeomType()                          */
 /************************************************************************/
@@ -1702,7 +1757,12 @@ OGRwkbGeometryType OGR_L_GetGeomType( OGRLayerH hLayer )
         OGRAPISpy_L_GetGeomType(hLayer);
 #endif
 
-    return ((OGRLayer *) hLayer)->GetGeomType();
+    OGRwkbGeometryType eType = ((OGRLayer *) hLayer)->GetGeomType();
+    if( OGR_GT_IsNonLinear(eType) && !OGRGetNonLinearGeometriesEnabledFlag() )
+    {
+        eType = OGR_GT_GetLinear(eType);
+    }
+    return eType;
 }
 
 /************************************************************************/
@@ -1795,6 +1855,8 @@ OGRErr create_field_map(OGRFeatureDefn *poDefn, int **map)
     if (n > 0) {
         *map = (int*)VSIMalloc(sizeof(int) * n);
         if (!(*map)) return OGRERR_NOT_ENOUGH_MEMORY;
+        for(int i=0;i<n;i++)
+            (*map)[i] = -1;
     }
     return ret;
 }

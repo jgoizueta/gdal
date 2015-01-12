@@ -172,15 +172,43 @@ void GDALCleanupTransformDeserializerMutex();
 
 /* Transformer cloning */
 
-void* GDALCloneTPSTransformer( void *pTransformArg );
-void* GDALCloneGenImgProjTransformer( void *pTransformArg );
-void* GDALCloneApproxTransformer( void *pTransformArg );
-/* TODO : GDALCloneGeoLocTransformer? , GDALCloneRPCTransformer? */ 
-
 void* GDALCreateTPSTransformerInt( int nGCPCount, const GDAL_GCP *pasGCPList, 
                                    int bReversed, char** papszOptions );
 
 void CPL_DLL * GDALCloneTransformer( void *pTranformerArg );
+
+/************************************************************************/
+/*      Color table related                                             */
+/************************************************************************/
+
+int
+GDALComputeMedianCutPCTInternal( GDALRasterBandH hRed, 
+                           GDALRasterBandH hGreen, 
+                           GDALRasterBandH hBlue, 
+                           GByte* pabyRedBand,
+                           GByte* pabyGreenBand,
+                           GByte* pabyBlueBand,
+                           int (*pfnIncludePixel)(int,int,void*),
+                           int nColors, 
+                           int nBits,
+                           int* panHistogram,
+                           GDALColorTableH hColorTable,
+                           GDALProgressFunc pfnProgress, 
+                           void * pProgressArg );
+
+int GDALDitherRGB2PCTInternal( GDALRasterBandH hRed, 
+                               GDALRasterBandH hGreen, 
+                               GDALRasterBandH hBlue, 
+                               GDALRasterBandH hTarget, 
+                               GDALColorTableH hColorTable,
+                               int nBits,
+                               GInt16* pasDynamicColorMap,
+                               int bDither,
+                               GDALProgressFunc pfnProgress, 
+                               void * pProgressArg );
+
+#define PRIME_FOR_65536                                 98317
+#define MEDIAN_CUT_AND_DITHER_BUFFER_SIZE_65536         (6 * sizeof(int) * PRIME_FOR_65536)
 
 /************************************************************************/
 /*      Float comparison function.                                      */

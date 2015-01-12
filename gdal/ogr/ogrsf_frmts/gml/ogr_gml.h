@@ -70,8 +70,6 @@ class OGRGMLLayer : public OGRLayer
 
     int                 bFaceHoleNegative;
 
-    OGRGeometry        *ConvertGeomToMultiIfNecessary(OGRGeometry* poGeom);
-
   public:
                         OGRGMLLayer( const char * pszName, 
                                      int bWriter,
@@ -85,7 +83,7 @@ class OGRGMLLayer : public OGRLayer
     int                 GetFeatureCount( int bForce = TRUE );
     OGRErr              GetExtent(OGREnvelope *psExtent, int bForce = TRUE);
 
-    OGRErr              CreateFeature( OGRFeature *poFeature );
+    OGRErr              ICreateFeature( OGRFeature *poFeature );
     
     OGRFeatureDefn *    GetLayerDefn() { return poFeatureDefn; }
 
@@ -210,6 +208,8 @@ class OGRGMLDataSource : public OGRDataSource
                                             OGRGeometry *poSpatialFilter,
                                             const char *pszDialect );
     virtual void                ReleaseResultSet( OGRLayer * poResultsSet );
+    
+    static int          CheckHeader(const char* pszStr);
 };
 
 #endif /* _OGR_GML_H_INCLUDED */

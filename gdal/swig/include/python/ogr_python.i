@@ -119,7 +119,7 @@ ds[0:4] would return a list of the first four layers."""
 
 
 %extend OGRLayerShadow {
-  %pythoncode {
+  %pythoncode %{
     def Reference(self):
       "For backwards compatibility only."
       pass
@@ -191,12 +191,19 @@ layer[0:4] would return a list of the first four features."""
         return output
     schema = property(schema)
 
-  }
+  %}
 
 }
 
 %extend OGRFeatureShadow {
-  %pythoncode {
+
+  %apply ( const char *utf8_path ) { (const char* value) };
+  void SetFieldString(int id, const char* value) {
+    OGR_F_SetFieldString(self, id, value);
+  }
+  %clear (const char* value );
+  
+  %pythoncode %{
     def Reference(self):
       pass
 
@@ -302,6 +309,30 @@ layer[0:4] would return a list of the first four features."""
         # default to returning as a string.  Should we add more types?
         return self.GetFieldAsString(fld_index)
 
+    # With several override, SWIG cannot dispatch automatically unicode strings
+    # to the right implementation, so we have to do it at hand
+    def SetField(self, *args):
+        """
+        SetField(self, int id, char value)
+        SetField(self, char name, char value)
+        SetField(self, int id, int value)
+        SetField(self, char name, int value)
+        SetField(self, int id, double value)
+        SetField(self, char name, double value)
+        SetField(self, int id, int year, int month, int day, int hour, int minute, 
+            int second, int tzflag)
+        SetField(self, char name, int year, int month, int day, int hour, 
+            int minute, int second, int tzflag)
+        """
+
+        if len(args) == 2 and str(type(args[1])) == "<type 'unicode'>":
+            fld_index = args[0]
+            if isinstance(fld_index, str):
+                fld_index = self.GetFieldIndex(fld_index)
+            return _ogr.Feature_SetFieldString(self, fld_index, args[1])
+
+        return _ogr.Feature_SetField(self, *args)
+
     def SetField2(self, fld_index, value):
         if isinstance(fld_index, str):
             fld_index = self.GetFieldIndex(fld_index)
@@ -391,12 +422,12 @@ layer[0:4] would return a list of the first four features."""
         return output
 
 
-}
+%}
 
 }
 
 %extend OGRGeometryShadow {
-%pythoncode {
+%pythoncode %{
   def Destroy(self):
     self.__swig_destroy__(self) 
     self.__del__()
@@ -424,7 +455,7 @@ layer[0:4] would return a list of the first four features."""
           return subgeom
       else:
           raise StopIteration
-}
+%}
 }
 
 
@@ -457,12 +488,12 @@ layer[0:4] would return a list of the first four features."""
 }
 
 %extend OGRFieldDefnShadow {
-%pythoncode {
+%pythoncode %{
   def Destroy(self):
     "Once called, self has effectively been destroyed.  Do not access. For backwards compatiblity only"
     _ogr.delete_FieldDefn( self )
     self.thisown = 0
-}
+%}
 }
 
 %import typemaps_python.i
@@ -470,3 +501,82 @@ layer[0:4] would return a list of the first four features."""
 #ifndef FROM_GDAL_I
 %include "callback.i"
 #endif
+
+
+%pythoncode %{
+
+# Backup original dictionnary before doing anything else
+_initial_dict = globals().copy()
+
+@property
+def wkb25Bit(module):
+    import warnings
+    warnings.warn("ogr.wkb25DBit deprecated: use ogr.GT_Flatten(), ogr.GT_HasZ() or ogr.GT_SetZ() instead", DeprecationWarning)
+    return module._initial_dict['wkb25DBit']
+
+@property
+def wkb25DBit(module):
+    import warnings
+    warnings.warn("ogr.wkb25DBit deprecated: use ogr.GT_Flatten(), ogr.GT_HasZ() or ogr.GT_SetZ() instead", DeprecationWarning)
+    return module._initial_dict['wkb25DBit']
+
+# Inspired from http://www.dr-josiah.com/2013/12/properties-on-python-modules.html
+class _Module(object):
+    def __init__(self):
+        self.__dict__ = globals()
+        self._initial_dict = _initial_dict
+
+        # Transfer properties from the object to the Class
+        for k, v in list(self.__dict__.items()):
+            if isinstance(v, property):
+                setattr(self.__class__, k, v)
+                #del self.__dict__[k]
+
+        # Replace original module by our object
+        import sys
+        self._original_module = sys.modules[self.__name__]
+        sys.modules[self.__name__] = self
+
+# Custom help() replacement to display the help of the original module
+# instead of the one of our instance object
+class _MyHelper(object):
+
+    def __init__(self, module):
+        self.module = module
+        self.original_help = help
+
+        # Replace builtin help by ours
+        try:
+            import __builtin__ as builtins # Python 2
+        except ImportError:
+            import builtins # Python 3
+        builtins.help = self
+
+    def __repr__(self):
+        return self.original_help.__repr__()
+
+    def __call__(self, *args, **kwds):
+
+        if args == (self.module,):
+            import sys
+
+            # Restore original module before calling help() otherwise
+            # we don't get methods or classes mentionned
+            sys.modules[self.module.__name__] = self.module._original_module
+
+            ret = self.original_help(self.module._original_module, **kwds)
+
+            # Reinstall our module
+            sys.modules[self.module.__name__] = self.module
+
+            return ret
+        elif args == (self,):
+            return self.original_help(self.original_help, **kwds)
+        else:
+            return self.original_help(*args, **kwds)
+
+_MyHelper(_Module())
+del _MyHelper
+del _Module
+
+%}

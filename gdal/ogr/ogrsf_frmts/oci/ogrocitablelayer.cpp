@@ -45,11 +45,12 @@ static int nHits = 0;
 /************************************************************************/
 
 OGROCITableLayer::OGROCITableLayer( OGROCIDataSource *poDSIn, 
-                                    const char * pszTableName,
+                                    const char * pszTableName, OGRwkbGeometryType eGType,
                                     int nSRIDIn, int bUpdate, int bNewLayerIn )
 
 {
     poDS = poDSIn;
+    bExtentUpdated = false;
 
     pszQuery = NULL;
     pszWHERE = CPLStrdup( "" );
@@ -68,6 +69,8 @@ OGROCITableLayer::OGROCITableLayer( OGROCIDataSource *poDSIn,
         bHaveSpatialIndex = HSI_UNKNOWN;
 
     poFeatureDefn = ReadTableDefinition( pszTableName );
+    if( eGType != wkbUnknown && poFeatureDefn->GetGeomFieldCount() > 0 )
+        poFeatureDefn->GetGeomFieldDefn(0)->SetType(eGType);
     SetDescription( poFeatureDefn->GetName() );
 
     nSRID = nSRIDIn;
@@ -363,6 +366,57 @@ OGRFeatureDefn *OGROCITableLayer::ReadTableDefinition( const char * pszTable )
         {
             CPLDebug( "OCI", "get dim based of existing data or index failed." );
         }
+        
+        {
+            OGROCIStringBuf oDimCmd2;
+            OGROCIStatement oDimStatement2( poSession );
+            char **papszResult2;
+
+            CPLErrorReset();
+            oDimCmd2.Appendf( 1024,
+                "select m.SDO_LAYER_GTYPE "
+                "from all_sdo_index_metadata m, all_sdo_index_info i "
+                "where i.index_name = m.sdo_index_name "
+                "and i.sdo_index_owner = m.sdo_index_owner "
+                "and i.table_name = upper('%s')",
+                osTableName.c_str() );
+
+            oDimStatement2.Execute( oDimCmd2.GetString() );
+
+            papszResult2 = oDimStatement2.SimpleFetchRow();
+
+            if( CSLCount( papszResult2 ) > 0 )
+            {
+                const char* pszLayerGType = papszResult2[0];
+                OGRwkbGeometryType eGeomType = wkbUnknown;
+                if( EQUAL(pszLayerGType, "POINT") )
+                    eGeomType = wkbPoint;
+                else if( EQUAL(pszLayerGType, "LINE") )
+                    eGeomType = wkbLineString;
+                else if( EQUAL(pszLayerGType, "POLYGON") )
+                    eGeomType = wkbPolygon;
+                else if( EQUAL(pszLayerGType, "MULTIPOINT") )
+                    eGeomType = wkbMultiPoint;
+                else if( EQUAL(pszLayerGType, "MULTILINE") )
+                    eGeomType = wkbMultiLineString;
+                else if( EQUAL(pszLayerGType, "MULTIPOLYGON") )
+                    eGeomType = wkbMultiPolygon;
+                else if( !EQUAL(pszLayerGType, "COLLECTION") )
+                    CPLDebug("OCI", "LAYER_GTYPE = %s", pszLayerGType );
+                if( iDim == 3 )
+                    eGeomType = wkbSetZ(eGeomType);
+                poDefn->GetGeomFieldDefn(0)->SetType( eGeomType );
+            }
+            else
+            {
+                // we want to clear any errors to avoid confusing the application.
+                CPLErrorReset();
+            }
+        }
+    }
+    else
+    {
+        poDefn->SetGeomType(wkbNone);
     }
 
     bValidTable = TRUE;
@@ -698,7 +752,7 @@ OGRErr OGROCITableLayer::SetAttributeFilter( const char *pszQuery )
 }
 
 /************************************************************************/
-/*                             SetFeature()                             */
+/*                             ISetFeature()                             */
 /*                                                                      */
 /*      We implement SetFeature() by deleting the existing row (if      */
 /*      it exists), and then using CreateFeature() to write it out      */
@@ -706,7 +760,7 @@ OGRErr OGROCITableLayer::SetAttributeFilter( const char *pszQuery )
 /*      existing FID if possible.                                       */
 /************************************************************************/
 
-OGRErr OGROCITableLayer::SetFeature( OGRFeature *poFeature )
+OGRErr OGROCITableLayer::ISetFeature( OGRFeature *poFeature )
 
 {
 /* -------------------------------------------------------------------- */
@@ -715,7 +769,7 @@ OGRErr OGROCITableLayer::SetFeature( OGRFeature *poFeature )
     if( pszFIDName == NULL )
     {
         CPLError( CE_Failure, CPLE_AppDefined, 
-                  "OGROCITableLayer::SetFeature(%ld) failed because there is "
+                  "OGROCITableLayer::ISetFeature(%ld) failed because there is "
                   "no apparent FID column on table %s.",
                   poFeature->GetFID(), 
                   poFeatureDefn->GetName() );
@@ -726,7 +780,7 @@ OGRErr OGROCITableLayer::SetFeature( OGRFeature *poFeature )
     if( poFeature->GetFID() == OGRNullFID )
     {
         CPLError( CE_Failure, CPLE_AppDefined, 
-                  "OGROCITableLayer::SetFeature(%ld) failed because the feature "
+                  "OGROCITableLayer::ISetFeature(%ld) failed because the feature "
                   "has no FID!", poFeature->GetFID() );
 
         return OGRERR_FAILURE;
@@ -802,10 +856,10 @@ OGRErr OGROCITableLayer::DeleteFeature( long nFID )
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGROCITableLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr OGROCITableLayer::ICreateFeature( OGRFeature *poFeature )
 
 {
 /* -------------------------------------------------------------------- */
@@ -910,12 +964,12 @@ OGRErr OGROCITableLayer::UnboundCreateFeature( OGRFeature *poFeature )
             OGRPoint *poPoint = (OGRPoint *) poGeometry;
 
             if( nDimension == 2 )
-                sprintf( szSDO_GEOMETRY,
+                CPLsprintf( szSDO_GEOMETRY,
                          "%s(%d,%s,MDSYS.SDO_POINT_TYPE(%.16g,%.16g,0),NULL,NULL)",
                          SDO_GEOMETRY, 2001, szSRID, 
                          poPoint->getX(), poPoint->getY() );
             else
-                sprintf( szSDO_GEOMETRY, 
+                CPLsprintf( szSDO_GEOMETRY, 
                          "%s(%d,%s,MDSYS.SDO_POINT_TYPE(%.16g,%.16g,%.16g),NULL,NULL)",
                          SDO_GEOMETRY, 3001, szSRID, 
                          poPoint->getX(), poPoint->getY(), poPoint->getZ() );
@@ -1532,86 +1586,6 @@ void OGROCITableLayer::UpdateLayerExtents()
 }
 
 /************************************************************************/
-/*                          FinalizeNewLayer()                          */
-/*                                                                      */
-/*      Our main job here is to update the USER_SDO_GEOM_METADATA       */
-/*      table to include the correct array of dimension object with     */
-/*      the appropriate extents for this layer.  We may also do         */
-/*      spatial indexing at this point.                                 */
-/************************************************************************/
-
-void OGROCITableLayer::FinalizeNewLayer()
-
-{
-    UpdateLayerExtents();
-
-/* -------------------------------------------------------------------- */
-/*      For new layers we try to create a spatial index.                */
-/* -------------------------------------------------------------------- */
-    if( bNewLayer && sExtent.IsInit() )
-    {
-/* -------------------------------------------------------------------- */
-/*      If the user has disabled INDEX support then don't create the    */
-/*      index.                                                          */
-/* -------------------------------------------------------------------- */
-        if( !CSLFetchBoolean( papszOptions, "INDEX", TRUE ) )
-            return;
-
-/* -------------------------------------------------------------------- */
-/*      Establish an index name.  For some reason Oracle 8.1.7 does     */
-/*      not support spatial index names longer than 18 characters so    */
-/*      we magic up an index name if it would be too long.              */
-/* -------------------------------------------------------------------- */
-        char  szIndexName[20];
-
-        if( strlen(poFeatureDefn->GetName()) < 15 )
-            sprintf( szIndexName, "%s_idx", poFeatureDefn->GetName() );
-        else if( strlen(poFeatureDefn->GetName()) < 17 )
-            sprintf( szIndexName, "%si", poFeatureDefn->GetName() );
-        else
-        {
-            int i, nHash = 0;
-            const char *pszSrcName = poFeatureDefn->GetName();
-
-            for( i = 0; pszSrcName[i] != '\0'; i++ )
-                nHash = (nHash + i * pszSrcName[i]) % 987651;
-        
-            sprintf( szIndexName, "OSI_%d", nHash );
-        }
-
-        poDS->GetSession()->CleanName( szIndexName );
-
-/* -------------------------------------------------------------------- */
-/*      Try creating an index on the table now.  Use a simple 5         */
-/*      level quadtree based index.  Would R-tree be a better default?  */
-/* -------------------------------------------------------------------- */
-        OGROCIStringBuf  sIndexCmd;
-        OGROCIStatement oExecStatement( poDS->GetSession() );
-    
-
-        sIndexCmd.Appendf( 10000, "CREATE INDEX \"%s\" ON %s(\"%s\") "
-                           "INDEXTYPE IS MDSYS.SPATIAL_INDEX ",
-                           szIndexName, 
-                           poFeatureDefn->GetName(), 
-                           pszGeomName );
-
-        if( CSLFetchNameValue( papszOptions, "INDEX_PARAMETERS" ) != NULL )
-        {
-            sIndexCmd.Append( " PARAMETERS( '" );
-            sIndexCmd.Append( CSLFetchNameValue(papszOptions,"INDEX_PARAMETERS") );
-            sIndexCmd.Append( "' )" );
-        }
-
-        if( oExecStatement.Execute( sIndexCmd.GetString() ) != CE_None )
-        {
-            CPLString osDropCommand;
-            osDropCommand.Printf( "DROP INDEX \"%s\"", szIndexName );
-            oExecStatement.Execute( osDropCommand );
-        }
-    }  
-}
-
-/************************************************************************/
 /*                   AllocAndBindForWrite(int eType)                    */
 /************************************************************************/
 
@@ -2074,6 +2048,8 @@ OGRErr OGROCITableLayer::SyncToDisk()
 
     CreateSpatialIndex();
 
+    bNewLayer = FALSE;
+
     return eErr;
 }
 
@@ -2134,10 +2110,37 @@ void OGROCITableLayer::CreateSpatialIndex()
                            poFeatureDefn->GetName(),
                            pszGeomName );
 
-        if( CSLFetchNameValue( papszOptions, "INDEX_PARAMETERS" ) != NULL )
+        int bAddLayerGType = CSLTestBoolean(
+            CSLFetchNameValueDef( papszOptions, "ADD_LAYER_GTYPE", "YES") ) &&
+            GetGeomType() != wkbUnknown;
+      
+        CPLString osParams(CSLFetchNameValueDef(papszOptions,"INDEX_PARAMETERS", ""));
+        if( bAddLayerGType || osParams.size() != 0 )
         {
             sIndexCmd.Append( " PARAMETERS( '" );
-            sIndexCmd.Append( CSLFetchNameValue(papszOptions,"INDEX_PARAMETERS") );
+            if( osParams.size() != 0 )
+                sIndexCmd.Append( osParams.c_str() );
+            if( bAddLayerGType &&
+                osParams.ifind("LAYER_GTYPE") == std::string::npos )
+            {
+                if( osParams.size() != 0 )
+                    sIndexCmd.Append( ", " );
+                sIndexCmd.Append( "LAYER_GTYPE=" );
+                if( wkbFlatten(GetGeomType()) == wkbPoint )
+                    sIndexCmd.Append( "POINT" );
+                else if( wkbFlatten(GetGeomType()) == wkbLineString )
+                    sIndexCmd.Append( "LINE" );
+                else if( wkbFlatten(GetGeomType()) == wkbPolygon )
+                    sIndexCmd.Append( "POLYGON" );
+                else if( wkbFlatten(GetGeomType()) == wkbMultiPoint )
+                    sIndexCmd.Append( "MULTIPOINT" );
+                else if( wkbFlatten(GetGeomType()) == wkbMultiLineString )
+                    sIndexCmd.Append( "MULTILINE" );
+                else if( wkbFlatten(GetGeomType()) == wkbMultiPolygon )
+                    sIndexCmd.Append( "MULTIPOLYGON" );
+                else
+                    sIndexCmd.Append( "COLLECTION" );
+            }
             sIndexCmd.Append( "' )" );
         }
 

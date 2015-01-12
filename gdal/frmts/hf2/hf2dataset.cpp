@@ -330,7 +330,7 @@ int HF2Dataset::Identify( GDALOpenInfo * poOpenInfo)
 
     GDALOpenInfo* poOpenInfoToDelete = NULL;
     /*  GZipped .hf2 files are common, so automagically open them */
-    /*  if the /vsigzip/ has not been explicitely passed */
+    /*  if the /vsigzip/ has not been explicitly passed */
     CPLString osFilename(poOpenInfo->pszFilename);
     if ((EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "hfz") ||
         (strlen(poOpenInfo->pszFilename) > 6 &&
@@ -374,7 +374,7 @@ GDALDataset *HF2Dataset::Open( GDALOpenInfo * poOpenInfo )
 
     GDALOpenInfo* poOpenInfoToDelete = NULL;
     /*  GZipped .hf2 files are common, so automagically open them */
-    /*  if the /vsigzip/ has not been explicitely passed */
+    /*  if the /vsigzip/ has not been explicitly passed */
     CPLString osFilename(poOpenInfo->pszFilename);
     if ((EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "hfz") ||
         (strlen(poOpenInfo->pszFilename) > 6 &&
@@ -805,7 +805,7 @@ GDALDataset* HF2Dataset::CreateCopy( const char * pszFilename,
 
             if( ABS(dfLinear - 0.3048) < 0.0000001 )
                 nExtentUnits = 2;
-            else if( ABS(dfLinear - atof(SRS_UL_US_FOOT_CONV)) < 0.00000001 )
+            else if( ABS(dfLinear - CPLAtof(SRS_UL_US_FOOT_CONV)) < 0.00000001 )
                 nExtentUnits = 3;
             else
                 nExtentUnits = 1;
@@ -924,7 +924,7 @@ GDALDataset* HF2Dataset::CreateCopy( const char * pszFilename,
                                                 i * nTileSize, MAX(0, nYSize - (j + 1) * nTileSize),
                                                 nReqXSize, nReqYSize,
                                                 pTileBuffer, nReqXSize, nReqYSize,
-                                                eReqDT, 0, 0);
+                                                eReqDT, 0, 0, NULL);
             if (eErr != CE_None)
                 break;
 

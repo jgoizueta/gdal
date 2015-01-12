@@ -562,7 +562,7 @@ OGRErr VFKReaderSQLite::ExecuteSQL(const char *pszSQLCommand, bool bQuiet)
                      "In ExecuteSQL(%s): %s",
                      pszSQLCommand, pszErrMsg);
         else
-            CPLDebug("OGR-VFK", 
+            CPLError(CE_Warning, CPLE_AppDefined, 
                      "In ExecuteSQL(%s): %s",
                      pszSQLCommand, pszErrMsg);
         
@@ -613,7 +613,7 @@ OGRErr VFKReaderSQLite::AddFeature(IVFKDataBlock *poDataBlock, VFKFeature *poFea
                 if (poDataBlock->GetProperty(i)->IsIntBig())
 		    osValue.Printf("%s", poProperty->GetValueS());
                 else
-                    osValue.Printf("'%s'", poProperty->GetValueS());
+                    osValue.Printf("'%s'", poProperty->GetValueS(TRUE));
                 break;
             default:
                 osValue.Printf("'%s'", poProperty->GetValueS());
@@ -639,7 +639,7 @@ OGRErr VFKReaderSQLite::AddFeature(IVFKDataBlock *poDataBlock, VFKFeature *poFea
             return OGRERR_NONE;
     }
         
-    poNewFeature = new VFKFeatureSQLite(poDataBlock, poDataBlock->GetFeatureCount() + 1,
+    poNewFeature = new VFKFeatureSQLite(poDataBlock, poDataBlock->GetRecordCount(RecordValid) + 1,
                                         poFeature->GetFID());
     poDataBlock->AddFeature(poNewFeature);
     

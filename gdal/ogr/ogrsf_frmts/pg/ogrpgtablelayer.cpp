@@ -243,7 +243,7 @@ void  OGRPGTableLayer::SetGeometryInformation(PGGeomColumnDesc* pasDesc,
         {
             OGRwkbGeometryType eGeomType = OGRFromOGCGeomType(pasDesc[i].pszGeomType);
             if( poGeomFieldDefn->nCoordDimension == 3 && eGeomType != wkbUnknown )
-                eGeomType = (OGRwkbGeometryType) (eGeomType | wkb25DBit);
+                eGeomType = wkbSetZ(eGeomType);
             poGeomFieldDefn->SetType(eGeomType);
         }
         poFeatureDefn->AddGeomFieldDefn(poGeomFieldDefn, FALSE);
@@ -442,6 +442,7 @@ int OGRPGTableLayer::ReadTableDefinition()
             continue;
         }
 
+        //CPLDebug("PG", "name=%s, type=%s", oField.GetNameRef(), pszType);
         if( EQUAL(pszType,"text") )
         {
             oField.SetType( OFTString );
@@ -472,6 +473,7 @@ int OGRPGTableLayer::ReadTableDefinition()
         else if( EQUAL(pszType,"bool") )
         {
             oField.SetType( OFTInteger );
+            oField.SetSubType( OFSTBoolean );
             oField.SetWidth( 1 );
         }
         else if( EQUAL(pszType,"numeric") )
@@ -504,15 +506,25 @@ int OGRPGTableLayer::ReadTableDefinition()
         {
             oField.SetType( OFTIntegerList );
         }
+        else if( EQUAL(pszFormatType,"boolean[]") )
+        {
+            oField.SetType( OFTIntegerList );
+            oField.SetSubType( OFSTBoolean );
+        }
         else if( EQUAL(pszFormatType, "float[]") ||
-                 EQUAL(pszFormatType, "real[]") ||
-                 EQUAL(pszFormatType, "double precision[]") )
+                 EQUAL(pszFormatType, "real[]") )
+        {
+            oField.SetType( OFTRealList );
+            oField.SetSubType( OFSTFloat32 );
+        }
+        else if( EQUAL(pszFormatType, "double precision[]") )
         {
             oField.SetType( OFTRealList );
         }
         else if( EQUAL(pszType,"int2") )
         {
             oField.SetType( OFTInteger );
+            oField.SetSubType( OFSTInt16 );
             oField.SetWidth( 5 );
         }
         else if( EQUAL(pszType,"int8") )
@@ -523,6 +535,11 @@ int OGRPGTableLayer::ReadTableDefinition()
         else if( EQUALN(pszType,"int",3) )
         {
             oField.SetType( OFTInteger );
+        }
+        else if( EQUAL(pszType,"float4")  )
+        {
+            oField.SetType( OFTReal );
+            oField.SetSubType( OFSTFloat32 );
         }
         else if( EQUALN(pszType,"float",5) ||
                  EQUALN(pszType,"double",6) ||
@@ -621,7 +638,7 @@ int OGRPGTableLayer::ReadTableDefinition()
                 poGeomFieldDefn->nSRSId = nSRSId;
             OGRwkbGeometryType eGeomType = OGRFromOGCGeomType(pszType);
             if( poGeomFieldDefn->nCoordDimension == 3 && eGeomType != wkbUnknown )
-                eGeomType = (OGRwkbGeometryType) (eGeomType | wkb25DBit);
+                eGeomType = wkbSetZ(eGeomType);
             poGeomFieldDefn->SetType(eGeomType);
 
             bGoOn = FALSE;
@@ -753,7 +770,6 @@ void OGRPGTableLayer::BuildWhere()
     {
         char szBox3D_1[128];
         char szBox3D_2[128];
-        char* pszComma;
         OGREnvelope  sEnvelope;
 
         m_poFilterGeom->getEnvelope( &sEnvelope );
@@ -768,12 +784,8 @@ void OGRPGTableLayer::BuildWhere()
             if( sEnvelope.MaxY > 90.0 )
                 sEnvelope.MaxY = 90.0;
         }
-        snprintf(szBox3D_1, sizeof(szBox3D_1), "%.18g %.18g", sEnvelope.MinX, sEnvelope.MinY);
-        while((pszComma = strchr(szBox3D_1, ',')) != NULL)
-            *pszComma = '.';
-        snprintf(szBox3D_2, sizeof(szBox3D_2), "%.18g %.18g", sEnvelope.MaxX, sEnvelope.MaxY);
-        while((pszComma = strchr(szBox3D_2, ',')) != NULL)
-            *pszComma = '.';
+        CPLsnprintf(szBox3D_1, sizeof(szBox3D_1), "%.18g %.18g", sEnvelope.MinX, sEnvelope.MinY);
+        CPLsnprintf(szBox3D_2, sizeof(szBox3D_2), "%.18g %.18g", sEnvelope.MaxX, sEnvelope.MaxY);
         osWHERE.Printf("WHERE %s && %s('BOX3D(%s, %s)'::box3d,%d) ",
                        OGRPGEscapeColumnName(poGeomFieldDefn->GetNameRef()).c_str(),
                        (poDS->sPostGISVersion.nMajor >= 2) ? "ST_SetSRID" : "SetSRID",
@@ -1127,7 +1139,8 @@ OGRErr OGRPGTableLayer::DeleteFeature( long nFID )
 void OGRPGTableLayer::AppendFieldValue(PGconn *hPGConn, CPLString& osCommand,
                                        OGRFeature* poFeature, int i)
 {
-    int nOGRFieldType = poFeatureDefn->GetFieldDefn(i)->GetType();
+    OGRFieldType nOGRFieldType = poFeatureDefn->GetFieldDefn(i)->GetType();
+    OGRFieldSubType eSubType = poFeatureDefn->GetFieldDefn(i)->GetSubType();
 
     // We need special formatting for integer list values.
     if(  nOGRFieldType == OFTIntegerList )
@@ -1175,11 +1188,7 @@ void OGRPGTableLayer::AppendFieldValue(PGconn *hPGConn, CPLString& osCommand,
             else if( CPLIsInf(padfItems[j]) )
                 sprintf( pszNeedToFree+nOff, (padfItems[j] > 0) ? "Infinity" : "-Infinity" );
             else
-                sprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
-
-            char* pszComma = strchr(pszNeedToFree+nOff, ',');
-            if (pszComma)
-                *pszComma = '.';
+                CPLsprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
         }
         strcat( pszNeedToFree+nOff, "}'" );
 
@@ -1236,9 +1245,6 @@ void OGRPGTableLayer::AppendFieldValue(PGconn *hPGConn, CPLString& osCommand,
     }
     else if ( nOGRFieldType == OFTReal )
     {
-        char* pszComma = strchr((char*)pszStrValue, ',');
-        if (pszComma)
-            *pszComma = '.';
         //Check for special values. They need to be quoted.
         double dfVal = poFeature->GetFieldAsDouble(i);
         if( CPLIsNan(dfVal) )
@@ -1246,6 +1252,8 @@ void OGRPGTableLayer::AppendFieldValue(PGconn *hPGConn, CPLString& osCommand,
         else if( CPLIsInf(dfVal) )
             pszStrValue = (dfVal > 0) ? "'Infinity'" : "'-Infinity'";
     }
+    else if ( nOGRFieldType == OFTInteger && eSubType == OFSTBoolean )
+        pszStrValue = poFeature->GetFieldAsInteger(i) ? "'t'" : "'f'";
 
     if( nOGRFieldType != OFTInteger && nOGRFieldType != OFTReal
         && !bIsDateNull )
@@ -1262,12 +1270,12 @@ void OGRPGTableLayer::AppendFieldValue(PGconn *hPGConn, CPLString& osCommand,
 }
 
 /************************************************************************/
-/*                             SetFeature()                             */
+/*                             ISetFeature()                             */
 /*                                                                      */
 /*      SetFeature() is implemented by an UPDATE SQL command            */
 /************************************************************************/
 
-OGRErr OGRPGTableLayer::SetFeature( OGRFeature *poFeature )
+OGRErr OGRPGTableLayer::ISetFeature( OGRFeature *poFeature )
 
 {
     PGconn              *hPGConn = poDS->GetPGConn();
@@ -1344,7 +1352,7 @@ OGRErr OGRPGTableLayer::SetFeature( OGRFeature *poFeature )
             {
                 if( !bWkbAsOid  )
                 {
-                    char    *pszBytea = GeometryToBYTEA( poGeom );
+                    char    *pszBytea = GeometryToBYTEA( poGeom, poDS->sPostGISVersion.nMajor < 2 );
 
                     if( pszBytea != NULL )
                     {
@@ -1391,7 +1399,8 @@ OGRErr OGRPGTableLayer::SetFeature( OGRFeature *poFeature )
             {
                 if ( poGeom != NULL )
                 {
-                    char* pszHexEWKB = OGRGeometryToHexEWKB( poGeom, poGeomFieldDefn->nSRSId );
+                    char* pszHexEWKB = OGRGeometryToHexEWKB( poGeom, poGeomFieldDefn->nSRSId,
+                                                             poDS->sPostGISVersion.nMajor < 2 );
                     if ( poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY )
                         osCommand += CPLString().Printf("'%s'::GEOGRAPHY", pszHexEWKB);
                     else
@@ -1480,10 +1489,10 @@ OGRErr OGRPGTableLayer::SetFeature( OGRFeature *poFeature )
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRPGTableLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr OGRPGTableLayer::ICreateFeature( OGRFeature *poFeature )
 {
     GetLayerDefn()->GetFieldCount();
 
@@ -1793,7 +1802,8 @@ OGRErr OGRPGTableLayer::CreateFeatureViaInsert( OGRFeature *poFeature )
 
             if ( !CSLTestBoolean(CPLGetConfigOption("PG_USE_TEXT", "NO")) )
             {
-                char    *pszHexEWKB = OGRGeometryToHexEWKB( poGeom, nSRSId );
+                char    *pszHexEWKB = OGRGeometryToHexEWKB( poGeom, nSRSId,
+                                                            poDS->sPostGISVersion.nMajor < 2 );
                 if ( poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY )
                     osCommand += CPLString().Printf("'%s'::GEOGRAPHY", pszHexEWKB);
                 else
@@ -1828,7 +1838,7 @@ OGRErr OGRPGTableLayer::CreateFeatureViaInsert( OGRFeature *poFeature )
         }
         else if( !bWkbAsOid )
         {
-            char    *pszBytea = GeometryToBYTEA( poGeom );
+            char    *pszBytea = GeometryToBYTEA( poGeom, poDS->sPostGISVersion.nMajor < 2 );
 
             if( pszBytea != NULL )
             {
@@ -1960,9 +1970,10 @@ OGRErr OGRPGTableLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
             poGeom->setCoordinateDimension( poGeomFieldDefn->nCoordDimension );
 
             if( poGeomFieldDefn->ePostgisType == GEOM_TYPE_WKB )
-                pszGeom = GeometryToBYTEA( poGeom );
+                pszGeom = GeometryToBYTEA( poGeom, poDS->sPostGISVersion.nMajor < 2 );
             else
-                pszGeom = OGRGeometryToHexEWKB( poGeom, poGeomFieldDefn->nSRSId );
+                pszGeom = OGRGeometryToHexEWKB( poGeom, poGeomFieldDefn->nSRSId,
+                                                poDS->sPostGISVersion.nMajor < 2 );
         }
 
         if (osCommand.size() > 0)
@@ -2066,11 +2077,8 @@ OGRErr OGRPGTableLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
                 else if( CPLIsInf(padfItems[j]) )
                     sprintf( pszNeedToFree+nOff, (padfItems[j] > 0) ? "Infinity" : "-Infinity" );
                 else
-                    sprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
+                    CPLsprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
 
-                char* pszComma = strchr(pszNeedToFree+nOff, ',');
-                if (pszComma)
-                    *pszComma = '.';
             }
             strcat( pszNeedToFree+nOff, "}" );
             pszStrValue = pszNeedToFree;
@@ -2098,9 +2106,6 @@ OGRErr OGRPGTableLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
 
         else if( nOGRFieldType == OFTReal )
         {
-            char* pszComma = strchr((char*)pszStrValue, ',');
-            if (pszComma)
-                *pszComma = '.';
             //Check for special values. They need to be quoted.
             double dfVal = poFeature->GetFieldAsDouble(i);
             if( CPLIsNan(dfVal) )
@@ -2267,92 +2272,11 @@ int OGRPGTableLayer::TestCapability( const char * pszCap )
     else if( EQUAL(pszCap,OLCStringsAsUTF8) )
         return TRUE;
 
+    else if( EQUAL(pszCap,OLCCurveGeometries) )
+        return TRUE;
+
     else
         return FALSE;
-}
-
-/************************************************************************/
-/*                        OGRPGTableLayerGetType()                      */
-/************************************************************************/
-
-static CPLString OGRPGTableLayerGetType(OGRFieldDefn& oField,
-                                        int bPreservePrecision,
-                                        int bApproxOK)
-{
-    char                szFieldType[256];
-
-/* -------------------------------------------------------------------- */
-/*      Work out the PostgreSQL type.                                   */
-/* -------------------------------------------------------------------- */
-    if( oField.GetType() == OFTInteger )
-    {
-        if( oField.GetWidth() > 0 && bPreservePrecision )
-            sprintf( szFieldType, "NUMERIC(%d,0)", oField.GetWidth() );
-        else
-            strcpy( szFieldType, "INTEGER" );
-    }
-    else if( oField.GetType() == OFTReal )
-    {
-        if( oField.GetWidth() > 0 && oField.GetPrecision() > 0
-            && bPreservePrecision )
-            sprintf( szFieldType, "NUMERIC(%d,%d)",
-                     oField.GetWidth(), oField.GetPrecision() );
-        else
-            strcpy( szFieldType, "FLOAT8" );
-    }
-    else if( oField.GetType() == OFTString )
-    {
-        if (oField.GetWidth() > 0 &&  bPreservePrecision )
-            sprintf( szFieldType, "VARCHAR(%d)",  oField.GetWidth() );
-        else
-            strcpy( szFieldType, "VARCHAR");
-    }
-    else if( oField.GetType() == OFTIntegerList )
-    {
-        strcpy( szFieldType, "INTEGER[]" );
-    }
-    else if( oField.GetType() == OFTRealList )
-    {
-        strcpy( szFieldType, "FLOAT8[]" );
-    }
-    else if( oField.GetType() == OFTStringList )
-    {
-        strcpy( szFieldType, "varchar[]" );
-    }
-    else if( oField.GetType() == OFTDate )
-    {
-        strcpy( szFieldType, "date" );
-    }
-    else if( oField.GetType() == OFTTime )
-    {
-        strcpy( szFieldType, "time" );
-    }
-    else if( oField.GetType() == OFTDateTime )
-    {
-        strcpy( szFieldType, "timestamp with time zone" );
-    }
-    else if( oField.GetType() == OFTBinary )
-    {
-        strcpy( szFieldType, "bytea" );
-    }
-    else if( bApproxOK )
-    {
-        CPLError( CE_Warning, CPLE_NotSupported,
-                  "Can't create field %s with type %s on PostgreSQL layers.  Creating as VARCHAR.",
-                  oField.GetNameRef(),
-                  OGRFieldDefn::GetFieldTypeName(oField.GetType()) );
-        strcpy( szFieldType, "VARCHAR" );
-    }
-    else
-    {
-        CPLError( CE_Failure, CPLE_NotSupported,
-                  "Can't create field %s with type %s on PostgreSQL layers.",
-                  oField.GetNameRef(),
-                  OGRFieldDefn::GetFieldTypeName(oField.GetType()) );
-        strcpy( szFieldType, "");
-    }
-
-    return szFieldType;
 }
 
 /************************************************************************/
@@ -2403,7 +2327,7 @@ OGRErr OGRPGTableLayer::CreateField( OGRFieldDefn *poFieldIn, int bApproxOK )
         osFieldType = pszOverrideType;
     else
     {
-        osFieldType = OGRPGTableLayerGetType(oField, bPreservePrecision, bApproxOK);
+        osFieldType = OGRPGCommonLayerGetType(oField, bPreservePrecision, bApproxOK);
         if (osFieldType.size() == 0)
             return OGRERR_FAILURE;
     }
@@ -2569,10 +2493,7 @@ OGRErr OGRPGTableLayer::CreateGeomField( OGRGeomFieldDefn *poGeomFieldIn,
     if( nForcedDimension > 0 )
     {
         nDimension = nForcedDimension;
-        if( nDimension == 2 )
-            eType = (OGRwkbGeometryType)( eType & ~wkb25DBit );
-        else
-            eType = (OGRwkbGeometryType)( eType | wkb25DBit );
+        eType = OGR_GT_SetModifier(eType, nDimension == 3, FALSE);
     }
     poGeomField->SetType(eType);
     poGeomField->nSRSId = nSRSId;
@@ -2721,7 +2642,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
     if ((nFlags & ALTER_TYPE_FLAG) ||
         (nFlags & ALTER_WIDTH_PRECISION_FLAG))
     {
-        CPLString osFieldType = OGRPGTableLayerGetType(oField,
+        CPLString osFieldType = OGRPGCommonLayerGetType(oField,
                                                        bPreservePrecision,
                                                        TRUE);
         if (osFieldType.size() == 0)
@@ -3286,7 +3207,9 @@ OGRErr OGRPGTableLayer::GetExtent( int iGeomField, OGREnvelope *psExtent, int bF
                         OGRPGEscapeString(hPGConn, pszTableName).c_str(),
                         OGRPGEscapeString(hPGConn, poGeomFieldDefn->GetNameRef()).c_str() );
 
-        if( RunGetExtentRequest(psExtent, bForce, osCommand) == OGRERR_NONE )
+        /* Quiet error: ST_Estimated_Extent may return an error if statistics */
+        /* have not been computed */
+        if( RunGetExtentRequest(psExtent, bForce, osCommand, TRUE) == OGRERR_NONE )
             return OGRERR_NONE;
 
         CPLDebug("PG","Unable to get extimated extent by PostGIS. Trying real extent.");

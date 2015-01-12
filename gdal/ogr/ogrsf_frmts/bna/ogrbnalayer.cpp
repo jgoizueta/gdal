@@ -147,6 +147,8 @@ void  OGRBNALayer::SetFeatureIndexTable(int nFeatures, OffsetAndLine* offsetAndL
 void OGRBNALayer::ResetReading()
 
 {
+    if( fpBNA == NULL )
+        return;
     eof = FALSE;
     failed = FALSE;
     curLine = 0;
@@ -165,7 +167,7 @@ OGRFeature *OGRBNALayer::GetNextFeature()
     BNARecord* record;
     int offset, line;
 
-    if (failed || eof) return NULL;
+    if (failed || eof || fpBNA == NULL) return NULL;
 
     while(1)
     {
@@ -285,10 +287,10 @@ void OGRBNALayer::WriteCoord(VSILFILE* fp, double dfX, double dfY)
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRBNALayer::CreateFeature( OGRFeature *poFeature )
+OGRErr OGRBNALayer::ICreateFeature( OGRFeature *poFeature )
 
 {
     int i,j,k,n;

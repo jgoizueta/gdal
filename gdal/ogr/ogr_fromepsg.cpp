@@ -1284,7 +1284,7 @@ static OGRErr SetEPSGGeogCS( OGRSpatialReference * poSRS, int nGeogCS )
 
         for( int iCoeff = 0; iCoeff < 7; iCoeff++ )
         {
-            sprintf( szValue, "%g", adfBursaTransform[iCoeff] );
+            CPLsprintf( szValue, "%g", adfBursaTransform[iCoeff] );
             poWGS84->AddChild( new OGR_SRSNode( szValue ) );
         }
 
@@ -1616,6 +1616,7 @@ static OGRErr SetEPSGProjCS( OGRSpatialReference * poSRS, int nPCSCode )
         break;
 
       case 9823: /* Equidistant Cylindrical / Plate Carre / Equirectangular */
+      case 9842:
       case 1028:
       case 1029:
         poSRS->SetEquirectangular( OGR_FP( NatOriginLat ),
@@ -1698,13 +1699,6 @@ static OGRErr SetEPSGVertCS( OGRSpatialReference * poSRS, int nVertCSCode )
         CSLGetField( papszRecord,
                      CSVGetFileFieldId(pszFilename,
                                        "DATUM_NAME")) );
-/* -------------------------------------------------------------------- */
-/*      Setup the VERT_DATUM node.                                      */
-/* -------------------------------------------------------------------- */
-    poSRS->SetAuthority( "VERT_CS|VERT_DATUM", "EPSG",
-                         atoi(CSLGetField( papszRecord,
-                                           CSVGetFileFieldId(pszFilename,
-                                                             "DATUM_CODE"))) );
 
 /* -------------------------------------------------------------------- */
 /*      Should we add a geoidgrids extension node?                      */
@@ -1720,7 +1714,15 @@ static OGRErr SetEPSGVertCS( OGRSpatialReference * poSRS, int nVertCSCode )
 
         poSRS->SetExtension( "VERT_CS|VERT_DATUM", "PROJ4_GRIDS", pszParm11 );
     }
-    
+
+/* -------------------------------------------------------------------- */
+/*      Setup the VERT_DATUM node.                                      */
+/* -------------------------------------------------------------------- */
+    poSRS->SetAuthority( "VERT_CS|VERT_DATUM", "EPSG",
+                         atoi(CSLGetField( papszRecord,
+                                           CSVGetFileFieldId(pszFilename,
+                                                             "DATUM_CODE"))) );
+
 /* -------------------------------------------------------------------- */
 /*      Set linear units.                                               */
 /* -------------------------------------------------------------------- */
@@ -1989,7 +1991,7 @@ static OGRErr SetEPSGGeocCS( OGRSpatialReference * poSRS, int nGCSCode )
 
         for( int iCoeff = 0; iCoeff < 7; iCoeff++ )
         {
-            sprintf( szValue, "%g", adfBursaTransform[iCoeff] );
+            CPLsprintf( szValue, "%g", adfBursaTransform[iCoeff] );
             poWGS84->AddChild( new OGR_SRSNode( szValue ) );
         }
 
@@ -2157,7 +2159,6 @@ OGRErr OGRSpatialReference::importFromEPSGA( int nCode )
 
 {
     OGRErr  eErr;
-    CPLLocaleC  oLocaleForcer;
 
     bNormInfoSet = FALSE;
 

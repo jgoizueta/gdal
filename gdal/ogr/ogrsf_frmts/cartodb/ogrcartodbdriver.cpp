@@ -76,6 +76,40 @@ OGRDataSource *OGRCARTODBDriver::Open( const char * pszFilename, int bUpdate )
 }
 
 /************************************************************************/
+/*                          CreateDataSource()                          */
+/************************************************************************/
+
+OGRDataSource *OGRCARTODBDriver::CreateDataSource( const char * pszName,
+                                              char ** /* papszOptions */ )
+
+{
+    OGRCARTODBDataSource   *poDS = new OGRCARTODBDataSource();
+
+    if( !poDS->Open( pszName, TRUE ) )
+    {
+        delete poDS;
+        CPLError( CE_Failure, CPLE_AppDefined, 
+                  "CartoDB driver doesn't support database creation." );
+        return NULL;
+    }
+
+    return poDS;
+}
+
+/************************************************************************/
+/*                           TestCapability()                           */
+/************************************************************************/
+
+int OGRCARTODBDriver::TestCapability( const char * pszCap )
+
+{
+    if( EQUAL(pszCap,ODrCCreateDataSource) )
+        return TRUE;
+    else
+        return FALSE;
+}
+
+/************************************************************************/
 /*                         RegisterOGRCARTODB()                         */
 /************************************************************************/
 

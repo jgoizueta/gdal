@@ -339,9 +339,9 @@ int TABDATFile::Close()
      * Write access: Update the header with number of records, etc.
      * and add a CTRL-Z char at the end of the file.
      *---------------------------------------------------------------*/
-    if (m_eAccessMode == TABWrite || (m_eAccessMode == TABReadWrite && m_bUpdated) )
+    if (m_eAccessMode != TABRead )
     {
-        WriteHeader();
+        SyncToDisk();
     }
 
     // Delete all structures 
@@ -380,6 +380,30 @@ int TABDATFile::Close()
     return 0;
 }
 
+/************************************************************************/
+/*                            SyncToDisk()                             */
+/************************************************************************/
+
+int TABDATFile::SyncToDisk()
+{
+    if( m_eAccessMode == TABRead )
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "SyncToDisk() can be used only with Write access.");
+        return -1;
+    }
+    
+    if( !m_bUpdated && m_bWriteHeaderInitialized )
+        return 0;
+
+    // No need to call. CommitRecordToFile(). It is normally called by
+    // TABFeature::WriteRecordToDATFile()
+    if( WriteHeader() != 0 )
+        return -1;
+
+    m_bUpdated = FALSE;
+    return 0;
+}
 
 /**********************************************************************
  *                   TABDATFile::InitWriteHeader()
@@ -1427,11 +1451,11 @@ int TABDATFile::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn, int nF
             }
             else if( m_pasFieldDef[iField].eTABType == TABFFloat )
             {
-                snprintf(pabyNewField, sFieldDef.byLength, "%.18f", ReadFloatField(m_pasFieldDef[iField].byLength));
+                CPLsnprintf(pabyNewField, sFieldDef.byLength, "%.18f", ReadFloatField(m_pasFieldDef[iField].byLength));
             }
             else if( m_pasFieldDef[iField].eTABType == TABFDecimal )
             {
-                snprintf(pabyNewField, sFieldDef.byLength, "%.18f", ReadFloatField(m_pasFieldDef[iField].byLength));
+                CPLsnprintf(pabyNewField, sFieldDef.byLength, "%.18f", ReadFloatField(m_pasFieldDef[iField].byLength));
             }
             else if( m_pasFieldDef[iField].eTABType == TABFLogical )
             {
@@ -1687,7 +1711,7 @@ double TABDATFile::ReadFloatField(int nWidth)
     }
 
     if (m_eTableType == TABTableDBF)
-        return atof(ReadCharField(nWidth));
+        return CPLAtof(ReadCharField(nWidth));
 
     return m_poRecordBlock->ReadDouble();
 }
@@ -1973,7 +1997,7 @@ double TABDATFile::ReadDecimalField(int nWidth)
 
     pszVal = ReadCharField(nWidth);
 
-    return atof(pszVal);
+    return CPLAtof(pszVal);
 }
 
 
@@ -2546,9 +2570,11 @@ int TABDATFile::WriteDateTimeField(int nYear, int nMonth, int nDay,
 int TABDATFile::WriteDecimalField(double dValue, int nWidth, int nPrec,
                                   TABINDFile *poINDFile, int nIndexNo)
 {
+    char szFormat[10];
     const char *pszVal;
 
-    pszVal = CPLSPrintf("%*.*f", nWidth, nPrec, dValue);
+    sprintf(szFormat, "%%%d.%df", nWidth, nPrec);
+    pszVal = CPLSPrintf(szFormat, dValue);
     if ((int)strlen(pszVal) > nWidth)
         pszVal += strlen(pszVal) - nWidth;
 

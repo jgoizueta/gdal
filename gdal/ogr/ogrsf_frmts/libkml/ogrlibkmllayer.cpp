@@ -512,7 +512,7 @@ OGRFeature *OGRLIBKMLLayer::GetNextRawFeature (
                 
 ******************************************************************************/
 
-OGRErr OGRLIBKMLLayer::CreateFeature (
+OGRErr OGRLIBKMLLayer::ICreateFeature (
     OGRFeature * poOgrFeat )
 {
 
@@ -572,7 +572,7 @@ OGRErr OGRLIBKMLLayer::CreateFeature (
             {
                 bAlreadyWarned = TRUE;
                 CPLError(CE_Warning, CPLE_AppDefined,
-                         "It is recommanded to define a FID when calling CreateFeature() in a update document");
+                         "It is recommended to define a FID when calling CreateFeature() in a update document");
             }
         }
         else
@@ -603,7 +603,7 @@ OGRErr OGRLIBKMLLayer::CreateFeature (
 
 ******************************************************************************/
 
-OGRErr OGRLIBKMLLayer::SetFeature ( OGRFeature * poOgrFeat )
+OGRErr OGRLIBKMLLayer::ISetFeature ( OGRFeature * poOgrFeat )
 {
     if( !bUpdate || m_poKmlUpdate == NULL )
         return OGRERR_UNSUPPORTED_OPERATION;

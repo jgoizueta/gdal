@@ -83,7 +83,7 @@ const char * TigerVersionString( TigerVersion );
 /*****************************************************************************/
 /* The TigerFieldInfo and TigerRecordInfo structures hold information about  */
 /* the schema of a TIGER record type.  In each layer implementation file     */
-/* there are statically initalized variables of these types that describe    */
+/* there are statically initialized variables of these types that describe    */
 /* the record types associated with that layer.  In the case where different */
 /* TIGER versions have different schemas, there is a                         */
 /* TigerFieldInfo/TigerRecordInfo for each version, and the constructor      */
@@ -525,7 +525,7 @@ class OGRTigerLayer : public OGRLayer
 
     int                 TestCapability( const char * );
 
-    virtual OGRErr      CreateFeature( OGRFeature *poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
     virtual OGRErr      CreateField( OGRFieldDefn *poField,
                                      int bApproxOK = TRUE );
 };

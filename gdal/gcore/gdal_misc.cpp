@@ -956,7 +956,7 @@ int CPL_STDCALL GDALLoadOziMapFile( const char *pszFilename,
     {
         if ( EQUALN(papszLines[iLine], "MSF,", 4) )
         {
-            dfMSF = atof(papszLines[iLine] + 4);
+            dfMSF = CPLAtof(papszLines[iLine] + 4);
             if (dfMSF <= 0.01) /* Suspicious values */
             {
                 CPLDebug("OZI", "Suspicious MSF value : %s", papszLines[iLine]);
@@ -3211,19 +3211,132 @@ void GDALDeserializeGCPListFromXML( CPLXMLNode* psGCPList,
         CPLFree( psGCP->pszInfo );
         psGCP->pszInfo = CPLStrdup(CPLGetXMLValue(psXMLGCP,"Info",""));
 
-        psGCP->dfGCPPixel = atof(CPLGetXMLValue(psXMLGCP,"Pixel","0.0"));
-        psGCP->dfGCPLine = atof(CPLGetXMLValue(psXMLGCP,"Line","0.0"));
+        psGCP->dfGCPPixel = CPLAtof(CPLGetXMLValue(psXMLGCP,"Pixel","0.0"));
+        psGCP->dfGCPLine = CPLAtof(CPLGetXMLValue(psXMLGCP,"Line","0.0"));
 
-        psGCP->dfGCPX = atof(CPLGetXMLValue(psXMLGCP,"X","0.0"));
-        psGCP->dfGCPY = atof(CPLGetXMLValue(psXMLGCP,"Y","0.0"));
+        psGCP->dfGCPX = CPLAtof(CPLGetXMLValue(psXMLGCP,"X","0.0"));
+        psGCP->dfGCPY = CPLAtof(CPLGetXMLValue(psXMLGCP,"Y","0.0"));
         const char* pszZ = CPLGetXMLValue(psXMLGCP,"Z",NULL);
         if( pszZ == NULL )
         {
             /* Note: GDAL 1.10.1 and older generated #GCPZ, but could not read it back */
             pszZ = CPLGetXMLValue(psXMLGCP,"GCPZ","0.0");
         }
-        psGCP->dfGCPZ = atof(pszZ);
+        psGCP->dfGCPZ = CPLAtof(pszZ);
 
         (*pnGCPCount) ++;
+    }
+}
+
+/************************************************************************/
+/*                   GDALSerializeOpenOptionsToXML()                    */
+/************************************************************************/
+
+void GDALSerializeOpenOptionsToXML( CPLXMLNode* psParentNode, char** papszOpenOptions)
+{
+    if( papszOpenOptions != NULL )
+    {
+        CPLXMLNode* psOpenOptions = CPLCreateXMLNode( psParentNode, CXT_Element, "OpenOptions" );
+        CPLXMLNode* psLastChild = NULL;
+
+        for(char** papszIter = papszOpenOptions; *papszIter != NULL; papszIter ++ )
+        {
+            const char *pszRawValue;
+            char *pszKey = NULL;
+            CPLXMLNode *psOOI;
+
+            pszRawValue = CPLParseNameValue( *papszIter, &pszKey );
+
+            psOOI = CPLCreateXMLNode( NULL, CXT_Element, "OOI" );
+            if( psLastChild == NULL )
+                psOpenOptions->psChild = psOOI;
+            else
+                psLastChild->psNext = psOOI;
+            psLastChild = psOOI;
+
+            CPLSetXMLValue( psOOI, "#key", pszKey );
+            CPLCreateXMLNode( psOOI, CXT_Text, pszRawValue );
+
+            CPLFree( pszKey );
+        }
+    }
+}
+
+/************************************************************************/
+/*                  GDALDeserializeOpenOptionsFromXML()                 */
+/************************************************************************/
+
+char** GDALDeserializeOpenOptionsFromXML( CPLXMLNode* psParentNode )
+{
+    char** papszOpenOptions = NULL;
+    CPLXMLNode* psOpenOptions = CPLGetXMLNode(psParentNode, "OpenOptions");
+    if( psOpenOptions != NULL )
+    {
+        CPLXMLNode* psOOI;
+        for( psOOI = psOpenOptions->psChild; psOOI != NULL;
+                psOOI = psOOI->psNext )
+        {
+            if( !EQUAL(psOOI->pszValue,"OOI")
+                || psOOI->eType != CXT_Element
+                || psOOI->psChild == NULL
+                || psOOI->psChild->psNext == NULL
+                || psOOI->psChild->eType != CXT_Attribute
+                || psOOI->psChild->psChild == NULL )
+                continue;
+
+            char* pszName = psOOI->psChild->psChild->pszValue;
+            char* pszValue = psOOI->psChild->psNext->pszValue;
+            if( pszName != NULL && pszValue != NULL )
+                papszOpenOptions = CSLSetNameValue( papszOpenOptions, pszName, pszValue );
+        }
+    }
+    return papszOpenOptions;
+}
+
+/************************************************************************/
+/*                    GDALRasterIOGetResampleAlg()                      */
+/************************************************************************/
+
+GDALRIOResampleAlg GDALRasterIOGetResampleAlg(const char* pszResampling)
+{
+    GDALRIOResampleAlg eResampleAlg = GRIORA_NearestNeighbour;
+    if( EQUALN(pszResampling, "NEAR", 4) )
+        eResampleAlg = GRIORA_NearestNeighbour;
+    else if( EQUAL(pszResampling, "BILINEAR") )
+        eResampleAlg = GRIORA_Bilinear;
+    else if( EQUAL(pszResampling, "CUBIC") )
+        eResampleAlg = GRIORA_Cubic;
+    else if( EQUAL(pszResampling, "CUBICSPLINE") )
+        eResampleAlg = GRIORA_CubicSpline;
+    else if( EQUAL(pszResampling, "LANCZOS") )
+        eResampleAlg = GRIORA_Lanczos;
+    else if( EQUAL(pszResampling, "AVERAGE") )
+        eResampleAlg = GRIORA_Average;
+    else if( EQUAL(pszResampling, "MODE") )
+        eResampleAlg = GRIORA_Mode;
+    else if( EQUAL(pszResampling, "GAUSS") )
+        eResampleAlg = GRIORA_Gauss;
+    else
+        CPLError(CE_Warning, CPLE_NotSupported,
+                "GDAL_RASTERIO_RESAMPLING = %s not supported", pszResampling);
+    return eResampleAlg;
+}
+
+/************************************************************************/
+/*                   GDALRasterIOExtraArgSetResampleAlg()               */
+/************************************************************************/
+
+void GDALRasterIOExtraArgSetResampleAlg(GDALRasterIOExtraArg* psExtraArg,
+                                        int nXSize, int nYSize,
+                                        int nBufXSize, int nBufYSize)
+{
+    if( (nBufXSize != nXSize || nBufYSize != nYSize) &&
+        psExtraArg->eResampleAlg == GRIORA_NearestNeighbour  )
+    {
+        const char* pszResampling = CPLGetConfigOption("GDAL_RASTERIO_RESAMPLING", NULL);
+        if( pszResampling != NULL )
+        {
+            psExtraArg->eResampleAlg = GDALRasterIOGetResampleAlg(pszResampling);
+        }
     }
 }

@@ -1879,6 +1879,11 @@ def ogr_shape_43():
         gdaltest.post_reason('did not get expected SRS')
         return 'fail'
 
+    f = lyr.GetNextFeature()
+    if f is None:
+        gdaltest.post_reason('did not get expected feature')
+        return 'fail'
+
     return 'success'
 
 ###############################################################################
@@ -1910,6 +1915,11 @@ def ogr_shape_44():
     wkt = srs.ExportToWkt()
     if wkt.find('OSGB') == -1:
         gdaltest.post_reason('did not get expected SRS')
+        return 'fail'
+
+    f = lyr.GetNextFeature()
+    if f is None:
+        gdaltest.post_reason('did not get expected feature')
         return 'fail'
 
     return 'success'
@@ -2532,13 +2542,7 @@ def ogr_shape_53():
         return 'fail'
 
     # Test REPACK
-    gdal.ErrorReset()
-    gdal.PushErrorHandler('CPLQuietErrorHandler')
-    ret = ds.ExecuteSQL("REPACK ogr_shape_53")
-    gdal.PopErrorHandler()
-    if gdal.GetLastErrorMsg() == '':
-        gdaltest.post_reason('failed')
-        return 'fail'
+    ds.ExecuteSQL("REPACK ogr_shape_53")
 
     lyr = None
     ds = None
@@ -3380,13 +3384,13 @@ def ogr_shape_68():
             if ret == 0:
                 gdaltest.post_reason('expected failure on DeleteFeature()')
                 return 'fail'
-            gdal.ErrorReset()
-            gdal.PushErrorHandler('CPLQuietErrorHandler')
+            #gdal.ErrorReset()
+            #gdal.PushErrorHandler('CPLQuietErrorHandler')
             ds.ExecuteSQL( 'REPACK mixedcase' )
-            gdal.PopErrorHandler()
-            if gdal.GetLastErrorMsg() == '':
-                gdaltest.post_reason('expected failure on REPACK mixedcase')
-                return 'fail'
+            #gdal.PopErrorHandler()
+            #if gdal.GetLastErrorMsg() == '':
+            #    gdaltest.post_reason('expected failure on REPACK mixedcase')
+            #    return 'fail'
 
         ds = None
         
@@ -3821,6 +3825,194 @@ def ogr_shape_79():
     ds = None
 
     return 'success'
+    
+###############################################################################
+# Test reading a shape with invalid extent (nan values) (#5702)
+
+def ogr_shape_80():
+    
+    ds = ogr.Open('data/extentnan.shp')
+    lyr = ds.GetLayer(0)
+    extent = lyr.GetExtent()
+    if extent is not None and extent[0] != extent[0]:
+        gdaltest.post_reason('fail')
+        print(extent)
+        return 'fail'
+    ds = None
+    return 'success'
+    
+###############################################################################
+# Test REPACK after SetFeature() and geometry change (#XXXX)
+
+def ogr_shape_81():
+    
+    ds = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('/vsimem/ogr_shape_81.shp')
+    lyr = ds.CreateLayer('ogr_shape_81')
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING(0 0,1 1)'))
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_shape_81.shp', update = 1)
+    lyr = ds.GetLayer(0)
+    
+    # Add junk behind our back
+    f = gdal.VSIFOpenL('/vsimem/ogr_shape_81.shp', 'ab')
+    gdal.VSIFWriteL('foo', 1, 3, f)
+    gdal.VSIFCloseL(f)
+    
+    size_before = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+
+    # Should be a no-op
+    ds.ExecuteSQL('REPACK ogr_shape_81')
+    size_after = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+    if size_after != size_before:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    
+    f = lyr.GetNextFeature()
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING(2 2,3 3)'))
+    lyr.SetFeature(f)
+    
+    # Should be a no-op
+    ds.ExecuteSQL('REPACK ogr_shape_81')
+    size_after = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+    if size_after != size_before:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # Writes a longer geometry. So .shp will be extended
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING(2 2,3 3,4 4)'))
+    lyr.SetFeature(f)
+    size_after = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+    if size_after == size_before:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # Should do something
+    size_before = size_after
+    ds.ExecuteSQL('REPACK ogr_shape_81')
+    size_after = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+    if size_after == size_before:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # Writes a shorter geometry, so .shp shouldn't change size
+    size_before = size_after
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING(3 3,4 4)'))
+    lyr.SetFeature(f)
+    size_after = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+    if size_after != size_before:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    size_before = size_after
+
+    # Should do something
+    ds.ExecuteSQL('REPACK ogr_shape_81')
+    size_after = gdal.VSIStatL('/vsimem/ogr_shape_81.shp').size
+    if size_after == size_before:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    ds = None
+
+    return 'success'
+
+###############################################################################
+# Test string length more than 254 bytes in UTF-8 encoding cut to 254 bytes
+
+def ogr_shape_82():
+
+    if gdaltest.shape_ds is None:
+        return 'skip'
+
+    # create ogrlayer to test cut long strings with UTF-8 encoding
+    gdaltest.shape_lyr = gdaltest.shape_ds.CreateLayer('test_utf_cut', geom_type = ogr.wkbPoint, options = ['ENCODING=UTF-8'])
+
+    #create field to put strings to automatic cut (254 is longest field length)
+    field_defn = ogr.FieldDefn('cut_field', ogr.OFTString)
+    field_defn.SetWidth(254)
+
+    result = gdaltest.shape_lyr.CreateField(field_defn)
+
+    field_defn.Destroy()
+
+    if result != 0:
+        gdaltest.post_reason('failed to create new field.')
+        return 'fail'
+
+    #insert feature with long string in Russian
+    feat = ogr.Feature(feature_def = gdaltest.shape_lyr.GetLayerDefn())
+    init_rus = 'работает два мастера, установка набоек, замена подошвы, замена каблуков, растяжка обуви, растяжка голенищ сапог, швейные работы, ушив голенища сапога, чистка обуви, чистка замшевой обуви, замена стелек'
+    result_rus = 'работает два мастера, установка набоек, замена подошвы, замена каблуков, растяжка обуви, растяжка голенищ сапог, швейные работы, ушив голен'
+    feat.SetField('cut_field', init_rus)
+    gdaltest.shape_lyr.CreateFeature(feat)
+
+    #insert feature with long string in English
+    init_en = 'Remont kablukov i ih zamena; zamena naboek; profilaktika i remont podoshvy; remont i zamena supinatorov; zamena stelek; zamena obuvnoj furnitury; remont golenishha; rastjazhka obuvi; chistka i pokraska obuvi.	Smolenskaja oblast, p. Monastyrshhina, ulica Sovetskaja, d. 38.	Rabotaet ponedelnik – chetverg s 9.00 do 18.00, pjatnica s 10.00 do 17.00, vyhodnoj: subbota'
+    result_en = 'Remont kablukov i ih zamena; zamena naboek; profilaktika i remont podoshvy; remont i zamena supinatorov; zamena stelek; zamena obuvnoj furnitury; remont golenishha; rastjazhka obuvi; chistka i pokraska obuvi.	Smolenskaja oblast, p. Monastyrshhina, ul'
+    feat = ogr.Feature(feature_def = gdaltest.shape_lyr.GetLayerDefn())
+    feat.SetField('cut_field',  init_rus)
+    gdaltest.shape_lyr.CreateFeature(feat)
+
+    #TODO: check you language
+
+    #save layer?
+
+    #read strings and compare with correct values
+    feat = gdaltest.shape_lyr.GetFeature(0) #rus
+    if feat.cut_field != result_rus:
+        gdaltest.post_reason('Wrong rus string cut')
+        return 'fail'
+
+    feat = gdaltest.shape_lyr.GetFeature(1) #en
+    if feat.cut_field != result_rus:
+        gdaltest.post_reason('Wrong en string cut')
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
+# Test behaviour with curve geometries
+def ogr_shape_83():
+    
+    ds = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('/vsimem/ogr_shape_83.shp')
+    lyr = ds.CreateLayer('ogr_shape_83', geom_type = ogr.wkbCurvePolygon)
+    if lyr.GetGeomType() != ogr.wkbPolygon:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('CURVEPOLYGON((0 0,0 1,1 1,1 0,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    
+    f = lyr.GetFeature(0)
+    if f.GetGeometryRef().GetGeometryType() != ogr.wkbPolygon:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    return 'success'
+
+###############################################################################
+# Test SPATIAL_INDEX creation option
+
+def ogr_shape_84():
+
+    ds = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('/vsimem/ogr_shape_84.shp')
+    lyr = ds.CreateLayer('ogr_shape_84', options = ['SPATIAL_INDEX=YES'])
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('POLYGON((0 0,0 1,1 1,1 0,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    if gdal.VSIStatL('/vsimem/ogr_shape_84.qix') is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    return 'success'
 
 ###############################################################################
 # 
@@ -3854,6 +4046,9 @@ def ogr_shape_cleanup():
     shape_drv.DeleteDataSource( '/vsimem/ogr_shape_74.shp' )
     shape_drv.DeleteDataSource( '/vsimem/ogr_shape_78.dbf' )
     shape_drv.DeleteDataSource( '/vsimem/ogr_shape_79.shp' )
+    shape_drv.DeleteDataSource( '/vsimem/ogr_shape_81.shp' )
+    shape_drv.DeleteDataSource( '/vsimem/ogr_shape_83.shp' )
+    shape_drv.DeleteDataSource( '/vsimem/ogr_shape_84.shp' )
 
     return 'success'
 
@@ -3939,6 +4134,11 @@ gdaltest_list = [
     ogr_shape_77,
     ogr_shape_78,
     ogr_shape_79,
+    ogr_shape_80,
+    ogr_shape_81,
+    ogr_shape_82,
+    ogr_shape_83,
+    ogr_shape_84,
     ogr_shape_cleanup ]
 
 if __name__ == '__main__':

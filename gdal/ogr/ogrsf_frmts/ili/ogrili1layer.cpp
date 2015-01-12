@@ -173,17 +173,17 @@ static char* d2str(double val)
     if( val == (int) val )
         sprintf( strbuf, "%d", (int) val );
     else if( fabs(val) < 370 )
-        sprintf( strbuf, "%.16g", val );
+        CPLsprintf( strbuf, "%.16g", val );
     else if( fabs(val) > 100000000.0  )
-        sprintf( strbuf, "%.16g", val );
+        CPLsprintf( strbuf, "%.16g", val );
     else
-        sprintf( strbuf, "%.3f", val );
+        CPLsprintf( strbuf, "%.3f", val );
     return strbuf;
 }
 
 static void AppendCoordinateList( OGRLineString *poLine, OGRILI1DataSource *poDS)
 {
-    int         b3D = (poLine->getGeometryType() & wkb25DBit);
+    int         b3D = wkbHasZ(poLine->getGeometryType());
 
     for( int iPoint = 0; iPoint < poLine->getNumPoints(); iPoint++ )
     {
@@ -287,10 +287,10 @@ int OGRILI1Layer::GeometryAppend( OGRGeometry *poGeometry )
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRILI1Layer::CreateFeature( OGRFeature *poFeature ) {
+OGRErr OGRILI1Layer::ICreateFeature( OGRFeature *poFeature ) {
     static long tid = -1; //system generated TID (must be unique within table)
     VSIFPrintf( poDS->GetTransferFile(), "OBJE" );
 
@@ -427,12 +427,12 @@ void OGRILI1Layer::JoinSurfaceLayer( OGRILI1Layer* poSurfacePolyLayer, int nSurf
     CPLDebug( "OGR_ILI", "Joining surface layer %s with geometries", GetLayerDefn()->GetName());
     poSurfacePolyLayer->ResetReading();
     while (OGRFeature *polyfeature = poSurfacePolyLayer->GetNextFeatureRef()) {
-        int reftid = polyfeature->GetFieldAsInteger(1);
+        long reftid = polyfeature->GetFID();
         OGRFeature *feature = GetFeatureRef(reftid);
         if (feature) {
             feature->SetGeomField(nSurfaceFieldIndex, polyfeature->GetGeomFieldRef(0));
         } else {
-            CPLDebug( "OGR_ILI", "Couldn't join feature FID %d", reftid );
+            CPLDebug( "OGR_ILI", "Couldn't join feature FID %ld", reftid );
         }
     }
 

@@ -35,9 +35,11 @@
 
 CPL_CVSID("$Id$");
 
-/* Defined in gdalwarpkernel.cpp */
-int GWKGetFilterRadius(GDALResampleAlg eResampleAlg);
-
+struct _GDALWarpChunk { 
+    int dx, dy, dsx, dsy; 
+    int sx, sy, ssx, ssy; 
+    int sExtraSx, sExtraSy;
+}; 
 
 /************************************************************************/
 /* ==================================================================== */
@@ -127,7 +129,7 @@ GDALWarpOperation::GDALWarpOperation()
 
     nChunkListCount = 0;
     nChunkListMax = 0;
-    panChunkList = NULL;
+    pasChunkList = NULL;
 
     bReportTimings = FALSE;
     nLastTimeReported = 0;
@@ -417,7 +419,7 @@ CPLErr GDALWarpOperation::Initialize( const GDALWarpOptions *psNewOptions )
         WipeOptions();
 
     psOptions = GDALCloneWarpOptions( psNewOptions );
-    psOptions->papszWarpOptions = CSLAddNameValue(psOptions->papszWarpOptions,
+    psOptions->papszWarpOptions = CSLSetNameValue(psOptions->papszWarpOptions,
         "EXTRA_ELTS", CPLSPrintf("%d", WARP_EXTRA_ELTS));
 
 /* -------------------------------------------------------------------- */
@@ -556,7 +558,7 @@ CPLErr GDALWarpOperation::Initialize( const GDALWarpOptions *psNewOptions )
             const char *pszBD = CSLFetchNameValue( psOptions->papszWarpOptions,
                                                    "CUTLINE_BLEND_DIST" );
             if( pszBD )
-                psOptions->dfCutlineBlendDist = atof(pszBD);
+                psOptions->dfCutlineBlendDist = CPLAtof(pszBD);
         }
     }
 
@@ -612,16 +614,11 @@ void GDALDestroyWarpOperation( GDALWarpOperationH hOperation )
 /************************************************************************/
 /*                         ChunkAndWarpImage()                          */
 /************************************************************************/
- 
- struct WarpChunk { 
-    int dx, dy, dsx, dsy; 
-    int sx, sy, ssx, ssy; 
-}; 
- 
+
 static int OrderWarpChunk(const void* _a, const void *_b)
 { 
-    const WarpChunk* a = (const WarpChunk* )_a;
-    const WarpChunk* b = (const WarpChunk* )_b;
+    const GDALWarpChunk* a = (const GDALWarpChunk* )_a;
+    const GDALWarpChunk* b = (const GDALWarpChunk* )_b;
     if (a->dy < b->dy)
         return -1; 
     else if (a->dy > b->dy)
@@ -668,7 +665,7 @@ CPLErr GDALWarpOperation::ChunkAndWarpImage(
     CollectChunkList( nDstXOff, nDstYOff, nDstXSize, nDstYSize );
     
     /* Sort chucks from top to bottom, and for equal y, from left to right */
-    qsort(panChunkList, nChunkListCount, sizeof(WarpChunk), OrderWarpChunk); 
+    qsort(pasChunkList, nChunkListCount, sizeof(GDALWarpChunk), OrderWarpChunk); 
 
 /* -------------------------------------------------------------------- */
 /*      Total up output pixels to process.                              */
@@ -678,8 +675,8 @@ CPLErr GDALWarpOperation::ChunkAndWarpImage(
 
     for( iChunk = 0; iChunk < nChunkListCount; iChunk++ )
     {
-        int *panThisChunk = panChunkList + iChunk*8;
-        double dfChunkPixels = panThisChunk[2] * (double) panThisChunk[3];
+        GDALWarpChunk *pasThisChunk = pasChunkList + iChunk;
+        double dfChunkPixels = pasThisChunk->dsx * (double) pasThisChunk->dsy;
 
         dfTotalPixels += dfChunkPixels;
     }
@@ -692,17 +689,18 @@ CPLErr GDALWarpOperation::ChunkAndWarpImage(
 
     for( iChunk = 0; iChunk < nChunkListCount; iChunk++ )
     {
-        int *panThisChunk = panChunkList + iChunk*8;
-        double dfChunkPixels = panThisChunk[2] * (double) panThisChunk[3];
+        GDALWarpChunk *pasThisChunk = pasChunkList + iChunk;
+        double dfChunkPixels = pasThisChunk->dsx * (double) pasThisChunk->dsy;
         CPLErr eErr;
 
         double dfProgressBase = dfPixelsProcessed / dfTotalPixels;
         double dfProgressScale = dfChunkPixels / dfTotalPixels;
 
-        eErr = WarpRegion( panThisChunk[0], panThisChunk[1], 
-                           panThisChunk[2], panThisChunk[3],
-                           panThisChunk[4], panThisChunk[5],
-                           panThisChunk[6], panThisChunk[7],
+        eErr = WarpRegion( pasThisChunk->dx, pasThisChunk->dy, 
+                           pasThisChunk->dsx, pasThisChunk->dsy,
+                           pasThisChunk->sx, pasThisChunk->sy, 
+                           pasThisChunk->ssx, pasThisChunk->ssy,
+                           pasThisChunk->sExtraSx, pasThisChunk->sExtraSy,
                            dfProgressBase, dfProgressScale);
 
         if( eErr != CE_None )
@@ -742,7 +740,7 @@ CPLErr GDALChunkAndWarpImage( GDALWarpOperationH hOperation,
 typedef struct
 {
     GDALWarpOperation *poOperation;
-    int               *panChunkInfo;
+    GDALWarpChunk     *pasChunkInfo;
     void              *hThreadHandle;
     CPLErr             eErr;
     double             dfProgressBase;
@@ -760,7 +758,7 @@ static void ChunkThreadMain( void *pThreadData )
 {
     volatile ChunkThreadData* psData = (volatile ChunkThreadData*) pThreadData;
 
-    int *panChunkInfo = psData->panChunkInfo;
+    GDALWarpChunk *pasChunkInfo = psData->pasChunkInfo;
 
 /* -------------------------------------------------------------------- */
 /*      Acquire IO mutex.                                               */
@@ -782,10 +780,11 @@ static void ChunkThreadMain( void *pThreadData )
         }
 
         psData->eErr = psData->poOperation->WarpRegion(
-                                    panChunkInfo[0], panChunkInfo[1],
-                                    panChunkInfo[2], panChunkInfo[3],
-                                    panChunkInfo[4], panChunkInfo[5],
-                                    panChunkInfo[6], panChunkInfo[7],
+                                    pasChunkInfo->dx, pasChunkInfo->dy, 
+                                    pasChunkInfo->dsx, pasChunkInfo->dsy,
+                                    pasChunkInfo->sx, pasChunkInfo->sy, 
+                                    pasChunkInfo->ssx, pasChunkInfo->ssy,
+                                    pasChunkInfo->sExtraSx, pasChunkInfo->sExtraSy,
                                     psData->dfProgressBase,
                                     psData->dfProgressScale);
 
@@ -841,7 +840,7 @@ CPLErr GDALWarpOperation::ChunkAndWarpMulti(
     CollectChunkList( nDstXOff, nDstYOff, nDstXSize, nDstYSize );
 
     /* Sort chucks from top to bottom, and for equal y, from left to right */
-    qsort(panChunkList, nChunkListCount, sizeof(WarpChunk), OrderWarpChunk); 
+    qsort(pasChunkList, nChunkListCount, sizeof(GDALWarpChunk), OrderWarpChunk); 
 
 /* -------------------------------------------------------------------- */
 /*      Process them one at a time, updating the progress               */
@@ -867,15 +866,15 @@ CPLErr GDALWarpOperation::ChunkAndWarpMulti(
 /* -------------------------------------------------------------------- */
         if( iChunk < nChunkListCount )
         {
-            int *panThisChunk = panChunkList + iChunk*8;
-            double dfChunkPixels = panThisChunk[2] * (double) panThisChunk[3];
+            GDALWarpChunk *pasThisChunk = pasChunkList + iChunk;
+            double dfChunkPixels = pasThisChunk->dsx * (double) pasThisChunk->dsy;
 
             asThreadData[iThread].dfProgressBase = dfPixelsProcessed / dfTotalPixels;
             asThreadData[iThread].dfProgressScale = dfChunkPixels / dfTotalPixels;
 
             dfPixelsProcessed += dfChunkPixels;
 
-            asThreadData[iThread].panChunkInfo = panThisChunk;
+            asThreadData[iThread].pasChunkInfo = pasThisChunk;
 
             if ( iChunk == 0 )
             {
@@ -974,8 +973,8 @@ CPLErr GDALChunkAndWarpMulti( GDALWarpOperationH hOperation,
 void GDALWarpOperation::WipeChunkList()
 
 {
-    CPLFree( panChunkList );
-    panChunkList = NULL;
+    CPLFree( pasChunkList );
+    pasChunkList = NULL;
     nChunkListCount = 0;
     nChunkListMax = 0;
 }
@@ -993,10 +992,13 @@ CPLErr GDALWarpOperation::CollectChunkList(
 /*      output area.                                                    */
 /* -------------------------------------------------------------------- */
     int nSrcXOff, nSrcYOff, nSrcXSize, nSrcYSize;
+    int nSrcXExtraSize, nSrcYExtraSize;
+    double dfSrcFillRatio;
     CPLErr eErr;
 
     eErr = ComputeSourceWindow( nDstXOff, nDstYOff, nDstXSize, nDstYSize,
-                                &nSrcXOff, &nSrcYOff, &nSrcXSize, &nSrcYSize );
+                                &nSrcXOff, &nSrcYOff, &nSrcXSize, &nSrcYSize,
+                                &nSrcXExtraSize, &nSrcYExtraSize, &dfSrcFillRatio );
     
     if( eErr != CE_None )
     {
@@ -1082,8 +1084,18 @@ CPLErr GDALWarpOperation::CollectChunkList(
                          &nBlockXSize, &nBlockYSize);
     }
     
-    if( dfTotalMemoryUse > psOptions->dfWarpMemoryLimit 
-        && (nDstXSize > 2 || nDstYSize > 2) )
+    // If size of working buffers need exceed the allow limit, then divide
+    // the target area
+    // Do it also if the "fill ratio" of the source is too low (#3120), but
+    // only if there's at least some source pixel intersecting. The
+    // SRC_FILL_RATIO_HEURISTICS warping option is undocumented and only here
+    // in case the heuristics would cause issues.
+    /*CPLDebug("WARP", "dst=(%d,%d,%d,%d) src=(%d,%d,%d,%d) srcfillratio=%.18g",
+             nDstXOff, nDstYOff, nDstXSize, nDstYSize,
+             nSrcXOff, nSrcYOff, nSrcXSize, nSrcYSize, dfSrcFillRatio);*/
+    if( (dfTotalMemoryUse > psOptions->dfWarpMemoryLimit && (nDstXSize > 2 || nDstYSize > 2)) ||
+        (dfSrcFillRatio > 0 && dfSrcFillRatio < 0.5 && (nDstXSize > 100 || nDstYSize > 100) &&
+         CSLFetchBoolean( psOptions->papszWarpOptions, "SRC_FILL_RATIO_HEURISTICS", TRUE )) )
     {
         CPLErr eErr2;
 
@@ -1141,18 +1153,20 @@ CPLErr GDALWarpOperation::CollectChunkList(
     if( nChunkListCount == nChunkListMax )
     {
         nChunkListMax = nChunkListMax * 2 + 1;
-        panChunkList = (int *) 
-            CPLRealloc(panChunkList,sizeof(int)*nChunkListMax*8 );
+        pasChunkList = (GDALWarpChunk *) 
+            CPLRealloc(pasChunkList,sizeof(GDALWarpChunk)*nChunkListMax );
     }
 
-    panChunkList[nChunkListCount*8+0] = nDstXOff;
-    panChunkList[nChunkListCount*8+1] = nDstYOff;
-    panChunkList[nChunkListCount*8+2] = nDstXSize;
-    panChunkList[nChunkListCount*8+3] = nDstYSize;
-    panChunkList[nChunkListCount*8+4] = nSrcXOff;
-    panChunkList[nChunkListCount*8+5] = nSrcYOff;
-    panChunkList[nChunkListCount*8+6] = nSrcXSize;
-    panChunkList[nChunkListCount*8+7] = nSrcYSize;
+    pasChunkList[nChunkListCount].dx = nDstXOff;
+    pasChunkList[nChunkListCount].dy = nDstYOff;
+    pasChunkList[nChunkListCount].dsx = nDstXSize;
+    pasChunkList[nChunkListCount].dsy = nDstYSize;
+    pasChunkList[nChunkListCount].sx = nSrcXOff;
+    pasChunkList[nChunkListCount].sy = nSrcYOff;
+    pasChunkList[nChunkListCount].ssx = nSrcXSize;
+    pasChunkList[nChunkListCount].ssy = nSrcYSize;
+    pasChunkList[nChunkListCount].sExtraSx = nSrcXExtraSize;
+    pasChunkList[nChunkListCount].sExtraSy = nSrcYExtraSize;
 
     nChunkListCount++;
 
@@ -1204,6 +1218,22 @@ CPLErr GDALWarpOperation::WarpRegion( int nDstXOff, int nDstYOff,
                                       int nDstXSize, int nDstYSize,
                                       int nSrcXOff, int nSrcYOff,
                                       int nSrcXSize, int nSrcYSize,
+                                      double dfProgressBase,
+                                      double dfProgressScale)
+{
+    return WarpRegion(nDstXOff, nDstYOff, 
+                      nDstXSize, nDstYSize,
+                      nSrcXOff, nSrcYOff,
+                      nSrcXSize, nSrcYSize,
+                      0, 0,
+                      dfProgressBase, dfProgressScale);
+}
+
+CPLErr GDALWarpOperation::WarpRegion( int nDstXOff, int nDstYOff, 
+                                      int nDstXSize, int nDstYSize,
+                                      int nSrcXOff, int nSrcYOff,
+                                      int nSrcXSize, int nSrcYSize,
+                                      int nSrcXExtraSize, int nSrcYExtraSize,
                                       double dfProgressBase,
                                       double dfProgressScale)
 
@@ -1331,6 +1361,7 @@ CPLErr GDALWarpOperation::WarpRegion( int nDstXOff, int nDstYOff,
     eErr = WarpRegionToBuffer( nDstXOff, nDstYOff, nDstXSize, nDstYSize, 
                                pDstBuffer, psOptions->eWorkingDataType, 
                                nSrcXOff, nSrcYOff, nSrcXSize, nSrcYSize,
+                               nSrcXExtraSize, nSrcYExtraSize,
                                dfProgressBase, dfProgressScale);
 
 /* -------------------------------------------------------------------- */
@@ -1430,11 +1461,24 @@ CPLErr GDALWarpRegion( GDALWarpOperationH hOperation,
  *
  * @return CE_None on success or CE_Failure if an error occurs.
  */
-                                 
+
 CPLErr GDALWarpOperation::WarpRegionToBuffer( 
     int nDstXOff, int nDstYOff, int nDstXSize, int nDstYSize, 
     void *pDataBuf, GDALDataType eBufDataType,
     int nSrcXOff, int nSrcYOff, int nSrcXSize, int nSrcYSize,
+    double dfProgressBase, double dfProgressScale)
+{
+    return WarpRegionToBuffer(nDstXOff, nDstYOff, nDstXSize, nDstYSize, 
+                              pDataBuf, eBufDataType,
+                              nSrcXOff, nSrcYOff, nSrcXSize, nSrcYSize, 0, 0,
+                              dfProgressBase, dfProgressScale);
+}
+
+CPLErr GDALWarpOperation::WarpRegionToBuffer( 
+    int nDstXOff, int nDstYOff, int nDstXSize, int nDstYSize, 
+    void *pDataBuf, GDALDataType eBufDataType,
+    int nSrcXOff, int nSrcYOff, int nSrcXSize, int nSrcYSize,
+    int nSrcXExtraSize, int nSrcYExtraSize,
     double dfProgressBase, double dfProgressScale)
 
 {
@@ -1452,7 +1496,8 @@ CPLErr GDALWarpOperation::WarpRegionToBuffer(
     {
         eErr = ComputeSourceWindow( nDstXOff, nDstYOff, nDstXSize, nDstYSize,
                                     &nSrcXOff, &nSrcYOff, 
-                                    &nSrcXSize, &nSrcYSize );
+                                    &nSrcXSize, &nSrcYSize,
+                                    &nSrcXExtraSize, &nSrcYExtraSize, NULL );
     
         if( eErr != CE_None )
             return eErr;
@@ -1489,6 +1534,8 @@ CPLErr GDALWarpOperation::WarpRegionToBuffer(
     oWK.nSrcYOff = nSrcYOff;
     oWK.nSrcXSize = nSrcXSize;
     oWK.nSrcYSize = nSrcYSize;
+    oWK.nSrcXExtraSize = nSrcXExtraSize;
+    oWK.nSrcYExtraSize = nSrcYExtraSize;
 
     if (nSrcXSize != 0 && nSrcYSize != 0 &&
         (nSrcXSize > INT_MAX / nSrcYSize ||
@@ -1986,7 +2033,9 @@ CPLErr GDALWarpOperation::CreateKernelMask( GDALWarpKernel *poKernel,
 CPLErr GDALWarpOperation::ComputeSourceWindow(int nDstXOff, int nDstYOff, 
                                               int nDstXSize, int nDstYSize,
                                               int *pnSrcXOff, int *pnSrcYOff, 
-                                              int *pnSrcXSize, int *pnSrcYSize)
+                                              int *pnSrcXSize, int *pnSrcYSize,
+                                              int *pnSrcXExtraSize, int *pnSrcYExtraSize,
+                                              double *pdfSrcFillRatio)
 
 {
 /* -------------------------------------------------------------------- */
@@ -2190,6 +2239,15 @@ CPLErr GDALWarpOperation::ComputeSourceWindow(int nDstXOff, int nDstYOff,
 /* -------------------------------------------------------------------- */
     int nResWinSize = GWKGetFilterRadius(psOptions->eResampleAlg);
 
+    /* Take scaling into account */
+    double dfXScale = (double)nDstXSize / (dfMaxXOut - dfMinXOut);
+    double dfYScale = (double)nDstYSize / (dfMaxYOut - dfMinYOut);
+    int nXRadius = ( dfXScale < 1.0 ) ?
+        (int)ceil( nResWinSize / dfXScale ) :nResWinSize;
+    int nYRadius = ( dfYScale < 1.0 ) ?
+        (int)ceil( nResWinSize / dfYScale ) : nResWinSize;
+    nResWinSize = MAX(nXRadius, nYRadius);
+
 /* -------------------------------------------------------------------- */
 /*      Allow addition of extra sample pixels to source window to       */
 /*      avoid missing pixels due to sampling error.  In fact,           */
@@ -2208,18 +2266,51 @@ CPLErr GDALWarpOperation::ComputeSourceWindow(int nDstXOff, int nDstYOff,
 /* -------------------------------------------------------------------- */
 /*      return bounds.                                                  */
 /* -------------------------------------------------------------------- */
+    /*CPLDebug("WARP", "dst=(%d,%d,%d,%d) raw src=(minx=%.8g,miny=%.8g,maxx=%.8g,maxy=%.8g)",
+             nDstXOff, nDstYOff, nDstXSize, nDstYSize,
+             dfMinXOut, dfMinYOut, dfMaxXOut, dfMaxYOut);
+    */
+    *pnSrcXOff = MAX(0,(int) floor( dfMinXOut ) );
+    *pnSrcYOff = MAX(0,(int) floor( dfMinYOut ) );
+    *pnSrcXOff = MIN(*pnSrcXOff,GDALGetRasterXSize(psOptions->hSrcDS));
+    *pnSrcYOff = MIN(*pnSrcYOff,GDALGetRasterYSize(psOptions->hSrcDS));
+
+    double dfCeilMaxXOut = ceil(dfMaxXOut);
+    if( dfCeilMaxXOut > INT_MAX )
+        dfCeilMaxXOut = INT_MAX;
+    double dfCeilMaxYOut = ceil(dfMaxYOut);
+    if( dfCeilMaxYOut > INT_MAX )
+        dfCeilMaxYOut = INT_MAX;
+
+    int nSrcXSizeRaw = MIN( GDALGetRasterXSize(psOptions->hSrcDS) - *pnSrcXOff,
+                       ((int) dfCeilMaxXOut) - *pnSrcXOff );
+    int nSrcYSizeRaw = MIN( GDALGetRasterYSize(psOptions->hSrcDS) - *pnSrcYOff,
+                       ((int) dfCeilMaxYOut) - *pnSrcYOff );
+    nSrcXSizeRaw = MAX(0,nSrcXSizeRaw);
+    nSrcYSizeRaw = MAX(0,nSrcYSizeRaw);
+    
     *pnSrcXOff = MAX(0,(int) floor( dfMinXOut ) - nResWinSize );
     *pnSrcYOff = MAX(0,(int) floor( dfMinYOut ) - nResWinSize );
     *pnSrcXOff = MIN(*pnSrcXOff,GDALGetRasterXSize(psOptions->hSrcDS));
     *pnSrcYOff = MIN(*pnSrcYOff,GDALGetRasterYSize(psOptions->hSrcDS));
 
     *pnSrcXSize = MIN( GDALGetRasterXSize(psOptions->hSrcDS) - *pnSrcXOff,
-                       ((int) ceil( dfMaxXOut )) - *pnSrcXOff + nResWinSize );
+                       ((int) dfCeilMaxXOut) - *pnSrcXOff + nResWinSize );
     *pnSrcYSize = MIN( GDALGetRasterYSize(psOptions->hSrcDS) - *pnSrcYOff,
-                       ((int) ceil( dfMaxYOut )) - *pnSrcYOff + nResWinSize );
+                       ((int) dfCeilMaxYOut) - *pnSrcYOff + nResWinSize );
     *pnSrcXSize = MAX(0,*pnSrcXSize);
     *pnSrcYSize = MAX(0,*pnSrcYSize);
 
+    if( pnSrcXExtraSize )
+        *pnSrcXExtraSize = *pnSrcXSize - nSrcXSizeRaw;
+    if( pnSrcYExtraSize )
+        *pnSrcYExtraSize = *pnSrcYSize - nSrcYSizeRaw;
+    
+    // Computed the ratio of the clamped source raster window size over
+    // the unclamped source raster window size
+    if( pdfSrcFillRatio )
+        *pdfSrcFillRatio = *pnSrcXSize * *pnSrcYSize / MAX(1.0,
+        (dfMaxXOut - dfMinXOut + 2 * nResWinSize) * (dfMaxYOut - dfMinYOut + 2 * nResWinSize)); 
 
     return CE_None;
 }

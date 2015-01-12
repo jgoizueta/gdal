@@ -32,28 +32,201 @@
 
 #include "ogrsf_frmts.h"
 #include "ogr_sqlite.h"
+#include "ogrgeopackageutility.h"
 
-#define UNDEFINED_SRID 0
+#define UNKNOWN_SRID   -2
+#define DEFAULT_SRID    0
 
 /************************************************************************/
-/*                           OGRGeoPackageDataSource                    */
+/*                          GDALGeoPackageDataset                       */
 /************************************************************************/
 
 class OGRGeoPackageTableLayer;
 
-class OGRGeoPackageDataSource : public OGRSQLiteBaseDataSource
+typedef struct
 {
+    int     nRow;
+    int     nCol;
+    int     nIdxWithinTileData;
+    int     abBandDirty[4];
+} CachedTileDesc;
+
+typedef enum
+{
+    GPKG_TF_PNG_JPEG,
+    GPKG_TF_PNG,
+    GPKG_TF_PNG8,
+    GPKG_TF_JPEG,
+    GPKG_TF_WEBP
+} GPKGTileFormat;
+
+class GDALGeoPackageDataset : public OGRSQLiteBaseDataSource
+{
+    friend class GDALGeoPackageRasterBand;
+
     OGRGeoPackageTableLayer** m_papoLayers;
     int                 m_nLayers;
     int                 m_bUtf8;
+    void                CheckUnknownExtensions(int bCheckRasterTable = FALSE);
+    
+    int                 m_bNew;
+
+    CPLString           m_osRasterTable;
+    CPLString           m_osIdentifier;
+    int                 m_bIdentifierAsCO;
+    CPLString           m_osDescription;
+    int                 m_bDescriptionAsCO;
+    int                 m_bHasReadMetadataFromStorage;
+    int                 m_bMetadataDirty;
+    char              **m_papszSubDatasets;
+    char               *m_pszProjection;
+    int                 m_bRecordInsertedInGPKGContent;
+    int                 m_bGeoTransformValid;
+    double              m_adfGeoTransform[6];
+    int                 m_nSRID;
+    double              m_dfTMSMinX;
+    double              m_dfTMSMaxY;
+    int                 m_nZoomLevel;
+    GByte              *m_pabyCachedTiles;
+    CachedTileDesc      m_asCachedTilesDesc[4];
+    int                 m_nShiftXTiles;
+    int                 m_nShiftXPixelsMod;
+    int                 m_nShiftYTiles;
+    int                 m_nShiftYPixelsMod;
+    int                 m_nTileMatrixWidth;
+    int                 m_nTileMatrixHeight;
+
+    GPKGTileFormat      m_eTF;
+    int                 m_nZLevel;
+    int                 m_nQuality;
+    int                 m_bDither;
+
+    GDALColorTable*     m_poCT;
+    int                 m_bTriedEstablishingCT;
+    GByte*              m_pabyHugeColorArray;
+
+    GDALGeoPackageDataset* m_poParentDS;
+    int                 m_nOverviewCount;
+    GDALGeoPackageDataset** m_papoOverviewDS;
+    int                 m_bZoomOther;
+
+    CPLString           m_osWHERE;
+
+    sqlite3            *m_hTempDB;
+    CPLString           m_osTempDBFilename;
+    
+    int                 m_bInFlushCache;
+    
+    int                 m_nTileInsertionCount;
+
+    CPLString           m_osTilingScheme;
+
+        void            ComputeTileAndPixelShifts();
+        int             InitRaster ( GDALGeoPackageDataset* poParentDS,
+                                     const char* pszTableName,
+                                        double dfMinX,
+                                        double dfMinY,
+                                        double dfMaxX,
+                                        double dfMaxY,
+                                        const char* pszContentsMinX,
+                                        const char* pszContentsMinY,
+                                        const char* pszContentsMaxX,
+                                        const char* pszContentsMaxY,
+                                        char** papszOpenOptions,
+                                        const SQLResult& oResult,
+                                        int nIdxInResult );
+        int             InitRaster ( GDALGeoPackageDataset* poParentDS,
+                                     const char* pszTableName,
+                                        int nZoomLevel,
+                                        int nBandCount,
+                                        double dfTMSMinX,
+                                        double dfTMSMaxY,
+                                        double dfPixelXSize,
+                                        double dfPixelYSize,
+                                        int nTileWidth,
+                                        int nTileHeight,
+                                        int nTileMatrixWidth,
+                                        int nTileMatrixHeight,
+                                        double dfGDALMinX,
+                                        double dfGDALMinY,
+                                        double dfGDALMaxX,
+                                        double dfGDALMaxY );
+
+        int     OpenRaster( const char* pszTableName,
+                            const char* pszIdentifier,
+                            const char* pszDescription,
+                            int nSRSId,
+                            double dfMinX,
+                            double dfMinY,
+                            double dfMaxX,
+                            double dfMaxY,
+                            const char* pszContentsMinX,
+                            const char* pszContentsMinY,
+                            const char* pszContentsMaxX,
+                            const char* pszContentsMaxY,
+                            char** papszOptions );
+        CPLErr   FinalizeRasterRegistration();
+
+        CPLErr                  ReadTile(const CPLString& osMemFileName,
+                                         GByte* pabyTileData,
+                                         int* pbIsLossyFormat = NULL);
+        GByte*                  ReadTile(int nRow, int nCol);
+        GByte*                  ReadTile(int nRow, int nCol, GByte* pabyData,
+                                         int* pbIsLossyFormat = NULL);
+
+        int                     m_bInWriteTile;
+        CPLErr                  WriteTile();
+
+        CPLErr                  WriteTileInternal(); /* should only be called by WriteTile() */
+        CPLErr                  FlushRemainingShiftedTiles();
+        CPLErr                  WriteShiftedTile(int nRow, int nCol, int iBand,
+                                                 int nDstXOffset, int nDstYOffset,
+                                                 int nDstXSize, int nDstYSize);
+
+        int                     RegisterWebPExtension();
+        int                     RegisterZoomOtherExtension();
+        void                    ParseCompressionOptions(char** papszOptions);
+
+        int                     HasMetadataTables();
+        int                     CreateMetadataTables();
+        const char*             CheckMetadataDomain( const char* pszDomain );
+        void                    WriteMetadata(CPLXMLNode* psXMLNode, /* will be destroyed by the method /*/
+                                              const char* pszTableName);
+        CPLErr                  FlushMetadata();
 
     public:
-                            OGRGeoPackageDataSource();
-                            ~OGRGeoPackageDataSource();
+                            GDALGeoPackageDataset();
+                            ~GDALGeoPackageDataset();
+
+        virtual char **     GetMetadata( const char *pszDomain = NULL );
+        virtual const char *GetMetadataItem( const char * pszName,
+                                             const char * pszDomain = "" );
+        virtual char **     GetMetadataDomainList();
+        virtual CPLErr      SetMetadata( char ** papszMetadata,
+                                         const char * pszDomain = "" );
+        virtual CPLErr      SetMetadataItem( const char * pszName,
+                                             const char * pszValue,
+                                             const char * pszDomain = "" );
+
+        virtual const char* GetProjectionRef();
+        virtual CPLErr      SetProjection( const char* pszProjection );
+
+        virtual CPLErr      GetGeoTransform( double* padfGeoTransform );
+        virtual CPLErr      SetGeoTransform( double* padfGeoTransform );
+
+        virtual void        FlushCache();
+        CPLErr              FlushCacheWithErrCode();
+        virtual CPLErr      IBuildOverviews( const char *, int, int *,
+                                             int, int *, GDALProgressFunc, void * );
 
         virtual int         GetLayerCount() { return m_nLayers; }
-        int                 Open( const char * pszFilename, int bUpdate );
-        int                 Create( const char * pszFilename, char **papszOptions );
+        int                 Open( GDALOpenInfo* poOpenInfo );
+        int                 Create( const char * pszFilename,
+                                    int nXSize,
+                                    int nYSize,
+                                    int nBands,
+                                    GDALDataType eDT,
+                                    char **papszOptions );
         OGRLayer*           GetLayer( int iLayer );
         int                 DeleteLayer( int iLayer );
         OGRLayer*           ICreateLayer( const char * pszLayerName,
@@ -79,6 +252,12 @@ class OGRGeoPackageDataSource : public OGRSQLiteBaseDataSource
         OGRErr              CreateExtensionsTableIfNecessary();
         int                 HasExtensionsTable();
 
+        static GDALDataset* CreateCopy( const char *pszFilename,
+                                                   GDALDataset *poSrcDS, 
+                                                   int bStrict,
+                                                   char ** papszOptions,
+                                                   GDALProgressFunc pfnProgress, 
+                                                   void * pProgressData );
     private:
     
         OGRErr              PragmaCheck(const char * pszPragma, const char * pszExpected, int nRowsExpected);
@@ -89,13 +268,41 @@ class OGRGeoPackageDataSource : public OGRSQLiteBaseDataSource
 };
 
 /************************************************************************/
+/*                        GDALGeoPackageRasterBand                      */
+/************************************************************************/
+
+class GDALGeoPackageRasterBand: public GDALPamRasterBand
+{
+    public:
+
+                                GDALGeoPackageRasterBand(GDALGeoPackageDataset* poDS,
+                                                         int nBand,
+                                                         int nTileWidth, int nTileHeight);
+        
+        virtual CPLErr          IReadBlock(int nBlockXOff, int nBlockYOff,
+                                           void* pData);
+        virtual CPLErr          IWriteBlock(int nBlockXOff, int nBlockYOff,
+                                           void* pData);
+        virtual CPLErr          FlushCache();
+
+        virtual GDALColorTable* GetColorTable();
+        virtual CPLErr          SetColorTable(GDALColorTable* poCT);
+
+        virtual GDALColorInterp GetColorInterpretation();
+        virtual CPLErr          SetColorInterpretation( GDALColorInterp );
+
+        virtual int             GetOverviewCount();
+        virtual GDALRasterBand* GetOverview(int nIdx);
+};
+
+/************************************************************************/
 /*                           OGRGeoPackageLayer                         */
 /************************************************************************/
 
 class OGRGeoPackageLayer : public OGRLayer, public IOGRSQLiteGetSpatialWhere
 {
   protected:
-    OGRGeoPackageDataSource *m_poDS;
+    GDALGeoPackageDataset *m_poDS;
 
     OGRFeatureDefn*      m_poFeatureDefn;
     int                  iNextShapeId;
@@ -119,7 +326,7 @@ class OGRGeoPackageLayer : public OGRLayer, public IOGRSQLiteGetSpatialWhere
 
   public:
 
-                        OGRGeoPackageLayer(OGRGeoPackageDataSource* poDS);
+                        OGRGeoPackageLayer(GDALGeoPackageDataset* poDS);
                         ~OGRGeoPackageLayer();
     /************************************************************************/
     /* OGR API methods */
@@ -154,6 +361,7 @@ class OGRGeoPackageTableLayer : public OGRGeoPackageLayer
     int                         bDeferedSpatialIndexCreation;
     int                         m_bHasSpatialIndex;
     int                         bDropRTreeTable;
+    int                         m_anHasGeometryExtension[wkbMultiSurface+1];
 
     virtual OGRErr      ResetStatement();
     
@@ -161,7 +369,7 @@ class OGRGeoPackageTableLayer : public OGRGeoPackageLayer
     
     public:
     
-                        OGRGeoPackageTableLayer( OGRGeoPackageDataSource *poDS,
+                        OGRGeoPackageTableLayer( GDALGeoPackageDataset *poDS,
                                             const char * pszTableName );
                         ~OGRGeoPackageTableLayer();
 
@@ -171,8 +379,8 @@ class OGRGeoPackageTableLayer : public OGRGeoPackageLayer
     int                 TestCapability( const char * );
     OGRErr              CreateField( OGRFieldDefn *poField, int bApproxOK = TRUE );
     void                ResetReading();
-	OGRErr				CreateFeature( OGRFeature *poFeater );
-    OGRErr              SetFeature( OGRFeature *poFeature );
+	OGRErr              ICreateFeature( OGRFeature *poFeater );
+    OGRErr              ISetFeature( OGRFeature *poFeature );
     OGRErr              DeleteFeature(long nFID);
     virtual void        SetSpatialFilter( OGRGeometry * );
     OGRErr              SetAttributeFilter( const char *pszQuery );
@@ -201,6 +409,9 @@ class OGRGeoPackageTableLayer : public OGRGeoPackageLayer
     virtual CPLString    GetSpatialWhere(int iGeomCol,
                                          OGRGeometry* poFilterGeom);
 
+    int                 HasSpatialIndex();
+    int                 CreateGeometryExtensionIfNecessary(OGRwkbGeometryType eGType);
+
     /************************************************************************/
     /* GPKG methods */
     
@@ -216,7 +427,6 @@ class OGRGeoPackageTableLayer : public OGRGeoPackageLayer
     OGRErr              FeatureBindInsertParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt, int bAddFID );
     OGRErr              FeatureBindParameters( OGRFeature *poFeature, sqlite3_stmt *poStmt, int *pnColCount, int bAddFID );
 
-    int                 HasSpatialIndex();
     void                CheckUnknownExtensions();
 };
 
@@ -231,7 +441,7 @@ class OGRGeoPackageSelectLayer : public OGRGeoPackageLayer, public IOGRSQLiteSel
     virtual OGRErr      ResetStatement();
 
   public:
-                        OGRGeoPackageSelectLayer( OGRGeoPackageDataSource *, 
+                        OGRGeoPackageSelectLayer( GDALGeoPackageDataset *, 
                                               CPLString osSQL,
                                               sqlite3_stmt *,
                                               int bUseStatementForGetNextFeature,

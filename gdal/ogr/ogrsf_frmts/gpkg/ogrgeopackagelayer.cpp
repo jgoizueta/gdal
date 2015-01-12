@@ -35,7 +35,7 @@
 /*                      OGRGeoPackageLayer()                            */
 /************************************************************************/
 
-OGRGeoPackageLayer::OGRGeoPackageLayer(OGRGeoPackageDataSource *poDS) : m_poDS(poDS)
+OGRGeoPackageLayer::OGRGeoPackageLayer(GDALGeoPackageDataset *poDS) : m_poDS(poDS)
 {
     m_poFeatureDefn = NULL;
     iNextShapeId = 0;
@@ -411,9 +411,13 @@ void OGRGeoPackageLayer::BuildFeatureDefn( const char *pszLayerName,
 
         if (pszDeclType != NULL)
         {
-            OGRFieldType eFieldType = GPkgFieldToOGR(pszDeclType);
+            OGRFieldSubType eSubType;
+            OGRFieldType eFieldType = GPkgFieldToOGR(pszDeclType, eSubType);
             if( (int)eFieldType <= OFTMaxType )
+            {
                 oField.SetType(eFieldType);
+                oField.SetSubType(eSubType);
+            }
         }
 
         m_poFeatureDefn->AddFieldDefn( &oField );

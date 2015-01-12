@@ -122,6 +122,7 @@ class OGRShapeLayer : public OGRAbstractProxiedLayer
     void                ClearSpatialFIDs();
 
     int                 bHeaderDirty;
+    int                 bSHPNeedsRepack;
 
     int                 bCheckedForQIX;
     SHPTreeDiskHandle   hQIX;
@@ -147,6 +148,8 @@ class OGRShapeLayer : public OGRAbstractProxiedLayer
     int                 bResizeAtClose;
 
     void                TruncateDBF();
+    
+    int                 bCreateSpatialIndexAtClose;
 
   protected:
 
@@ -175,8 +178,9 @@ class OGRShapeLayer : public OGRAbstractProxiedLayer
                                        const char * pszName,
                                        SHPHandle hSHP, DBFHandle hDBF,
                                        OGRSpatialReference *poSRS, int bSRSSet,
-                                       int bUpdate, 
-                                       OGRwkbGeometryType eReqType );
+                                       int bUpdate,
+                                       OGRwkbGeometryType eReqType,
+                                       char ** papszCreateOptions = NULL);
                         ~OGRShapeLayer();
 
     void                ResetReading();
@@ -184,9 +188,9 @@ class OGRShapeLayer : public OGRAbstractProxiedLayer
     virtual OGRErr      SetNextByIndex( long nIndex );
 
     OGRFeature         *GetFeature( long nFeatureId );
-    OGRErr              SetFeature( OGRFeature *poFeature );
+    OGRErr              ISetFeature( OGRFeature *poFeature );
     OGRErr              DeleteFeature( long nFID );
-    OGRErr              CreateFeature( OGRFeature *poFeature );
+    OGRErr              ICreateFeature( OGRFeature *poFeature );
     OGRErr              SyncToDisk();
     
     OGRFeatureDefn *    GetLayerDefn() { return poFeatureDefn; }
@@ -205,6 +209,7 @@ class OGRShapeLayer : public OGRAbstractProxiedLayer
     virtual OGRErr      SetAttributeFilter( const char * );
     
     void                AddToFileList( CPLStringList& oFileList );
+    void                CreateSpatialIndexAtClose( int bFlag ) { bCreateSpatialIndexAtClose = bFlag; }
 };
 
 /************************************************************************/

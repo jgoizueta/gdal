@@ -1282,54 +1282,28 @@ int CPLPrintPointer( char *pszBuffer, void *pValue, int nMaxLen )
  */
 
 int CPLPrintDouble( char *pszBuffer, const char *pszFormat,
-                    double dfValue, const char *pszLocale )
+                    double dfValue, CPL_UNUSED const char *pszLocale )
 {
-
-#define DOUBLE_BUFFER_SIZE 64
-
-    char    szTemp[DOUBLE_BUFFER_SIZE];
-    int     i;
-
     if ( !pszBuffer )
         return 0;
 
-#if defined(HAVE_LOCALE_H) && defined(HAVE_SETLOCALE)
-    char        *pszCurLocale = NULL;
-
-    if ( pszLocale || EQUAL( pszLocale, "" ) )
-    {
-        // Save the current locale
-        pszCurLocale = CPLsetlocale(LC_ALL, NULL );
-        // Set locale to the specified value
-        CPLsetlocale( LC_ALL, pszLocale );
-    }
-#else
-    (void) pszLocale;
-#endif
+    const int double_buffer_size = 64;
+    char szTemp[double_buffer_size];
 
 #if defined(HAVE_SNPRINTF)
-    snprintf( szTemp, DOUBLE_BUFFER_SIZE, pszFormat, dfValue );
+    CPLsnprintf( szTemp, double_buffer_size, pszFormat, dfValue );
 #else
-    sprintf( szTemp, pszFormat, dfValue );
+    CPLsprintf( szTemp, pszFormat, dfValue );
 #endif
-    szTemp[DOUBLE_BUFFER_SIZE - 1] = '\0';
+    szTemp[double_buffer_size - 1] = '\0';
 
-    for( i = 0; szTemp[i] != '\0'; i++ )
+    for( int i = 0; szTemp[i] != '\0'; i++ )
     {
         if( szTemp[i] == 'E' || szTemp[i] == 'e' )
             szTemp[i] = 'D';
     }
 
-#if defined(HAVE_LOCALE_H) && defined(HAVE_SETLOCALE)
-    // Restore stored locale back
-    if ( pszCurLocale )
-        CPLsetlocale( LC_ALL, pszCurLocale );
-#endif
-
     return CPLPrintString( pszBuffer, szTemp, 64 );
-
-#undef DOUBLE_BUFFER_SIZE
-
 }
 
 /************************************************************************/
@@ -1531,7 +1505,7 @@ static void CPLAccessConfigOption(const char* pszKey, int bGet)
   *     char* pszOldVal = pszOldValTmp ? CPLStrdup(pszOldValTmp) : NULL;
   *     // override with new value
   *     CPLSetConfigOption(pszKey, pszNewVal);
-  *     // do something usefull
+  *     // do something useful
   *     // restore old value
   *     CPLSetConfigOption(pszKey, pszOldVal);
   *     CPLFree(pszOldVal);
@@ -1736,7 +1710,7 @@ proj_strtod(char *nptr, char **endptr)
              * then restore it and return
              */
             *cp = '\0';
-            result = strtod(nptr, endptr);
+            result = CPLStrtod(nptr, endptr);
             *cp = c;
             return result;
         }
@@ -1745,7 +1719,7 @@ proj_strtod(char *nptr, char **endptr)
 
     /* no offending characters, just handle normally */
 
-    return strtod(nptr, endptr);
+    return CPLStrtod(nptr, endptr);
 }
 
 /************************************************************************/
@@ -1857,8 +1831,8 @@ const char *CPLDecToDMS( double dfAngle, const char * pszAxis,
     else
         pszHemisphere = "N";
 
-    sprintf( szFormat, "%%3dd%%2d\'%%%d.%df\"%s", nPrecision+3, nPrecision, pszHemisphere );
-    sprintf( szBuffer, szFormat, nDegrees, nMinutes, dfSeconds );
+    CPLsprintf( szFormat, "%%3dd%%2d\'%%%d.%df\"%s", nPrecision+3, nPrecision, pszHemisphere );
+    CPLsprintf( szBuffer, szFormat, nDegrees, nMinutes, dfSeconds );
 
     return( szBuffer );
 }
@@ -2460,6 +2434,9 @@ CPLLocaleC::~CPLLocaleC()
  * potential data race. A mutex is used to provide a critical region so
  * that only one thread at a time can be executing setlocale().
  *
+ * The return should not be freed, and copied quickly as it may be invalidated
+ * by a following next call to CPLsetlocale().
+ *
  * @param category See your compiler's documentation on setlocale.
  * @param locale See your compiler's documentation on setlocale.
  *
@@ -2468,7 +2445,10 @@ CPLLocaleC::~CPLLocaleC()
 char* CPLsetlocale (int category, const char* locale)
 {
     CPLMutexHolder oHolder(&hSetLocaleMutex);
-    return setlocale(category, locale);
+    char* pszRet = setlocale(category, locale);
+    if( pszRet == NULL )
+        return pszRet;
+    return (char*)CPLSPrintf("%s", pszRet); /* to make it thread-locale storage */
 }
 
 

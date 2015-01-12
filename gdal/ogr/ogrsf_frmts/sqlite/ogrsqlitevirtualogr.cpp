@@ -35,6 +35,25 @@
 
 #ifdef HAVE_SQLITE_VFS
 
+/************************************************************************/
+/*                           OGR2SQLITE_Register()                      */
+/************************************************************************/
+
+CPL_C_START
+int CPL_DLL OGR2SQLITE_static_register (sqlite3* hDB, char **pzErrMsg, void* pApi);
+CPL_C_END
+
+/* We call this function so that each time a db is created, */
+/* OGR2SQLITE_static_register is called, to initialize the sqlite3_api */
+/* structure with the right pointers. */
+/* We need to declare this function before including sqlite3ext.h, since */
+/* sqlite 3.8.7, sqlite3_auto_extension can be a macro (#5725) */
+
+void OGR2SQLITE_Register()
+{
+    sqlite3_auto_extension ((void (*)(void)) OGR2SQLITE_static_register);
+}
+
 #define VIRTUAL_OGR_DYNAMIC_EXTENSION_ENABLED
 //#define DEBUG_OGR2SQLITE
 
@@ -526,7 +545,7 @@ int OGR2SQLITE_ConnectCreate(sqlite3* hDB, void *pAux,
 
             if( poDS->GetLayerCount() > 1 )
             {
-                *pzErr = sqlite3_mprintf( "Datasource '%s' has more than one layers, and none was explicitely selected.",
+                *pzErr = sqlite3_mprintf( "Datasource '%s' has more than one layers, and none was explicitly selected.",
                                           osDSName.c_str() );
                 poDS->Release();
                 return SQLITE_ERROR;
@@ -586,7 +605,8 @@ int OGR2SQLITE_ConnectCreate(sqlite3* hDB, void *pAux,
         osSQL += OGRSQLiteEscapeName(poFieldDefn->GetNameRef());
         osSQL += "\"";
         osSQL += " ";
-        osSQL += OGRSQLiteFieldDefnToSQliteFieldDefn(poFieldDefn);
+        osSQL += OGRSQLiteFieldDefnToSQliteFieldDefn(poFieldDefn,
+                                                     bInternalUse);
     }
 
     if( bAddComma )
@@ -620,7 +640,7 @@ int OGR2SQLITE_ConnectCreate(sqlite3* hDB, void *pAux,
             osSQL += "_";
             osSQL += OGRToOGCGeomType(poFieldDefn->GetType());
             osSQL += "_";
-            osSQL += (poFieldDefn->GetType() & wkb25DBit) ? "25D" : "2D";
+            osSQL += wkbHasZ(poFieldDefn->GetType()) ? "25D" : "2D";
             OGRSpatialReference* poSRS = poFieldDefn->GetSpatialRef();
             if( poSRS == NULL && i == 0 )
                 poSRS = poLayer->GetSpatialRef();
@@ -980,7 +1000,7 @@ int OGR2SQLITE_Filter(sqlite3_vtab_cursor* pCursor,
         else if (sqlite3_value_type (argv[i]) == SQLITE_FLOAT)
         { // Insure that only Decimal.Points are used, never local settings such as Decimal.Comma.
             osAttributeFilter +=
-                CPLString().FormatC(sqlite3_value_double (argv[i]),"%.18g").c_str();
+                CPLSPrintf("%.18g", sqlite3_value_double (argv[i]));
         }
         else if (sqlite3_value_type (argv[i]) == SQLITE_TEXT)
         {
@@ -1119,6 +1139,36 @@ static void OGR2SQLITE_GoToWishedIndex(OGR2SQLITE_vtab_cursor* pMyCursor)
 }
 
 /************************************************************************/
+/*                    OGR2SQLITE_ExportGeometry()                       */
+/************************************************************************/
+
+static void OGR2SQLITE_ExportGeometry(OGRGeometry* poGeom, int nSRSId,
+                                      GByte*& pabyGeomBLOB,
+                                      int& nGeomBLOBLen)
+{
+    if( OGRSQLiteLayer::ExportSpatiaLiteGeometry(
+            poGeom, nSRSId, wkbNDR, FALSE, FALSE, FALSE,
+            &pabyGeomBLOB,
+            &nGeomBLOBLen ) != CE_None )
+    {
+        nGeomBLOBLen = 0;
+    }
+    /* This is a hack: we add the original curve geometry after */
+    /* the spatialite blob */
+    else if( poGeom->hasCurveGeometry() )
+    {
+        int nWkbSize = poGeom->WkbSize();
+
+        pabyGeomBLOB = (GByte*) CPLRealloc(pabyGeomBLOB,
+                                nGeomBLOBLen + nWkbSize + 1);
+        poGeom->exportToWkb(wkbNDR, pabyGeomBLOB + nGeomBLOBLen);
+        /* Sheat a bit and add a end-of-blob spatialite marker */
+        pabyGeomBLOB[nGeomBLOBLen + nWkbSize] = 0xFE;
+        nGeomBLOBLen += nWkbSize + 1;
+    }
+}
+
+/************************************************************************/
 /*                         OGR2SQLITE_Column()                          */
 /************************************************************************/
 
@@ -1165,13 +1215,9 @@ int OGR2SQLITE_Column(sqlite3_vtab_cursor* pCursor,
                 OGRSpatialReference* poSRS = poGeom->getSpatialReference();
                 int nSRSId = pMyCursor->pVTab->poModule->FetchSRSId(poSRS);
 
-                if( OGRSQLiteLayer::ExportSpatiaLiteGeometry(
-                        poGeom, nSRSId, wkbNDR, FALSE, FALSE, FALSE,
-                        &pMyCursor->pabyGeomBLOB,
-                        &pMyCursor->nGeomBLOBLen ) != CE_None )
-                {
-                    pMyCursor->nGeomBLOBLen = 0;
-                }
+                OGR2SQLITE_ExportGeometry(poGeom, nSRSId,
+                                          pMyCursor->pabyGeomBLOB,
+                                          pMyCursor->nGeomBLOBLen);
             }
         }
 
@@ -1206,12 +1252,7 @@ int OGR2SQLITE_Column(sqlite3_vtab_cursor* pCursor,
 
             GByte* pabyGeomBLOB = NULL;
             int nGeomBLOBLen = 0;
-            if( OGRSQLiteLayer::ExportSpatiaLiteGeometry(
-                    poGeom, nSRSId, wkbNDR, FALSE, FALSE, FALSE,
-                    &pabyGeomBLOB, &nGeomBLOBLen ) != CE_None )
-            {
-                nGeomBLOBLen = 0;
-            }
+            OGR2SQLITE_ExportGeometry(poGeom, nSRSId, pabyGeomBLOB, nGeomBLOBLen);
 
             if( nGeomBLOBLen == 0 )
             {
@@ -1436,7 +1477,16 @@ static OGRFeature* OGR2SQLITE_FeatureFromArgs(OGRLayer* poLayer,
             if( OGRSQLiteLayer::ImportSpatiaLiteGeometry(
                             pabyBlob, nLen, &poGeom ) == CE_None )
             {
-                poFeature->SetGeomFieldDirectly(i, poGeom);
+/*                OGRwkbGeometryType eGeomFieldType =
+                    poFeature->GetDefnRef()->GetGeomFieldDefn(i)->GetType();
+                if( OGR_GT_IsCurve(eGeomFieldType) && !OGR_GT_IsCurve(poGeom->getGeometryType()) )
+                {
+                    OGRGeometry* poCurveGeom = poGeom->getCurveGeometry();
+                    poFeature->SetGeomFieldDirectly(i, poCurveGeom);
+                    delete poCurveGeom;
+                }
+                else*/
+                    poFeature->SetGeomFieldDirectly(i, poGeom);
             }
         }
     }
@@ -1693,7 +1743,7 @@ void OGR2SQLITE_ogr_layer_GeometryType(sqlite3_context* pContext,
     }
 
     const char* psz2DName = OGRToOGCGeomType(eType);
-    if( eType & wkb25DBit )
+    if( wkbHasZ(eType) )
         sqlite3_result_text( pContext, CPLSPrintf("%s Z", psz2DName), -1, SQLITE_TRANSIENT );
     else
         sqlite3_result_text( pContext, psz2DName, -1, SQLITE_TRANSIENT );
@@ -2402,18 +2452,13 @@ int sqlite3_extension_init (sqlite3 * hDB, char **pzErrMsg,
 /*                        OGR2SQLITE_static_register()                  */
 /************************************************************************/
 
-CPL_C_START
-int CPL_DLL OGR2SQLITE_static_register (sqlite3 * hDB, char **pzErrMsg,
-                                        const sqlite3_api_routines * pApi);
-CPL_C_END
-
 #ifndef WIN32
 extern const struct sqlite3_api_routines OGRSQLITE_static_routines;
 #endif
 
-int OGR2SQLITE_static_register (sqlite3 * hDB, char **pzErrMsg,
-                                const sqlite3_api_routines * pApi)
+int OGR2SQLITE_static_register (sqlite3 * hDB, char **pzErrMsg, void * _pApi)
 {
+    const sqlite3_api_routines * pApi = (const sqlite3_api_routines * )_pApi;
 #ifndef WIN32
     if( pApi->create_module == NULL )
     {
@@ -2447,19 +2492,6 @@ int OGR2SQLITE_static_register (sqlite3 * hDB, char **pzErrMsg,
     }
 
     return SQLITE_OK;
-}
-
-/************************************************************************/
-/*                           OGR2SQLITE_Register()                      */
-/************************************************************************/
-
-/* We call this function so that each time a db is created, */
-/* OGR2SQLITE_static_register is called, to initialize the sqlite3_api */
-/* structure with the right pointers. */
-
-void OGR2SQLITE_Register()
-{
-    sqlite3_auto_extension ((void (*)(void)) OGR2SQLITE_static_register);
 }
 
 #endif // HAVE_SQLITE_VFS

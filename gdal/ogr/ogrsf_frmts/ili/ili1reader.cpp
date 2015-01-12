@@ -337,11 +337,11 @@ int ILI1Reader::ReadTable(CPL_UNUSED const char *layername) {
                 if (geomIdx >= 0) {
                   if (featureDef->GetGeomFieldDefn(geomIdx)->GetType() == wkbPoint) {
                     //add Point geometry
-                    OGRPoint *ogrPoint = new OGRPoint(atof(tokens[fIndex-1]), atof(tokens[fIndex]));
+                    OGRPoint *ogrPoint = new OGRPoint(CPLAtof(tokens[fIndex-1]), CPLAtof(tokens[fIndex]));
                     feature->SetGeomFieldDirectly(geomIdx, ogrPoint);
                   } else if (featureDef->GetGeomFieldDefn(geomIdx)->GetType() == wkbPoint25D && fieldno > 1 && featureDef->GetFieldDefn(fieldno-2)->GetType() == OFTReal) {
                     //add 3D Point geometry
-                    OGRPoint *ogrPoint = new OGRPoint(atof(tokens[fIndex-2]), atof(tokens[fIndex-1]), atof(tokens[fIndex]));
+                    OGRPoint *ogrPoint = new OGRPoint(CPLAtof(tokens[fIndex-2]), CPLAtof(tokens[fIndex-1]), CPLAtof(tokens[fIndex]));
                     feature->SetGeomFieldDirectly(geomIdx, ogrPoint);
                   }
                 }
@@ -350,11 +350,17 @@ int ILI1Reader::ReadTable(CPL_UNUSED const char *layername) {
           }
           if (!warned && featureDef->GetFieldCount() != CSLCount(tokens)-1 && !(featureDef->GetFieldCount() == CSLCount(tokens) && EQUAL(featureDef->GetFieldDefn(featureDef->GetFieldCount()-1)->GetNameRef(), "ILI_Geometry"))) {
             CPLError(CE_Warning, CPLE_AppDefined,
-                "Field count doesn't match. %d declared, %d found", featureDef->GetFieldCount(), CSLCount(tokens)-1);
+                "Field count of table %s doesn't match. %d declared, %d found (e.g. ignored LINEATTR)", featureDef->GetName(), featureDef->GetFieldCount(), CSLCount(tokens)-1);
             warned = TRUE;
           }
           if (feature->GetFieldCount() > 0) {
-            feature->SetFID(atol(feature->GetFieldAsString(0))); //TODO: use IDENT field from model instead of TID
+            if (featureDef->GetFieldIndex("_RefTID") == 1) {
+              // Polygon geometry table: Use _RefTID as FID. References TID of attribute table.
+              feature->SetFID(atol(feature->GetFieldAsString(1)));
+            } else {
+              // USE _TID as FID. TODO: respect IDENT field from model
+              feature->SetFID(atol(feature->GetFieldAsString(0)));
+            }
           }
           curLayer->AddFeature(feature);
           geomIdx = -1; //Reset
@@ -363,7 +369,8 @@ int ILI1Reader::ReadTable(CPL_UNUSED const char *layername) {
       else if (EQUAL(firsttok, "STPT"))
       {
         //Find next non-Point geometry
-        do { geomIdx++; } while (geomIdx < featureDef->GetGeomFieldCount() && featureDef->GetGeomFieldDefn(geomIdx)->GetType() == wkbPoint);
+        if (geomIdx < 0) geomIdx = 0;
+        while (geomIdx < featureDef->GetGeomFieldCount() && featureDef->GetGeomFieldDefn(geomIdx)->GetType() == wkbPoint) { geomIdx++; }
         OGRwkbGeometryType geomType = (geomIdx < featureDef->GetGeomFieldCount()) ? featureDef->GetGeomFieldDefn(geomIdx)->GetType() : wkbNone;
         ReadGeom(tokens, geomIdx, geomType, feature);
         if (EQUAL(featureDef->GetFieldDefn(featureDef->GetFieldCount()-1)->GetNameRef(), "ILI_Geometry"))
@@ -417,9 +424,13 @@ void ILI1Reader::ReadGeom(char **stgeom, int geomIdx, OGRwkbGeometryType eType, 
     OGRPoint ogrPoint, arcPoint, endPoint; //points for arc interpolation
     OGRMultiLineString *ogrMultiLine = NULL; //current multi line
 
-    //CPLDebug( "OGR_ILI", "ILI1Reader::ReadGeom geomIdx: %d", geomIdx);
+    //CPLDebug( "OGR_ILI", "ILI1Reader::ReadGeom geomIdx: %d OGRGeometryType: %s", geomIdx, OGRGeometryTypeToName(eType));
+    if (eType == wkbNone)
+    {
+      CPLError(CE_Warning, CPLE_AppDefined, "Calling ILI1Reader::ReadGeom with wkbNone" );
+    }
     //tokens = ["STPT", "1111", "22222"]
-    ogrPoint.setX(atof(stgeom[1])); ogrPoint.setY(atof(stgeom[2]));
+    ogrPoint.setX(CPLAtof(stgeom[1])); ogrPoint.setY(CPLAtof(stgeom[2]));
     ogrLine = (eType == wkbPolygon) ? new OGRLinearRing() : new OGRLineString();
     ogrLine->addPoint(&ogrPoint);
 
@@ -468,16 +479,16 @@ void ILI1Reader::ReadGeom(char **stgeom, int geomIdx, OGRwkbGeometryType eType, 
       if (EQUAL(firsttok, "LIPT"))
       {
         if (isArc) {
-          endPoint.setX(atof(tokens[1])); endPoint.setY(atof(tokens[2]));
+          endPoint.setX(CPLAtof(tokens[1])); endPoint.setY(CPLAtof(tokens[2]));
           interpolateArc(ogrLine, &ogrPoint, &arcPoint, &endPoint, arcIncr);
         }
-        ogrPoint.setX(atof(tokens[1])); ogrPoint.setY(atof(tokens[2])); isArc = FALSE;
+        ogrPoint.setX(CPLAtof(tokens[1])); ogrPoint.setY(CPLAtof(tokens[2])); isArc = FALSE;
         ogrLine->addPoint(&ogrPoint);
       }
       else if (EQUAL(firsttok, "ARCP"))
       {
         isArc = TRUE;
-        arcPoint.setX(atof(tokens[1])); arcPoint.setY(atof(tokens[2]));
+        arcPoint.setX(CPLAtof(tokens[1])); arcPoint.setY(CPLAtof(tokens[2]));
       }
       else if (EQUAL(firsttok, "ELIN"))
       {

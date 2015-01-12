@@ -40,7 +40,7 @@ compressed tiles.<p>
 
 To be able to read and write JPEG images with 12-bit sample, you can build GDAL
 with its internal libjpeg (based on IJG libjpeg-6b, with additional changes for 12-bit
-sample support), or explicitely pass --with-jpeg12=yes to configure script when building
+sample support), or explicitly pass --with-jpeg12=yes to configure script when building
 with external libjpeg. See <a href="http://trac.osgeo.org/gdal/wiki/TIFF12BitJPEG">
 "8 and 12 bit JPEG in TIFF"</a> wiki page for more details.<p>
 
@@ -117,6 +117,10 @@ versions prior to libjpeg 9.<p>
 
 <li> <b>SOURCE_ICC_PROFILE=value</b>: (Starting with GDAL 1.11).
 ICC profile encoded in Base64.<p>
+
+<li> <b>COMMENT=string</b>: (Starting with GDAL 2.0). String to embed in a
+comment JPEG marker. When reading, such strings are exposed in the COMMENT
+metadata item.<p>
 
 <li> <b>EXIF_THUMBNAIL=YES/NO</b>: (Starting with GDAL 2.0). Whether to generate
 an EXIF thumbnail(overview), itself JPEG compressed. Defaults to NO. If enabled,

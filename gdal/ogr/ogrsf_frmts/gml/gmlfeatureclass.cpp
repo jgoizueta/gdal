@@ -30,8 +30,10 @@
 
 #include "gmlreader.h"
 #include "cpl_conv.h"
+#include "cpl_string.h"
 #include "ogr_core.h"
 #include "ogr_geometry.h"
+#include "cpl_string.h"
 
 /************************************************************************/
 /*                          GMLFeatureClass()                           */
@@ -55,7 +57,7 @@ GMLFeatureClass::GMLFeatureClass( const char *pszName )
     m_nFeatureCount = -1; // unknown
 
     m_pszSRSName = NULL;
-    m_bSRSNameConsistant = TRUE;
+    m_bSRSNameConsistent = TRUE;
 }
 
 /************************************************************************/
@@ -355,7 +357,7 @@ int GMLFeatureClass::GetExtents( double *pdfXMin, double *pdfXMax,
 void GMLFeatureClass::SetSRSName( const char* pszSRSName )
 
 {
-    m_bSRSNameConsistant = TRUE;
+    m_bSRSNameConsistent = TRUE;
     CPLFree(m_pszSRSName);
     m_pszSRSName = (pszSRSName) ? CPLStrdup(pszSRSName) : NULL;
 }
@@ -367,7 +369,7 @@ void GMLFeatureClass::SetSRSName( const char* pszSRSName )
 void GMLFeatureClass::MergeSRSName( const char* pszSRSName )
 
 {
-    if(!m_bSRSNameConsistant)
+    if(!m_bSRSNameConsistent)
         return;
 
     if( m_pszSRSName == NULL )
@@ -377,9 +379,9 @@ void GMLFeatureClass::MergeSRSName( const char* pszSRSName )
     }
     else
     {
-        m_bSRSNameConsistant = pszSRSName != NULL &&
+        m_bSRSNameConsistent = pszSRSName != NULL &&
                                   strcmp(m_pszSRSName, pszSRSName) == 0;
-        if (!m_bSRSNameConsistant)
+        if (!m_bSRSNameConsistent)
         {
             CPLFree(m_pszSRSName);
             m_pszSRSName = NULL;
@@ -449,8 +451,8 @@ int GMLFeatureClass::InitializeFromXML( CPLXMLNode *psRoot )
             if( pszType != NULL && !EQUAL(pszType, "0") )
             {
                 nGeomType = atoi(pszType);
-                int nFlattenGeomType = nGeomType & (~wkb25DBit);
-                if( nGeomType != 0 && !(nFlattenGeomType >= 0 && nFlattenGeomType <= 7) )
+                OGRwkbGeometryType nFlattenGeomType = wkbFlatten(nGeomType);
+                if( nGeomType != 0 && !(nFlattenGeomType >= wkbPoint && nFlattenGeomType <= wkbMultiSurface) )
                 {
                     nGeomType = wkbUnknown;
                     CPLError(CE_Warning, CPLE_AppDefined, "Unrecognised geometry type : %s",
@@ -521,14 +523,14 @@ int GMLFeatureClass::InitializeFromXML( CPLXMLNode *psRoot )
             if( pszGeometryType != NULL && !EQUAL(pszGeometryType, "0") )
             {
                 nGeomType = atoi(pszGeometryType);
-                int nFlattenGeomType = nGeomType & (~wkb25DBit);
+                OGRwkbGeometryType nFlattenGeomType = wkbFlatten(nGeomType);
                 if( nGeomType == 100 || EQUAL(pszGeometryType, "NONE") )
                 {
                     bHasValidGeometryElementPath = FALSE;
                     bHasFoundGeomType = FALSE;
                     break;
                 }
-                else if( nGeomType != 0 && !(nFlattenGeomType >= 0 && nFlattenGeomType <= 7) )
+                else if( nGeomType != 0 && !(nFlattenGeomType >= wkbPoint && nFlattenGeomType <= wkbMultiSurface) )
                 {
                     nGeomType = wkbUnknown;
                     CPLError(CE_Warning, CPLE_AppDefined, "Unrecognised geometry type : %s",
@@ -590,6 +592,7 @@ int GMLFeatureClass::InitializeFromXML( CPLXMLNode *psRoot )
         {
             const char *pszName = CPLGetXMLValue( psThis, "Name", NULL );
             const char *pszType = CPLGetXMLValue( psThis, "Type", "Untyped" );
+            const char *pszSubType = CPLGetXMLValue( psThis, "Subtype", "" );
             const char *pszCondition = CPLGetXMLValue( psThis, "Condition", NULL );
             GMLPropertyDefn *poPDefn;
 
@@ -608,22 +611,49 @@ int GMLFeatureClass::InitializeFromXML( CPLXMLNode *psRoot )
                 poPDefn->SetType( GMLPT_Untyped );
             else if( EQUAL(pszType,"String") ) 
             {
-                poPDefn->SetType( GMLPT_String );
-                poPDefn->SetWidth( atoi( CPLGetXMLValue( psThis, "Width", "0" ) ) );
+                if( EQUAL(pszSubType, "Boolean") )
+                {
+                    poPDefn->SetType( GMLPT_Boolean );
+                    poPDefn->SetWidth( 1 );
+                }
+                else
+                {
+                    poPDefn->SetType( GMLPT_String );
+                    poPDefn->SetWidth( atoi( CPLGetXMLValue( psThis, "Width", "0" ) ) );
+                }
             }
             else if( EQUAL(pszType,"Integer") )
             {
-                poPDefn->SetType( GMLPT_Integer );
+                if( EQUAL(pszSubType, "Short") )
+                {
+                    poPDefn->SetType( GMLPT_Short );
+                }
+                else
+                {
+                    poPDefn->SetType( GMLPT_Integer );
+                }
                 poPDefn->SetWidth( atoi( CPLGetXMLValue( psThis, "Width", "0" ) ) );
             }
             else if( EQUAL(pszType,"Real") )
             {
-                poPDefn->SetType( GMLPT_Real );
+                if( EQUAL(pszSubType, "Float") )
+                {
+                    poPDefn->SetType( GMLPT_Float );
+                }
+                else
+                {
+                    poPDefn->SetType( GMLPT_Real );
+                }
                 poPDefn->SetWidth( atoi( CPLGetXMLValue( psThis, "Width", "0" ) ) );
                 poPDefn->SetPrecision( atoi( CPLGetXMLValue( psThis, "Precision", "0" ) ) );
             }
             else if( EQUAL(pszType,"StringList") ) 
-                poPDefn->SetType( GMLPT_StringList );
+            {
+                if( EQUAL(pszSubType, "Boolean") )
+                    poPDefn->SetType( GMLPT_BooleanList );
+                else
+                    poPDefn->SetType( GMLPT_StringList );
+            }
             else if( EQUAL(pszType,"IntegerList") )
                 poPDefn->SetType( GMLPT_IntegerList );
             else if( EQUAL(pszType,"RealList") )
@@ -686,7 +716,13 @@ CPLXMLNode *GMLFeatureClass::SerializeToXML()
         {
             char szValue[128];
 
-            sprintf( szValue, "%d", poGeomFDefn->GetType() );
+            OGRwkbGeometryType eType = (OGRwkbGeometryType)poGeomFDefn->GetType();
+
+            CPLString osStr(OGRToOGCGeomType(eType));
+            if( wkbHasZ(eType) ) osStr += "Z";
+            CPLCreateXMLNode( psRoot, CXT_Comment, osStr.c_str() );
+
+            sprintf( szValue, "%d", eType );
             CPLCreateXMLElementAndValue( psRoot, "GeometryType", szValue );
         }
     }
@@ -726,16 +762,16 @@ CPLXMLNode *GMLFeatureClass::SerializeToXML()
         {
             char szValue[128];
 
-            snprintf( szValue, sizeof(szValue), "%.5f", m_dfXMin );
+            CPLsnprintf( szValue, sizeof(szValue), "%.5f", m_dfXMin );
             CPLCreateXMLElementAndValue( psDSI, "ExtentXMin", szValue );
 
-            snprintf( szValue, sizeof(szValue), "%.5f", m_dfXMax );
+            CPLsnprintf( szValue, sizeof(szValue), "%.5f", m_dfXMax );
             CPLCreateXMLElementAndValue( psDSI, "ExtentXMax", szValue );
 
-            snprintf( szValue, sizeof(szValue), "%.5f", m_dfYMin );
+            CPLsnprintf( szValue, sizeof(szValue), "%.5f", m_dfYMin );
             CPLCreateXMLElementAndValue( psDSI, "ExtentYMin", szValue );
 
-            snprintf( szValue, sizeof(szValue), "%.5f", m_dfYMax );
+            CPLsnprintf( szValue, sizeof(szValue), "%.5f", m_dfYMax );
             CPLCreateXMLElementAndValue( psDSI, "ExtentYMax", szValue );
         }
 
@@ -764,14 +800,17 @@ CPLXMLNode *GMLFeatureClass::SerializeToXML()
             break;
             
           case GMLPT_String:
+          case GMLPT_Boolean:
             pszTypeName = "String";
             break;
             
           case GMLPT_Integer:
+          case GMLPT_Short:
             pszTypeName = "Integer";
             break;
             
           case GMLPT_Real:
+          case GMLPT_Float:
             pszTypeName = "Real";
             break;
             
@@ -788,6 +827,7 @@ CPLXMLNode *GMLFeatureClass::SerializeToXML()
             break;
 
           case GMLPT_StringList:
+          case GMLPT_BooleanList:
             pszTypeName = "StringList";
             break;
 
@@ -804,6 +844,12 @@ CPLXMLNode *GMLFeatureClass::SerializeToXML()
             break;
         }
         CPLCreateXMLElementAndValue( psPDefnNode, "Type", pszTypeName );
+        if( poPDefn->GetType() == GMLPT_Boolean || poPDefn->GetType() == GMLPT_BooleanList )
+            CPLCreateXMLElementAndValue( psPDefnNode, "Subtype", "Boolean" );
+        else if( poPDefn->GetType() == GMLPT_Short )
+            CPLCreateXMLElementAndValue( psPDefnNode, "Subtype", "Short" );
+        else if( poPDefn->GetType() == GMLPT_Float )
+            CPLCreateXMLElementAndValue( psPDefnNode, "Subtype", "Float" );
 
         if( EQUAL(pszTypeName,"String") )
         {

@@ -67,15 +67,15 @@ OGRFeatureDefn *OGRSOSILayer::GetLayerDefn() {
 /************************************************************************/
 /*                           CreateField()                              */
 /************************************************************************/
-OGRErr OGRSOSILayer::CreateField (OGRFieldDefn *poField, int bApproxOK) {
+OGRErr OGRSOSILayer::CreateField (OGRFieldDefn *poField, CPL_UNUSED int bApproxOK) {
     poFeatureDefn->AddFieldDefn( poField );
     return OGRERR_NONE; /* We'll just gladly accept any "field" we find */
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
-OGRErr OGRSOSILayer::CreateFeature(OGRFeature *poFeature) {
+OGRErr OGRSOSILayer::ICreateFeature(OGRFeature *poFeature) {
     short nNavn;
     long nSerial;
     

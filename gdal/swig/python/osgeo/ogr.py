@@ -76,8 +76,18 @@ wkbMultiPoint = _ogr.wkbMultiPoint
 wkbMultiLineString = _ogr.wkbMultiLineString
 wkbMultiPolygon = _ogr.wkbMultiPolygon
 wkbGeometryCollection = _ogr.wkbGeometryCollection
+wkbCircularString = _ogr.wkbCircularString
+wkbCompoundCurve = _ogr.wkbCompoundCurve
+wkbCurvePolygon = _ogr.wkbCurvePolygon
+wkbMultiCurve = _ogr.wkbMultiCurve
+wkbMultiSurface = _ogr.wkbMultiSurface
 wkbNone = _ogr.wkbNone
 wkbLinearRing = _ogr.wkbLinearRing
+wkbCircularStringZ = _ogr.wkbCircularStringZ
+wkbCompoundCurveZ = _ogr.wkbCompoundCurveZ
+wkbCurvePolygonZ = _ogr.wkbCurvePolygonZ
+wkbMultiCurveZ = _ogr.wkbMultiCurveZ
+wkbMultiSurfaceZ = _ogr.wkbMultiSurfaceZ
 wkbPoint25D = _ogr.wkbPoint25D
 wkbLineString25D = _ogr.wkbLineString25D
 wkbPolygon25D = _ogr.wkbPolygon25D
@@ -97,6 +107,10 @@ OFTBinary = _ogr.OFTBinary
 OFTDate = _ogr.OFTDate
 OFTTime = _ogr.OFTTime
 OFTDateTime = _ogr.OFTDateTime
+OFSTNone = _ogr.OFSTNone
+OFSTBoolean = _ogr.OFSTBoolean
+OFSTInt16 = _ogr.OFSTInt16
+OFSTFloat32 = _ogr.OFSTFloat32
 OJUndefined = _ogr.OJUndefined
 OJLeft = _ogr.OJLeft
 OJRight = _ogr.OJRight
@@ -123,9 +137,11 @@ OLCFastSetNextByIndex = _ogr.OLCFastSetNextByIndex
 OLCStringsAsUTF8 = _ogr.OLCStringsAsUTF8
 OLCIgnoreFields = _ogr.OLCIgnoreFields
 OLCCreateGeomField = _ogr.OLCCreateGeomField
+OLCCurveGeometries = _ogr.OLCCurveGeometries
 ODsCCreateLayer = _ogr.ODsCCreateLayer
 ODsCDeleteLayer = _ogr.ODsCDeleteLayer
 ODsCCreateGeomFieldAfterCreateLayer = _ogr.ODsCCreateGeomFieldAfterCreateLayer
+ODsCCurveGeometries = _ogr.ODsCCurveGeometries
 ODrCCreateDataSource = _ogr.ODrCCreateDataSource
 ODrCDeleteDataSource = _ogr.ODrCDeleteDataSource
 
@@ -140,6 +156,81 @@ def UseExceptions(*args):
 def DontUseExceptions(*args):
   """DontUseExceptions()"""
   return _ogr.DontUseExceptions(*args)
+# Backup original dictionnary before doing anything else
+_initial_dict = globals().copy()
+
+@property
+def wkb25Bit(module):
+    import warnings
+    warnings.warn("ogr.wkb25DBit deprecated: use ogr.GT_Flatten(), ogr.GT_HasZ() or ogr.GT_SetZ() instead", DeprecationWarning)
+    return module._initial_dict['wkb25DBit']
+
+@property
+def wkb25DBit(module):
+    import warnings
+    warnings.warn("ogr.wkb25DBit deprecated: use ogr.GT_Flatten(), ogr.GT_HasZ() or ogr.GT_SetZ() instead", DeprecationWarning)
+    return module._initial_dict['wkb25DBit']
+
+# Inspired from http://www.dr-josiah.com/2013/12/properties-on-python-modules.html
+class _Module(object):
+    def __init__(self):
+        self.__dict__ = globals()
+        self._initial_dict = _initial_dict
+
+        # Transfer properties from the object to the Class
+        for k, v in list(self.__dict__.items()):
+            if isinstance(v, property):
+                setattr(self.__class__, k, v)
+                #del self.__dict__[k]
+
+        # Replace original module by our object
+        import sys
+        self._original_module = sys.modules[self.__name__]
+        sys.modules[self.__name__] = self
+
+# Custom help() replacement to display the help of the original module
+# instead of the one of our instance object
+class _MyHelper(object):
+
+    def __init__(self, module):
+        self.module = module
+        self.original_help = help
+
+        # Replace builtin help by ours
+        try:
+            import __builtin__ as builtins # Python 2
+        except ImportError:
+            import builtins # Python 3
+        builtins.help = self
+
+    def __repr__(self):
+        return self.original_help.__repr__()
+
+    def __call__(self, *args, **kwds):
+
+        if args == (self.module,):
+            import sys
+
+            # Restore original module before calling help() otherwise
+            # we don't get methods or classes mentionned
+            sys.modules[self.module.__name__] = self.module._original_module
+
+            ret = self.original_help(self.module._original_module, **kwds)
+
+            # Reinstall our module
+            sys.modules[self.module.__name__] = self.module
+
+            return ret
+        elif args == (self,):
+            return self.original_help(self.original_help, **kwds)
+        else:
+            return self.original_help(*args, **kwds)
+
+_MyHelper(_Module())
+del _MyHelper
+del _Module
+
+
 import osr
 import gdal
 class StyleTable(_object):
@@ -742,7 +833,7 @@ class DataSource(gdal.MajorObject):
 
         pszDialect:  allows control of the statement dialect. If set to NULL,
         the OGR SQL engine will be used, except for RDBMS drivers that will
-        use their dedicated SQL engine, unless OGRSQL is explicitely passed as
+        use their dedicated SQL engine, unless OGRSQL is explicitly passed as
         the dialect.
 
         an handle to a OGRLayer containing the results of the query.
@@ -2032,12 +2123,12 @@ class Layer(gdal.MajorObject):
         """Returns the number of features in the layer"""
         return self.GetFeatureCount()
 
-
-
+    # To avoid __len__ being called when testing boolean value
+    # which can have side effects (#4758)
     def __nonzero__(self):
         return True
 
-
+    # For Python 3 compat
     __bool__ = __nonzero__
 
     def __getitem__(self, value):
@@ -2048,9 +2139,9 @@ class Layer(gdal.MajorObject):
             import sys
             output = []
             if value.stop == sys.maxint:
-                
-                
-                
+                #for an unending slice, sys.maxint is used
+                #We need to stop before that or GDAL will write an
+                ##error to stdout
                 stop = len(self) - 1
             else:
                 stop = value.stop
@@ -2554,6 +2645,35 @@ class Feature(_object):
         """
         return _ogr.Feature_GetFieldAsStringList(self, *args)
 
+    def GetFieldAsBinary(self, *args):
+        """
+        GetFieldAsBinary(self, int id) -> OGRErr
+        GetFieldAsBinary(self, char name) -> OGRErr
+
+        GByte*
+        OGR_F_GetFieldAsBinary(OGRFeatureH hFeat, int iField, int *pnBytes)
+
+        Fetch field value as binary.
+
+        Currently this method only works for OFTBinary fields.
+
+        This function is the same as the C++ method
+        OGRFeature::GetFieldAsBinary().
+
+        Parameters:
+        -----------
+
+        hFeat:  handle to the feature that owned the field.
+
+        iField:  the field to fetch, from 0 to GetFieldCount()-1.
+
+        pnBytes:  location to place count of bytes returned.
+
+        the field value. This list is internal, and should not be modified, or
+        freed. Its lifetime may be very brief. 
+        """
+        return _ogr.Feature_GetFieldAsBinary(self, *args)
+
     def IsFieldSet(self, *args):
         """
         IsFieldSet(self, int id) -> bool
@@ -2933,6 +3053,33 @@ class Feature(_object):
         """
         return _ogr.Feature_GetFieldType(self, *args)
 
+    def SetFieldString(self, *args):
+        """
+        SetFieldString(self, int id, char value)
+
+        void
+        OGR_F_SetFieldString(OGRFeatureH hFeat, int iField, const char
+        *pszValue)
+
+        Set field to string value.
+
+        OFTInteger fields will be set based on an atoi() conversion of the
+        string. OFTReal fields will be set based on an atof() conversion of
+        the string. Other field types may be unaffected.
+
+        This function is the same as the C++ method OGRFeature::SetField().
+
+        Parameters:
+        -----------
+
+        hFeat:  handle to the feature that owned the field.
+
+        iField:  the field to fetch, from 0 to GetFieldCount()-1.
+
+        pszValue:  the value to assign. 
+        """
+        return _ogr.Feature_SetFieldString(self, *args)
+
     def Reference(self):
       pass
 
@@ -2951,8 +3098,8 @@ class Feature(_object):
     def __copy__(self):
         return self.Clone()
 
-
-
+    # This makes it possible to fetch fields in the form "feature.area". 
+    # This has some risk of name collisions.
     def __getattr__(self, key):
         """Returns the values of fields by the given name"""
         if key == 'this':
@@ -2968,8 +3115,8 @@ class Feature(_object):
         else:
             return self.GetField(idx)
 
-
-
+    # This makes it possible to set fields in the form "feature.area". 
+    # This has some risk of name collisions.
     def __setattr__(self, key, value):
         """Set the values of fields by the given name"""
         if key == 'this' or key == 'thisown':
@@ -2985,7 +3132,7 @@ class Feature(_object):
                 else:
                     self.__dict__[key] = value
 
-
+    # This makes it possible to fetch fields in the form "feature['area']". 
     def __getitem__(self, key):
         """Returns the values of fields by the given name / field_index"""
         if isinstance(key, str):
@@ -3000,7 +3147,7 @@ class Feature(_object):
         else:
             return self.GetField(fld_index)
 
-
+    # This makes it possible to set fields in the form "feature['area'] = 123". 
     def __setitem__(self, key, value):
         """Returns the value of a field by field name / index"""
         if isinstance(key, str):
@@ -3033,10 +3180,34 @@ class Feature(_object):
             return self.GetFieldAsIntegerList(fld_index)
         if fld_type == OFTRealList:
             return self.GetFieldAsDoubleList(fld_index)
-        
-        
-        
+        ## if fld_type == OFTDateTime or fld_type == OFTDate or fld_type == OFTTime:
+        #     return self.GetFieldAsDate(fld_index)
+        # default to returning as a string.  Should we add more types?
         return self.GetFieldAsString(fld_index)
+
+    # With several override, SWIG cannot dispatch automatically unicode strings
+    # to the right implementation, so we have to do it at hand
+    def SetField(self, *args):
+        """
+        SetField(self, int id, char value)
+        SetField(self, char name, char value)
+        SetField(self, int id, int value)
+        SetField(self, char name, int value)
+        SetField(self, int id, double value)
+        SetField(self, char name, double value)
+        SetField(self, int id, int year, int month, int day, int hour, int minute, 
+            int second, int tzflag)
+        SetField(self, char name, int year, int month, int day, int hour, 
+            int minute, int second, int tzflag)
+        """
+
+        if len(args) == 2 and str(type(args[1])) == "<type 'unicode'>":
+            fld_index = args[0]
+            if isinstance(fld_index, str):
+                fld_index = self.GetFieldIndex(fld_index)
+            return _ogr.Feature_SetFieldString(self, fld_index, args[1])
+
+        return _ogr.Feature_SetField(self, *args)
 
     def SetField2(self, fld_index, value):
         if isinstance(fld_index, str):
@@ -3563,6 +3734,14 @@ class FieldDefn(_object):
         """
         return _ogr.FieldDefn_SetType(self, *args)
 
+    def GetSubType(self, *args):
+        """GetSubType(self) -> OGRFieldSubType"""
+        return _ogr.FieldDefn_GetSubType(self, *args)
+
+    def SetSubType(self, *args):
+        """SetSubType(self, OGRFieldSubType type)"""
+        return _ogr.FieldDefn_SetSubType(self, *args)
+
     def GetJustify(self, *args):
         """
         GetJustify(self) -> OGRJustification
@@ -3861,6 +4040,10 @@ def ForceToMultiPoint(*args):
 def ForceToMultiLineString(*args):
   """ForceToMultiLineString(Geometry geom_in) -> Geometry"""
   return _ogr.ForceToMultiLineString(*args)
+
+def ForceTo(*args):
+  """ForceTo(Geometry geom_in, OGRwkbGeometryType eTargetType, char options = None) -> Geometry"""
+  return _ogr.ForceTo(*args)
 class Geometry(_object):
     """Proxy of C++ OGRGeometryShadow class"""
     __swig_setmethods__ = {}
@@ -3904,6 +4087,10 @@ class Geometry(_object):
         """
         return _ogr.Geometry_ExportToWkt(self, *args)
 
+    def ExportToIsoWkt(self, *args):
+        """ExportToIsoWkt(self) -> OGRErr"""
+        return _ogr.Geometry_ExportToIsoWkt(self, *args)
+
     def ExportToWkb(self, *args, **kwargs):
         """
         ExportToWkb(self, OGRwkbByteOrder byte_order = wkbXDR) -> OGRErr
@@ -3934,6 +4121,10 @@ class Geometry(_object):
         Currently OGRERR_NONE is always returned. 
         """
         return _ogr.Geometry_ExportToWkb(self, *args, **kwargs)
+
+    def ExportToIsoWkb(self, *args, **kwargs):
+        """ExportToIsoWkb(self, OGRwkbByteOrder byte_order = wkbXDR) -> OGRErr"""
+        return _ogr.Geometry_ExportToIsoWkb(self, *args, **kwargs)
 
     def ExportToGML(self, *args, **kwargs):
         """ExportToGML(self, char options = None) -> retStringAndCPLFree"""
@@ -5189,6 +5380,22 @@ class Geometry(_object):
         """
         return _ogr.Geometry_GetDimension(self, *args)
 
+    def HasCurveGeometry(self, *args):
+        """HasCurveGeometry(self, int bLookForCircular = True) -> int"""
+        return _ogr.Geometry_HasCurveGeometry(self, *args)
+
+    def GetLinearGeometry(self, *args, **kwargs):
+        """GetLinearGeometry(self, double dfMaxAngleStepSizeDegrees = 0.0, char options = None) -> Geometry"""
+        return _ogr.Geometry_GetLinearGeometry(self, *args, **kwargs)
+
+    def GetCurveGeometry(self, *args, **kwargs):
+        """GetCurveGeometry(self, char options = None) -> Geometry"""
+        return _ogr.Geometry_GetCurveGeometry(self, *args, **kwargs)
+
+    def Value(self, *args):
+        """Value(self, double dfDistance) -> Geometry"""
+        return _ogr.Geometry_Value(self, *args)
+
     def Destroy(self):
       self.__swig_destroy__(self) 
       self.__del__()
@@ -5244,6 +5451,62 @@ def GeometryTypeToName(*args):
 def GetFieldTypeName(*args):
   """GetFieldTypeName(OGRFieldType type) -> char"""
   return _ogr.GetFieldTypeName(*args)
+
+def GetFieldSubTypeName(*args):
+  """GetFieldSubTypeName(OGRFieldSubType type) -> char"""
+  return _ogr.GetFieldSubTypeName(*args)
+
+def GT_Flatten(*args):
+  """GT_Flatten(OGRwkbGeometryType eType) -> OGRwkbGeometryType"""
+  return _ogr.GT_Flatten(*args)
+
+def GT_SetZ(*args):
+  """GT_SetZ(OGRwkbGeometryType eType) -> OGRwkbGeometryType"""
+  return _ogr.GT_SetZ(*args)
+
+def GT_SetModifier(*args):
+  """GT_SetModifier(OGRwkbGeometryType eType, int bSetZ, int bSetM = True) -> OGRwkbGeometryType"""
+  return _ogr.GT_SetModifier(*args)
+
+def GT_HasZ(*args):
+  """GT_HasZ(OGRwkbGeometryType eType) -> int"""
+  return _ogr.GT_HasZ(*args)
+
+def GT_IsSubClassOf(*args):
+  """GT_IsSubClassOf(OGRwkbGeometryType eType, OGRwkbGeometryType eSuperType) -> int"""
+  return _ogr.GT_IsSubClassOf(*args)
+
+def GT_IsCurve(*args):
+  """GT_IsCurve(OGRwkbGeometryType arg0) -> int"""
+  return _ogr.GT_IsCurve(*args)
+
+def GT_IsSurface(*args):
+  """GT_IsSurface(OGRwkbGeometryType arg0) -> int"""
+  return _ogr.GT_IsSurface(*args)
+
+def GT_IsNonLinear(*args):
+  """GT_IsNonLinear(OGRwkbGeometryType arg0) -> int"""
+  return _ogr.GT_IsNonLinear(*args)
+
+def GT_GetCollection(*args):
+  """GT_GetCollection(OGRwkbGeometryType eType) -> OGRwkbGeometryType"""
+  return _ogr.GT_GetCollection(*args)
+
+def GT_GetCurve(*args):
+  """GT_GetCurve(OGRwkbGeometryType eType) -> OGRwkbGeometryType"""
+  return _ogr.GT_GetCurve(*args)
+
+def GT_GetLinear(*args):
+  """GT_GetLinear(OGRwkbGeometryType eType) -> OGRwkbGeometryType"""
+  return _ogr.GT_GetLinear(*args)
+
+def SetNonLinearGeometriesEnabledFlag(*args):
+  """SetNonLinearGeometriesEnabledFlag(int bFlag)"""
+  return _ogr.SetNonLinearGeometriesEnabledFlag(*args)
+
+def GetNonLinearGeometriesEnabledFlag(*args):
+  """GetNonLinearGeometriesEnabledFlag() -> int"""
+  return _ogr.GetNonLinearGeometriesEnabledFlag(*args)
 
 def GetOpenDS(*args):
   """GetOpenDS(int ds_number) -> DataSource"""

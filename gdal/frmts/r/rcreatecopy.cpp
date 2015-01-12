@@ -183,14 +183,14 @@ RCreateCopy( const char * pszFilename,
 
             eErr = poBand->RasterIO( GF_Read, 0, iLine, nXSize, 1, 
                                      padfScanline, nXSize, 1, GDT_Float64,
-                                     sizeof(double), 0 );
+                                     sizeof(double), 0, NULL );
 
             if( bASCII )
             {
                 for( iValue = 0; iValue < nXSize; iValue++ )
                 {
                     char szValue[128];
-                    sprintf(szValue,"%.16g\n", padfScanline[iValue] );
+                    CPLsprintf(szValue,"%.16g\n", padfScanline[iValue] );
                     VSIFWriteL( szValue, 1, strlen(szValue), fp );
                 }
             }

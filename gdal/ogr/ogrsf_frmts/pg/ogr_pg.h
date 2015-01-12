@@ -36,6 +36,7 @@
 #include "cpl_string.h"
 
 #include "ogrpgutility.h"
+#include "ogr_pgdump.h"
 
 /* These are the OIDs for some builtin types, as returned by PQftype(). */
 /* They were copied from pg_type.h in src/include/catalog/pg_type.h */
@@ -57,6 +58,7 @@
 #define OIDVECTOROID            30
 #define FLOAT4OID               700
 #define FLOAT8OID               701
+#define BOOLARRAYOID            1000
 #define INT4ARRAYOID            1007
 #define TEXTARRAYOID            1009
 #define BPCHARARRAYOID          1014
@@ -159,12 +161,13 @@ class OGRPGLayer : public OGRLayer
   protected:
     OGRPGFeatureDefn   *poFeatureDefn;
 
+    int                 nCursorPage;
     int                 iNextShapeId;
 
     static char        *GByteArrayToBYTEA( const GByte* pabyData, int nLen);
-    static char        *GeometryToBYTEA( OGRGeometry * );
+    static char        *GeometryToBYTEA( OGRGeometry *, int bIsPostGIS1 );
     static GByte       *BYTEAToGByteArray( const char *pszBytea, int* pnLength );
-    static OGRGeometry *BYTEAToGeometry( const char * );
+    static OGRGeometry *BYTEAToGeometry( const char *, int bIsPostGIS1 );
     Oid                 GeometryToOID( OGRGeometry * );
     OGRGeometry        *OIDToGeometry( Oid );
 
@@ -192,7 +195,7 @@ class OGRPGLayer : public OGRLayer
 
     virtual CPLString   GetFromClauseForGetExtent() = 0;
     OGRErr              RunGetExtentRequest( OGREnvelope *psExtent, int bForce,
-                                             CPLString osCommand);
+                                             CPLString osCommand, int bErrorAsDebug );
     void                CreateMapFromFieldNameToIndex();
 
     int                 ReadResultDefinition(PGresult *hInitialResultIn);
@@ -313,9 +316,9 @@ public:
 
     virtual OGRErr      SetAttributeFilter( const char * );
 
-    virtual OGRErr      SetFeature( OGRFeature *poFeature );
+    virtual OGRErr      ISetFeature( OGRFeature *poFeature );
     virtual OGRErr      DeleteFeature( long nFID );
-    virtual OGRErr      CreateFeature( OGRFeature *poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
 
     virtual OGRErr      CreateField( OGRFieldDefn *poField,
                                      int bApproxOK = TRUE );

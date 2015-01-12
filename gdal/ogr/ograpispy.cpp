@@ -241,8 +241,18 @@ static CPLString OGRAPISpyGetGeomType(OGRwkbGeometryType eType)
         casePrefixOgrDot(wkbMultiLineString)
         casePrefixOgrDot(wkbMultiPolygon)
         casePrefixOgrDot(wkbGeometryCollection)
+        casePrefixOgrDot(wkbCircularString)
+        casePrefixOgrDot(wkbCompoundCurve)
+        casePrefixOgrDot(wkbCurvePolygon)
+        casePrefixOgrDot(wkbMultiCurve)
+        casePrefixOgrDot(wkbMultiSurface)
         casePrefixOgrDot(wkbNone)
         casePrefixOgrDot(wkbLinearRing)
+        casePrefixOgrDot(wkbCircularStringZ)
+        casePrefixOgrDot(wkbCompoundCurveZ)
+        casePrefixOgrDot(wkbCurvePolygonZ)
+        casePrefixOgrDot(wkbMultiCurveZ)
+        casePrefixOgrDot(wkbMultiSurfaceZ)
         casePrefixOgrDot(wkbPoint25D)
         casePrefixOgrDot(wkbLineString25D)
         casePrefixOgrDot(wkbPolygon25D)
@@ -511,7 +521,7 @@ void OGRAPISpy_DS_CreateLayer( OGRDataSourceH hDS,
     OGRAPISpyFileClose();
 }
 
-void OGRAPISpy_DS_DeleteLayer( OGRDataSourceH hDS, int iLayer, OGRErr eErr )
+void OGRAPISpy_DS_DeleteLayer( OGRDataSourceH hDS, int iLayer, CPL_UNUSED OGRErr eErr )
 {
     OGRAPISpyFlushDiffered();
     fprintf(fpSpyFile, "%s.DeleteLayer(%d)\n",
@@ -601,8 +611,8 @@ static void OGRAPISpyDumpFeature( OGRLayerH hLayer, OGRFeatureH hFeat )
             {
                 case OFTInteger: fprintf(fpSpyFile, "f.SetField(%d, %d)\n", i,
                     poFeature->GetFieldAsInteger(i)); break;
-                case OFTReal: fprintf(fpSpyFile, "f.SetField(%d, %.16g)\n", i,
-                    poFeature->GetFieldAsDouble(i)); break;
+                case OFTReal: fprintf(fpSpyFile, "%s", CPLSPrintf("f.SetField(%d, %.16g)\n", i,
+                    poFeature->GetFieldAsDouble(i))); break;
                 case OFTString: fprintf(fpSpyFile, "f.SetField(%d, %s)\n", i,
                     OGRAPISpyGetString(poFeature->GetFieldAsString(i)).c_str()); break;
                 default: fprintf(fpSpyFile, "f.SetField(%d, %s) #FIXME\n", i,
@@ -800,9 +810,9 @@ void OGRAPISpy_L_SetSpatialFilterRect( OGRLayerH hLayer,
                                        double dfMaxX, double dfMaxY)
 {
     OGRAPISpyFlushDiffered();
-    fprintf(fpSpyFile, "%s.SetSpatialFilterRect(%.16g, %.16g, %.16g, %.16g)\n",
+    fprintf(fpSpyFile, "%s", CPLSPrintf("%s.SetSpatialFilterRect(%.16g, %.16g, %.16g, %.16g)\n",
             OGRAPISpyGetLayerVar(hLayer).c_str(),
-            dfMinX, dfMinY, dfMaxX, dfMaxY);
+            dfMinX, dfMinY, dfMaxX, dfMaxY));
     OGRAPISpyFileClose();
 }
 
@@ -812,11 +822,11 @@ void OGRAPISpy_L_SetSpatialFilterRectEx( OGRLayerH hLayer, int iGeomField,
 {
 
     OGRAPISpyFlushDiffered();
-    fprintf(fpSpyFile, "%s.SetSpatialFilterRect(%d, "
+    fprintf(fpSpyFile, "%s", CPLSPrintf("%s.SetSpatialFilterRect(%d, "
             "%.16g, %.16g, %.16g, %.16g)\n",
             OGRAPISpyGetLayerVar(hLayer).c_str(),
             iGeomField,
-            dfMinX, dfMinY, dfMaxX, dfMaxY);
+            dfMinX, dfMinY, dfMaxX, dfMaxY));
     OGRAPISpyFileClose();
 }
 

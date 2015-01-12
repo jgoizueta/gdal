@@ -124,6 +124,8 @@ void CPL_STDCALL GDALDestroyDriver( GDALDriverH hDriver )
  * @param nBands number of bands.
  * @param eType type of raster.
  * @param papszOptions list of driver specific control parameters.
+ * The APPEND_SUBDATASET=YES option can be
+ * specified to avoid prior destruction of existing dataset.
  *
  * @return NULL on failure, or a new GDALDataset.
  */
@@ -133,7 +135,7 @@ GDALDataset * GDALDriver::Create( const char * pszFilename,
                                   GDALDataType eType, char ** papszOptions )
 
 {
-    CPLLocaleC  oLocaleForcer;
+    //CPLLocaleC  oLocaleForcer;
 
 /* -------------------------------------------------------------------- */
 /*      Does this format support creation.                              */
@@ -247,6 +249,8 @@ GDALDataset * GDALDriver::Create( const char * pszFilename,
         
         if( poDS->poDriver == NULL )
             poDS->poDriver = this;
+
+        poDS->AddToDatasetOpenList();
     }
 
     return poDS;
@@ -654,7 +658,8 @@ GDALDataset *GDALDriver::DefaultCreateCopy( const char * pszFilename,
  * normally FALSE indicating that the copy may adapt as needed for the 
  * output format. 
  * @param papszOptions additional format dependent options controlling 
- * creation of the output file. 
+ * creation of the output file. The APPEND_SUBDATASET=YES option can be
+ * specified to avoid prior destruction of existing dataset.
  * @param pfnProgress a function to be used to report progress of the copy.
  * @param pProgressData application data passed into progress function.
  *
@@ -668,7 +673,7 @@ GDALDataset *GDALDriver::CreateCopy( const char * pszFilename,
                                      void * pProgressData )
 
 {
-    CPLLocaleC  oLocaleForcer;
+    //CPLLocaleC  oLocaleForcer;
 
     if( pfnProgress == NULL )
         pfnProgress = GDALDummyProgress;
@@ -709,19 +714,38 @@ GDALDataset *GDALDriver::CreateCopy( const char * pszFilename,
 /*      name.  But even if that seems to fail we will continue since    */
 /*      it might just be a corrupt file or something.                   */
 /* -------------------------------------------------------------------- */
-    if( !CSLFetchBoolean(papszOptions, "APPEND_SUBDATASET", FALSE) &&
+    int bAppendSubdataset = CSLFetchBoolean(papszOptions, "APPEND_SUBDATASET", FALSE);
+    if( !bAppendSubdataset &&
         CSLFetchBoolean(papszOptions, "QUIET_DELETE_ON_CREATE_COPY", TRUE) )
         QuietDelete( pszFilename );
 
+    char** papszOptionsToDelete = NULL;
     int iIdxQuietDeleteOnCreateCopy = 
         CSLPartialFindString(papszOptions, "QUIET_DELETE_ON_CREATE_COPY=");
-    char** papszOptionsToDelete = NULL;
     if( iIdxQuietDeleteOnCreateCopy >= 0 )
     {
-        papszOptions = CSLRemoveStrings(CSLDuplicate(papszOptions), iIdxQuietDeleteOnCreateCopy, 1, NULL);
+        if( papszOptionsToDelete == NULL )
+            papszOptionsToDelete = CSLDuplicate(papszOptions);
+        papszOptions = CSLRemoveStrings(papszOptionsToDelete, iIdxQuietDeleteOnCreateCopy, 1, NULL);
         papszOptionsToDelete = papszOptions;
     }
-    
+
+/* -------------------------------------------------------------------- */
+/*      If _INTERNAL_DATASET=YES, the returned dataset will not be      */
+/*      registered in the global list of open datasets.                 */
+/* -------------------------------------------------------------------- */
+    int iIdxInternalDataset =
+        CSLPartialFindString(papszOptions, "_INTERNAL_DATASET=");
+    int bInternalDataset = FALSE;
+    if( iIdxInternalDataset >= 0 )
+    {
+        bInternalDataset = CSLFetchBoolean(papszOptions, "_INTERNAL_DATASET", FALSE);
+        if( papszOptionsToDelete == NULL )
+            papszOptionsToDelete = CSLDuplicate(papszOptions);
+        papszOptions = CSLRemoveStrings(papszOptionsToDelete, iIdxInternalDataset, 1, NULL);
+        papszOptionsToDelete = papszOptions;
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Validate creation options.                                      */
 /* -------------------------------------------------------------------- */
@@ -746,12 +770,17 @@ GDALDataset *GDALDriver::CreateCopy( const char * pszFilename,
 
             if( poDstDS->poDriver == NULL )
                 poDstDS->poDriver = this;
+
+            if( !bInternalDataset )
+                poDstDS->AddToDatasetOpenList();
         }
     }
     else
+    {
         poDstDS = DefaultCreateCopy( pszFilename, poSrcDS, bStrict, 
                                   papszOptions, pfnProgress, pProgressData );
-
+    }
+        
     CSLDestroy(papszOptionsToDelete);
     return poDstDS;
 }
@@ -814,7 +843,8 @@ CPLErr GDALDriver::QuietDelete( const char *pszName )
         return CE_None;
 
     VSIStatBufL sStat;
-    if( VSIStatExL(pszName, &sStat, VSI_STAT_EXISTS_FLAG | VSI_STAT_NATURE_FLAG) == 0 &&
+    int bExists = VSIStatExL(pszName, &sStat, VSI_STAT_EXISTS_FLAG | VSI_STAT_NATURE_FLAG) == 0;
+    if( bExists &&
         VSI_ISDIR(sStat.st_mode) )
     {
         /* It is not desirable to remove directories quietly */
@@ -824,7 +854,18 @@ CPLErr GDALDriver::QuietDelete( const char *pszName )
 
     CPLDebug( "GDAL", "QuietDelete(%s) invoking Delete()", pszName );
 
-    return poDriver->Delete( pszName );
+    CPLErr eErr;
+    int bQuiet = ( !bExists && poDriver->pfnDelete == NULL && poDriver->pfnDeleteDataSource == NULL );
+    if( bQuiet )
+        CPLPushErrorHandler(CPLQuietErrorHandler);
+    eErr  = poDriver->Delete( pszName );
+    if( bQuiet )
+    {
+        CPLPopErrorHandler();
+        CPLErrorReset();
+        eErr = CE_None;
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -1326,10 +1367,19 @@ int CPL_STDCALL GDALValidateCreationOptions( GDALDriverH hDriver,
         ((GDALDriver *) hDriver)->GetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST );
     CPLString osDriver;
     osDriver.Printf("driver %s", ((GDALDriver *) hDriver)->GetDescription());
-    return GDALValidateOptions( pszOptionList,
-                                (const char* const* )papszCreationOptions,
+    char** papszOptionsToValidate = papszCreationOptions;
+    char** papszOptionsToFree = NULL;
+    if( CSLFetchNameValue( papszCreationOptions, "APPEND_SUBDATASET") )
+    {
+        papszOptionsToValidate = papszOptionsToFree =
+            CSLSetNameValue(CSLDuplicate(papszCreationOptions), "APPEND_SUBDATASET", NULL);
+    }
+    int bRet = GDALValidateOptions( pszOptionList,
+                                (const char* const* )papszOptionsToValidate,
                                 "creation option",
                                 osDriver);
+    CSLDestroy(papszOptionsToFree);
+    return bRet;
 }
 
 /************************************************************************/
@@ -1663,7 +1713,7 @@ GDALIdentifyDriver( const char * pszFilename,
     int         	iDriver;
     GDALDriverManager  *poDM = GetGDALDriverManager();
     GDALOpenInfo        oOpenInfo( pszFilename, GA_ReadOnly, papszFileList );
-    CPLLocaleC          oLocaleForcer;
+    //CPLLocaleC          oLocaleForcer;
 
     CPLErrorReset();
     CPLAssert( NULL != poDM );

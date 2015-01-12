@@ -251,7 +251,9 @@ CPLErr RasterliteBand::IReadBlock( int nBlockXOff, int nBlockYOff, void * pImage
                                               nDataSize, FALSE);
             VSIFCloseL(fp);
             
-            GDALDatasetH hDSTile = GDALOpen(osMemFileName.c_str(), GA_ReadOnly);
+            GDALDatasetH hDSTile = GDALOpenEx(osMemFileName.c_str(),
+                                              GDAL_OF_RASTER | GDAL_OF_INTERNAL,
+                                              NULL, NULL, NULL);
             int nTileBands = 0;
             if (hDSTile && (nTileBands = GDALGetRasterCount(hDSTile)) == 0)
             {
@@ -927,6 +929,7 @@ end:
 int RasterliteDataset::Identify(GDALOpenInfo* poOpenInfo)
 {
     if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "MBTILES") &&
+        !EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "GPKG") &&
         poOpenInfo->nHeaderBytes >= 1024 &&
         EQUALN((const char*)poOpenInfo->pabyHeader, "SQLite Format 3", 15))
     {
@@ -968,7 +971,7 @@ GDALDataset* RasterliteDataset::Open(GDALOpenInfo* poOpenInfo)
     else
     {
         papszTokens = CSLTokenizeStringComplex( 
-                poOpenInfo->pszFilename + 11, ", ", FALSE, FALSE );
+                poOpenInfo->pszFilename + 11, ",", FALSE, FALSE );
         int nTokens = CSLCount(papszTokens);
         if (nTokens == 0)
         {
@@ -988,22 +991,22 @@ GDALDataset* RasterliteDataset::Open(GDALOpenInfo* poOpenInfo)
             else if (EQUALN(papszTokens[i], "minx=", 5))
             {
                 bMinXSet = TRUE;
-                minx = atof(papszTokens[i] + 5);
+                minx = CPLAtof(papszTokens[i] + 5);
             }
             else if (EQUALN(papszTokens[i], "miny=", 5))
             {
                 bMinYSet = TRUE;
-                miny = atof(papszTokens[i] + 5);
+                miny = CPLAtof(papszTokens[i] + 5);
             }
             else if (EQUALN(papszTokens[i], "maxx=", 5))
             {
                 bMaxXSet = TRUE;
-                maxx = atof(papszTokens[i] + 5);
+                maxx = CPLAtof(papszTokens[i] + 5);
             }
             else if (EQUALN(papszTokens[i], "maxy=", 5))
             {
                 bMaxYSet = TRUE;
-                maxy = atof(papszTokens[i] + 5);
+                maxy = CPLAtof(papszTokens[i] + 5);
             }
             else if (EQUALN(papszTokens[i], "bands=", 6))
             {

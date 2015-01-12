@@ -274,7 +274,7 @@ int TABMAPFile::Open(const char *pszFname, const char* pszAccess, GBool bNoError
  * be used.  They will behave as if the .ID file contained only null
  * references, so all object will look like they have NONE geometries.
  *
- * Returns 0 on success, -1 on error.
+ * Returns 0 on success, 1 when the .map file does not exist, -1 on error.
  **********************************************************************/
 int TABMAPFile::Open(const char *pszFname, TABAccess eAccess,
                      GBool bNoErrorMsg /* = FALSE */)
@@ -352,6 +352,8 @@ int TABMAPFile::Open(const char *pszFname, TABAccess eAccess,
         // Alloc a second 512 bytes of space since oBlockManager deals 
         // with 512 bytes blocks.
         m_oBlockManager.AllocNewBlock("HEADER"); 
+
+        m_bUpdated = TRUE;
     }
     else if (bNoErrorMsg)
     {
@@ -446,18 +448,25 @@ int TABMAPFile::Open(const char *pszFname, TABAccess eAccess,
         {
             TABRawBinBlock *poBlock;
             poBlock = GetIndexObjectBlock( m_poHeader->m_nFirstIndexBlock );
-            if( poBlock == NULL || poBlock->GetBlockType() != TABMAP_INDEX_BLOCK )
+            if( poBlock == NULL || (poBlock->GetBlockType() != TABMAP_INDEX_BLOCK &&
+                                    poBlock->GetBlockType() != TABMAP_OBJECT_BLOCK) )
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "Cannot find first index block at offset %d",
                          m_poHeader->m_nFirstIndexBlock );
                 delete poBlock;
             }
-            else
+            else if( poBlock->GetBlockType() == TABMAP_INDEX_BLOCK )
             {
                 m_poSpIndex = (TABMAPIndexBlock *)poBlock;
                 m_poSpIndex->SetMBR(m_poHeader->m_nXMin, m_poHeader->m_nYMin,
                                     m_poHeader->m_nXMax, m_poHeader->m_nYMax);
+            }
+            else /* if( poBlock->GetBlockType() == TABMAP_OBJECT_BLOCK ) */
+            {
+                /* This can happen if the file created by MapInfo contains just */
+                /* a few objects */
+                delete poBlock;
             }
         }
     }
@@ -541,56 +550,9 @@ int TABMAPFile::Close()
     /*----------------------------------------------------------------
      * Write access: commit latest changes to the file.
      *---------------------------------------------------------------*/
-    if (m_eAccessMode == TABWrite || (m_eAccessMode == TABReadWrite && m_bUpdated))
+    if (m_eAccessMode != TABRead)
     {
-        // Start by committing current object and coord blocks
-        // Nothing happens if none has been created yet.
-        CommitObjAndCoordBlocks(FALSE);
-
-        // Write the drawing tools definitions now.
-        CommitDrawingTools();
-
-        // Commit spatial index blocks
-        CommitSpatialIndex();
-
-        // Update header fields and commit
-        if (m_poHeader)
-        {
-            // OK, with V450 files, objects are not limited to 32k nodes
-            // any more, and this means that m_nMaxCoordBufSize can become
-            // huge, and actually more huge than can be held in memory.
-            // MapInfo counts m_nMaxCoordBufSize=0 for V450 objects, but 
-            // until this is cleanly implented, we will just prevent 
-            // m_nMaxCoordBufSizefrom going beyond 512k in V450 files.
-            if (m_nMinTABVersion >= 450)
-            {
-                m_poHeader->m_nMaxCoordBufSize = 
-                                 MIN(m_poHeader->m_nMaxCoordBufSize, 512*1024);
-            }
-
-            // Write Ref to beginning of the chain of garbage blocks
-            m_poHeader->m_nFirstGarbageBlock = 
-                m_oBlockManager.GetFirstGarbageBlock();
-
-            m_poHeader->CommitToFile();
-        }
-    }
-    
-    // Check for overflow of internal coordinates and produce a warning
-    // if that happened...
-    if (m_poHeader && m_poHeader->m_bIntBoundsOverflow)
-    {
-        double dBoundsMinX, dBoundsMinY, dBoundsMaxX, dBoundsMaxY;
-        Int2Coordsys(-1000000000, -1000000000, dBoundsMinX, dBoundsMinY);
-        Int2Coordsys(1000000000, 1000000000, dBoundsMaxX, dBoundsMaxY);
-
-        CPLError(CE_Warning, TAB_WarningBoundsOverflow,
-                 "Some objects were written outside of the file's "
-                 "predefined bounds.\n"
-                 "These objects may have invalid coordinates when the file "
-                 "is reopened.\n"
-                 "Predefined bounds: (%.15g,%.15g)-(%.15g,%.15g)\n",
-                 dBoundsMinX, dBoundsMinY, dBoundsMaxX, dBoundsMaxY );
+        SyncToDisk();
     }
 
     // Delete all structures 
@@ -640,6 +602,83 @@ int TABMAPFile::Close()
 
     CPLFree(m_pszFname);
     m_pszFname = NULL;
+
+    return 0;
+}
+
+/************************************************************************/
+/*                            SyncToDisk()                             */
+/************************************************************************/
+
+int TABMAPFile::SyncToDisk()
+{
+    if( m_eAccessMode == TABRead )
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "SyncToDisk() can be used only with Write access.");
+        return -1;
+    }
+
+    if( !m_bUpdated) 
+        return 0;
+
+    // Start by committing current object and coord blocks
+    // Nothing happens if none has been created yet.
+    if( CommitObjAndCoordBlocks(FALSE) != 0 )
+        return -1;
+
+    // Write the drawing tools definitions now.
+    if( CommitDrawingTools() != 0 )
+        return -1;
+
+    // Commit spatial index blocks
+    if( CommitSpatialIndex() != 0 )
+        return -1;
+
+    // Update header fields and commit
+    if (m_poHeader)
+    {
+        // OK, with V450 files, objects are not limited to 32k nodes
+        // any more, and this means that m_nMaxCoordBufSize can become
+        // huge, and actually more huge than can be held in memory.
+        // MapInfo counts m_nMaxCoordBufSize=0 for V450 objects, but 
+        // until this is cleanly implented, we will just prevent 
+        // m_nMaxCoordBufSizefrom going beyond 512k in V450 files.
+        if (m_nMinTABVersion >= 450)
+        {
+            m_poHeader->m_nMaxCoordBufSize = 
+                                MIN(m_poHeader->m_nMaxCoordBufSize, 512*1024);
+        }
+
+        // Write Ref to beginning of the chain of garbage blocks
+        m_poHeader->m_nFirstGarbageBlock = 
+            m_oBlockManager.GetFirstGarbageBlock();
+
+        if( m_poHeader->CommitToFile() != 0 )
+            return -1;
+    }
+
+    // Check for overflow of internal coordinates and produce a warning
+    // if that happened...
+    if (m_poHeader && m_poHeader->m_bIntBoundsOverflow)
+    {
+        double dBoundsMinX, dBoundsMinY, dBoundsMaxX, dBoundsMaxY;
+        Int2Coordsys(-1000000000, -1000000000, dBoundsMinX, dBoundsMinY);
+        Int2Coordsys(1000000000, 1000000000, dBoundsMaxX, dBoundsMaxY);
+
+        CPLError(CE_Warning, TAB_WarningBoundsOverflow,
+                 "Some objects were written outside of the file's "
+                 "predefined bounds.\n"
+                 "These objects may have invalid coordinates when the file "
+                 "is reopened.\n"
+                 "Predefined bounds: (%.15g,%.15g)-(%.15g,%.15g)\n",
+                 dBoundsMinX, dBoundsMinY, dBoundsMaxX, dBoundsMaxY );
+    }
+
+    if( m_poIdIndex != NULL && m_poIdIndex->SyncToDisk() != 0 )
+        return -1;
+
+    m_bUpdated = FALSE;
 
     return 0;
 }
@@ -1106,11 +1145,11 @@ int   TABMAPFile::MoveToObjId(int nObjId)
     m_bLastOpWasRead = TRUE;
 
     /*-----------------------------------------------------------------
-     * In read access mode, since the .MAP/.ID are optional, if the 
+     * In non creation mode, since the .MAP/.ID are optional, if the 
      * file is not opened then we can still act as if one existed and
      * make any object id look like a TAB_GEOM_NONE
      *----------------------------------------------------------------*/
-    if (m_fp == NULL && m_eAccessMode == TABRead)
+    if (m_fp == NULL && m_eAccessMode != TABWrite)
     {
         CPLAssert(m_poIdIndex == NULL && m_poCurObjBlock == NULL);
         m_nCurObjPtr = 0;
@@ -1472,7 +1511,28 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
                                   m_oBlockManager.AllocNewBlock("INDEX"));
         m_poSpIndex->SetMAPBlockManagerRef(&m_oBlockManager);
 
-        m_poHeader->m_nFirstIndexBlock = m_poSpIndex->GetNodeBlockPtr();
+        if( m_eAccessMode == TABReadWrite && m_poHeader->m_nFirstIndexBlock != 0 )
+        {
+            /* This can happen if the file created by MapInfo contains just */
+            /* a few objects */
+            TABRawBinBlock *poBlock;
+            poBlock = GetIndexObjectBlock( m_poHeader->m_nFirstIndexBlock );
+            CPLAssert( poBlock != NULL && poBlock->GetBlockType() == TABMAP_OBJECT_BLOCK);
+            int nStartAddress = poBlock->GetStartAddress();
+            delete poBlock;
+            if (m_poSpIndex->AddEntry(m_poHeader->m_nXMin, m_poHeader->m_nYMin,
+                                      m_poHeader->m_nXMax, m_poHeader->m_nYMax,
+                                      m_poHeader->m_nFirstIndexBlock) != 0)
+                return -1;
+            m_poHeader->m_nFirstIndexBlock = nStartAddress;
+
+            delete m_poCurObjBlock;
+            m_poCurObjBlock = NULL;
+        }
+        else
+        {
+            m_poHeader->m_nFirstIndexBlock = m_poSpIndex->GetNodeBlockPtr();
+        }
 
         /* We'll also need to create an object data block (later) */
         nObjBlockForInsert = -1;
@@ -1520,6 +1580,9 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
                                   m_poCurObjBlock->GetStartAddress()) != 0)
             return -1;
 
+        m_poCurObjBlock->SetMBR(poObjHdr->m_nMinX, poObjHdr->m_nMinY,
+                                poObjHdr->m_nMaxX, poObjHdr->m_nMaxY);
+
         m_poHeader->m_nMaxSpIndexDepth = MAX(m_poHeader->m_nMaxSpIndexDepth,
                                       (GByte)m_poSpIndex->GetCurMaxDepth()+1);
     }
@@ -1541,21 +1604,21 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
         {
             if (LoadObjAndCoordBlocks(nObjBlockForInsert) != 0)
                 return -1;
+        }
 
-            /* If we have compressed objects, we don't want to change the center  */
-            m_poCurObjBlock->LockCenter();
+        /* If we have compressed objects, we don't want to change the center  */
+        m_poCurObjBlock->LockCenter();
 
-            // The ObjBlock doesn't know its MBR. Get the value from the 
-            // index and set it
-            GInt32 nMinX, nMinY, nMaxX, nMaxY;
+        // Check if the ObjBlock know its MBR. If not (new block, or the current
+        // block was the good one but retrieved without the index), get the value
+        // from the index and set it.
+        GInt32 nMinX, nMinY, nMaxX, nMaxY;
+        m_poCurObjBlock->GetMBR(nMinX, nMinY, nMaxX, nMaxY);
+        if( nMinX > nMaxX )
+        {
             m_poSpIndex->GetCurLeafEntryMBR(m_poCurObjBlock->GetStartAddress(),
                                             nMinX, nMinY, nMaxX, nMaxY);
             m_poCurObjBlock->SetMBR(nMinX, nMinY, nMaxX, nMaxY);
-        }
-        else
-        {
-            /* If we have compressed objects, we don't want to change the center */
-            m_poCurObjBlock->LockCenter();
         }
     }
 
@@ -1635,7 +1698,7 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
         CPLFree(papoSrcObjHdrs);
         papoSrcObjHdrs = NULL;
     }
-    
+
     if (m_poCurObjBlock->GetNumUnusedBytes() >= nObjSize )
     {
         /*-------------------------------------------------------------
@@ -1649,6 +1712,8 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
         nMinY = MIN(nMinY, poObjHdr->m_nMinY);
         nMaxX = MAX(nMaxX, poObjHdr->m_nMaxX);
         nMaxY = MAX(nMaxY, poObjHdr->m_nMaxY);
+        
+        m_poCurObjBlock->SetMBR(nMinX, nMinY, nMaxX, nMaxY);
 
         if (m_poSpIndex->UpdateLeafEntry(m_poCurObjBlock->GetStartAddress(),
                                          nMinX, nMinY, nMaxX, nMaxY) != 0)
@@ -1677,12 +1742,15 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
          *------------------------------------------------------------*/
         GInt32 nMinX, nMinY, nMaxX, nMaxY;
         m_poCurObjBlock->GetMBR(nMinX, nMinY, nMaxX, nMaxY);
+        CPLAssert(nMinX <= nMaxX);
 
         /* Need to calculate the enlarged MBR that includes new object */
         nMinX = MIN(nMinX, poObjHdr->m_nMinX);
         nMinY = MIN(nMinY, poObjHdr->m_nMinY);
         nMaxX = MAX(nMaxX, poObjHdr->m_nMaxX);
         nMaxY = MAX(nMaxY, poObjHdr->m_nMaxY);
+        
+        m_poCurObjBlock->SetMBR(nMinX, nMinY, nMaxX, nMaxY);
 
         if (m_poSpIndex->UpdateLeafEntry(m_poCurObjBlock->GetStartAddress(),
                                          nMinX, nMinY, nMaxX, nMaxY) != 0)
@@ -1692,6 +1760,7 @@ int   TABMAPFile::PrepareNewObjViaSpatialIndex(TABMAPObjHdr *poObjHdr)
          * Add new obj block to index
          *------------------------------------------------------------*/
         poNewObjBlock->GetMBR(nMinX, nMinY, nMaxX, nMaxY);
+        CPLAssert(nMinX <= nMaxX);
 
         if (m_poSpIndex->AddEntry(nMinX, nMinY, nMaxX, nMaxY,
                                   poNewObjBlock->GetStartAddress()) != 0)
@@ -1792,6 +1861,18 @@ int   TABMAPFile::PrepareNewObjViaObjBlock(TABMAPObjHdr *poObjHdr)
  **********************************************************************/
 int   TABMAPFile::CommitNewObj(TABMAPObjHdr *poObjHdr)
 {
+    /* Update this now so that PrepareCoordBlock() doesn't try to old an older */
+    /* block */
+    if( m_poCurCoordBlock != NULL )
+        m_poCurObjBlock->AddCoordBlockRef(m_poCurCoordBlock->GetStartAddress());
+
+    /* So that GetExtent() is up-to-date */
+    if( m_poSpIndex != NULL )
+    {
+        m_poSpIndex->GetMBR(m_poHeader->m_nXMin, m_poHeader->m_nYMin,
+                            m_poHeader->m_nXMax, m_poHeader->m_nYMax);
+    }
+
     return m_poCurObjBlock->CommitNewObject(poObjHdr);
 }
 
@@ -2124,10 +2205,10 @@ TABMAPObjectBlock *TABMAPFile::SplitObjBlock(TABMAPObjHdr *poObjHdrToAdd,
             continue;
         }
 
-
         // Decide which of the two blocks to put this entry in
         GInt32 nXMin, nYMin, nXMax, nYMax;
         m_poCurObjBlock->GetMBR(nXMin, nYMin, nXMax, nYMax);
+        CPLAssert( nXMin <= nXMax );
         double dAreaDiff1 = 
             TABMAPIndexBlock::ComputeAreaDiff(nXMin, nYMin, 
                                               nXMax, nYMax,
@@ -2137,6 +2218,7 @@ TABMAPObjectBlock *TABMAPFile::SplitObjBlock(TABMAPObjHdr *poObjHdrToAdd,
                                               poObjHdr->m_nMaxY);
 
         poNewObjBlock->GetMBR(nXMin, nYMin, nXMax, nYMax);
+        CPLAssert( nXMin <= nXMax );
         double dAreaDiff2 = 
             TABMAPIndexBlock::ComputeAreaDiff(nXMin, nYMin, nXMax, nYMax,
                                               poObjHdr->m_nMinX, 
@@ -2342,7 +2424,28 @@ int TABMAPFile::PrepareCoordBlock(int nObjType,
 
             // Set the references to this coord block in the MAPObjBlock
             poObjBlock->AddCoordBlockRef((*ppoCoordBlock)->GetStartAddress());
-
+        }
+        /* If we are not at the end of the chain of coordinate blocks, then */
+        /* reload us */
+        else if( (*ppoCoordBlock)->GetStartAddress() != poObjBlock->GetLastCoordBlockAddress() )
+        {
+            TABRawBinBlock* poBlock = TABCreateMAPBlockFromFile(m_fp, 
+                                    poObjBlock->GetLastCoordBlockAddress(),
+                                    512, TRUE, TABReadWrite);
+            if (poBlock != NULL && poBlock->GetBlockClass() == TABMAP_COORD_BLOCK)
+            {
+                delete *ppoCoordBlock;
+                *ppoCoordBlock = (TABMAPCoordBlock*)poBlock;
+                (*ppoCoordBlock)->SetMAPBlockManagerRef(&m_oBlockManager);
+            }
+            else
+            {
+                delete poBlock;
+                CPLError(CE_Failure, CPLE_FileIO,
+                            "LoadObjAndCoordBlocks() failed for coord block at %d.", 
+                            poObjBlock->GetLastCoordBlockAddress());
+                return -1;
+            }
         }
 
         if ((*ppoCoordBlock)->GetNumUnusedBytes() < 4)
@@ -2351,6 +2454,7 @@ int TABMAPFile::PrepareCoordBlock(int nObjType,
             (*ppoCoordBlock)->SetNextCoordBlock(nNewBlockOffset);
             (*ppoCoordBlock)->CommitToFile();
             (*ppoCoordBlock)->InitNewBlock(m_fp, 512, nNewBlockOffset);
+            poObjBlock->AddCoordBlockRef((*ppoCoordBlock)->GetStartAddress());
         }
 
         // Make sure read/write pointer is at the end of the block

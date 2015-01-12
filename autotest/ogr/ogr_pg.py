@@ -1102,11 +1102,20 @@ def ogr_pg_23():
     # add some custom date fields.
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_numeric5 numeric(5)' )
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_numeric5_3 numeric(5,3)' )
-    gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_bool bool' )
-    gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_int2 int2' )
+    #gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_bool bool' )
+    fld = ogr.FieldDefn('my_bool', ogr.OFTInteger)
+    fld.SetSubType(ogr.OFSTBoolean)
+    lyr.CreateField(fld)
+    #gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_int2 int2' )
+    fld = ogr.FieldDefn('my_int2', ogr.OFTInteger)
+    fld.SetSubType(ogr.OFSTInt16)
+    lyr.CreateField(fld)
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_int4 int4' )
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_int8 int8' )
-    gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_float4 float4' )
+    #gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_float4 float4' )
+    fld = ogr.FieldDefn('my_float4', ogr.OFTReal)
+    fld.SetSubType(ogr.OFSTFloat32)
+    lyr.CreateField(fld)
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_float8 float8' )
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_real real' )
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_char char' )
@@ -1124,7 +1133,9 @@ def ogr_pg_23():
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_int4array int4[]' )
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_float4array float4[]' )
     gdaltest.pg_ds.ExecuteSQL( 'ALTER TABLE datatypetest ADD COLUMN my_float8array float8[]' )
-
+    fld = ogr.FieldDefn('my_boolarray', ogr.OFTIntegerList)
+    fld.SetSubType(ogr.OFSTBoolean)
+    lyr.CreateField(fld)
     ######################################################
     # Create a populated records.
 
@@ -1134,8 +1145,7 @@ def ogr_pg_23():
         geom_str = "'\\\\001\\\\001\\\\000\\\\000\\\\000\\\\000\\\\000\\\\000\\\\000\\\\000\\\\000$@\\\\000\\\\000\\\\000\\\\000\\\\000\\\\0004@'"
         if gdaltest.pg_quote_with_E:
             geom_str = "E" + geom_str
-    gdaltest.pg_ds.ExecuteSQL( "INSERT INTO datatypetest ( my_numeric5, my_numeric5_3, my_bool, my_int2, my_int4, my_int8, my_float4, my_float8, my_real, my_char, my_varchar, my_varchar10, my_text, my_bytea, my_time, my_date, my_timestamp, my_timestamptz, my_chararray, my_textarray, my_varchararray, my_int4array, my_float4array, my_float8array, wkb_geometry) VALUES ( 12345, 0.123, 'T', 12345, 12345678, 1234567901234, 0.123, 0.12345678, 0.876, 'a', 'ab', 'varchar10 ', 'abc', 'xyz', '12:34:56', '2000-01-01', '2000-01-01 00:00:00', '2000-01-01 00:00:00+00', '{a,b}', '{aa,bb}', '{cc,dd}', '{100,200}', '{100.1,200.1}', '{100.12,200.12}', " + geom_str + " )" )
-
+    gdaltest.pg_ds.ExecuteSQL( "INSERT INTO datatypetest ( my_numeric5, my_numeric5_3, my_bool, my_int2, my_int4, my_int8, my_float4, my_float8, my_real, my_char, my_varchar, my_varchar10, my_text, my_bytea, my_time, my_date, my_timestamp, my_timestamptz, my_chararray, my_textarray, my_varchararray, my_int4array, my_float4array, my_float8array, my_boolarray, wkb_geometry) VALUES ( 12345, 0.123, 'T', 12345, 12345678, 1234567901234, 0.123, 0.12345678, 0.876, 'a', 'ab', 'varchar10 ', 'abc', 'xyz', '12:34:56', '2000-01-01', '2000-01-01 00:00:00', '2000-01-01 00:00:00+00', '{a,b}', '{aa,bb}', '{cc,dd}', '{100,200}', '{100.1,200.1}', '{100.12,200.12}', '{1,0}', " + geom_str + " )" )
 
     return 'success'
 
@@ -1158,6 +1168,26 @@ def test_val_test_23(layer_defn, feat):
         gdaltest.post_reason('Wrong field defn for my_varchar10 : %d, %d, %d' % (field_defn.GetWidth(), field_defn.GetPrecision(), field_defn.GetType()))
         return 'fail'
 
+    field_defn = layer_defn.GetFieldDefn(layer_defn.GetFieldIndex("my_bool"))
+    if field_defn.GetWidth() != 1 or field_defn.GetType() != ogr.OFTInteger or field_defn.GetSubType() != ogr.OFSTBoolean:
+        gdaltest.post_reason('Wrong field defn for my_bool : %d, %d, %d, %d' % (field_defn.GetWidth(), field_defn.GetPrecision(), field_defn.GetType(), field_defn.GetSubType()))
+        return 'fail'
+
+    field_defn = layer_defn.GetFieldDefn(layer_defn.GetFieldIndex("my_boolarray"))
+    if field_defn.GetType() != ogr.OFTIntegerList or field_defn.GetSubType() != ogr.OFSTBoolean:
+        gdaltest.post_reason('Wrong field defn for my_boolarray : %d, %d, %d, %d' % (field_defn.GetWidth(), field_defn.GetPrecision(), field_defn.GetType(), field_defn.GetSubType()))
+        return 'fail'
+
+    field_defn = layer_defn.GetFieldDefn(layer_defn.GetFieldIndex("my_int2"))
+    if field_defn.GetType() != ogr.OFTInteger or field_defn.GetSubType() != ogr.OFSTInt16:
+        gdaltest.post_reason('Wrong field defn for my_bool : %d, %d, %d, %d' % (field_defn.GetWidth(), field_defn.GetPrecision(), field_defn.GetType(), field_defn.GetSubType()))
+        return 'fail'
+
+    field_defn = layer_defn.GetFieldDefn(layer_defn.GetFieldIndex("my_float4"))
+    if field_defn.GetType() != ogr.OFTReal or field_defn.GetSubType() != ogr.OFSTFloat32:
+        gdaltest.post_reason('Wrong field defn for my_bool : %d, %d, %d, %d' % (field_defn.GetWidth(), field_defn.GetPrecision(), field_defn.GetType(), field_defn.GetSubType()))
+        return 'fail'
+
     if feat.my_numeric5 != 12345 or \
     feat.my_numeric5_3 != 0.123 or \
     feat.my_bool != 1 or \
@@ -1178,7 +1208,8 @@ def test_val_test_23(layer_defn, feat):
     feat.GetFieldAsString('my_chararray') != '(2:a,b)' or \
     feat.GetFieldAsString('my_textarray') != '(2:aa,bb)' or \
     feat.GetFieldAsString('my_varchararray') != '(2:cc,dd)' or \
-    feat.GetFieldAsString('my_int4array') != '(2:100,200)' :
+    feat.GetFieldAsString('my_int4array') != '(2:100,200)' or \
+    feat.GetFieldAsString('my_boolarray') != '(2:1,0)' :
 #    feat.my_float4array != '(2:100.1,200.1)'
 #    feat.my_float4array != '(2:100.12,200.12)'
 #    feat.my_int8 != 1234567901234
@@ -3445,6 +3476,9 @@ def ogr_pg_69():
 
 def ogr_pg_70():
 
+    if gdaltest.pg_ds is None:
+        return 'skip'
+
     gdal.SetConfigOption('OGR_PG_DIFFERED_CREATION', 'NO')
     lyr = gdaltest.pg_ds.CreateLayer('ogr_pg_70')
     gdal.SetConfigOption('OGR_PG_DIFFERED_CREATION', None)
@@ -3499,6 +3533,141 @@ def ogr_pg_70():
     return 'success'
 
 ###############################################################################
+# Test interoperability of WKT/WKB with PostGIS
+
+def ogr_pg_71():
+
+    if gdaltest.pg_ds is None:
+        return 'skip'
+
+    if not gdaltest.pg_has_postgis:
+        return 'skip'
+
+    curve_lyr = gdaltest.pg_ds.CreateLayer('test_curve')
+    curve_lyr2 = gdaltest.pg_ds.CreateLayer('test_curve_3d', geom_type = ogr.wkbUnknown | ogr.wkb25DBit)
+    # FIXME: the ResetReading() should not be necessary
+    curve_lyr.ResetReading()
+    curve_lyr2.ResetReading()
+
+    for wkt in [ 'CIRCULARSTRING EMPTY',
+                 'CIRCULARSTRING Z EMPTY',
+                 'CIRCULARSTRING (0 1,2 3,4 5)',
+                 'CIRCULARSTRING Z (0 1 2,4 5 6,7 8 9)',
+                 'COMPOUNDCURVE EMPTY',
+                 'COMPOUNDCURVE ((0 1,2 3,4 5))',
+                 'COMPOUNDCURVE Z ((0 1 2,4 5 6,7 8 9))',
+                 'COMPOUNDCURVE ((0 1,2 3,4 5),CIRCULARSTRING (4 5,6 7,8 9))',
+                 'COMPOUNDCURVE Z ((0 1 2,4 5 6,7 8 9),CIRCULARSTRING Z (7 8 9,10 11 12,13 14 15))',
+                 'CURVEPOLYGON EMPTY',
+                 'CURVEPOLYGON ((0 0,0 1,1 1,1 0,0 0))',
+                 'CURVEPOLYGON Z ((0 0 2,0 1 3,1 1 4,1 0 5,0 0 2))',
+                 'CURVEPOLYGON (COMPOUNDCURVE (CIRCULARSTRING (0 0,1 0,0 0)))',
+                 'CURVEPOLYGON Z (COMPOUNDCURVE Z (CIRCULARSTRING Z (0 0 2,1 0 3,0 0 2)))',
+                 'MULTICURVE EMPTY',
+                 'MULTICURVE (CIRCULARSTRING (0 0,1 0,0 0),(0 0,1 1))',
+                 'MULTICURVE Z (CIRCULARSTRING Z (0 0 1,1 0 1,0 0 1),(0 0 1,1 1 1))',
+                 'MULTICURVE (CIRCULARSTRING (0 0,1 0,0 0),(0 0,1 1),COMPOUNDCURVE ((0 0,1 1),CIRCULARSTRING (1 1,2 2,3 3)))',
+                 'MULTISURFACE EMPTY',
+                 'MULTISURFACE (((0 0,0 10,10 10,10 0,0 0)),CURVEPOLYGON (CIRCULARSTRING (0 0,1 0,0 0)))',
+                 'MULTISURFACE Z (((0 0 1,0 10 1,10 10 1,10 0 1,0 0 1)),CURVEPOLYGON Z (CIRCULARSTRING Z (0 0 1,1 0 1,0 0 1)))',
+                 'GEOMETRYCOLLECTION (CIRCULARSTRING (0 1,2 3,4 5),COMPOUNDCURVE ((0 1,2 3,4 5)),CURVEPOLYGON ((0 0,0 1,1 1,1 0,0 0)),MULTICURVE ((0 0,1 1)),MULTISURFACE (((0 0,0 10,10 10,10 0,0 0))))',
+               ]:
+
+        # would cause PostGIS 1.X to crash
+        if not gdaltest.pg_has_postgis_2 and wkt == 'CURVEPOLYGON EMPTY':
+            continue
+        # Parsing error of WKT by PostGIS 1.X
+        if not gdaltest.pg_has_postgis_2 and wkt.find('MULTICURVE') >= 0 and wkt.find('CIRCULARSTRING') >= 0:
+            continue
+
+        postgis_in_wkt = wkt
+        while True:
+            z_pos = postgis_in_wkt.find('Z ')
+            # PostGIS 1.X doesn't like Z in WKT
+            if not gdaltest.pg_has_postgis_2 and z_pos >= 0:
+                postgis_in_wkt = postgis_in_wkt[0:z_pos] + postgis_in_wkt[z_pos+2:]
+            else:
+                break
+
+        # Test parsing PostGIS WKB
+        lyr = gdaltest.pg_ds.ExecuteSQL("SELECT ST_GeomFromText('%s')" % postgis_in_wkt)
+        f = lyr.GetNextFeature()
+        g = f.GetGeometryRef()
+        out_wkt = g.ExportToWkt()
+        g = None
+        f = None
+        gdaltest.pg_ds.ReleaseResultSet(lyr)
+
+        expected_wkt = wkt
+        if not gdaltest.pg_has_postgis_2 and wkt.find('EMPTY') >= 0:
+            expected_wkt = 'GEOMETRYCOLLECTION EMPTY'
+        if out_wkt != expected_wkt:
+            gdaltest.post_reason('fail')
+            print(expected_wkt)
+            print(out_wkt)
+            return 'fail'
+
+        # Test parsing PostGIS WKT
+        if gdaltest.pg_has_postgis_2:
+            fct = 'ST_AsText'
+        else:
+            fct = 'AsEWKT'
+
+        lyr = gdaltest.pg_ds.ExecuteSQL("SELECT %s(ST_GeomFromText('%s'))" % (fct,postgis_in_wkt))
+        f = lyr.GetNextFeature()
+        g = f.GetGeometryRef()
+        out_wkt = g.ExportToWkt()
+        g = None
+        f = None
+        gdaltest.pg_ds.ReleaseResultSet(lyr)
+
+        expected_wkt = wkt
+        if not gdaltest.pg_has_postgis_2 and wkt.find('EMPTY') >= 0:
+            expected_wkt = 'GEOMETRYCOLLECTION EMPTY'
+        if out_wkt != expected_wkt:
+            gdaltest.post_reason('fail')
+            print(expected_wkt)
+            print(out_wkt)
+            return 'fail'
+
+        g = ogr.CreateGeometryFromWkt(wkt)
+        if g.GetCoordinateDimension() == 2:
+            active_lyr = curve_lyr
+        else:
+            active_lyr = curve_lyr2
+
+        # Use our WKB export to inject into PostGIS and check that
+        # PostGIS interprets it correctly by checking with ST_AsText
+        f = ogr.Feature(active_lyr.GetLayerDefn())
+        f.SetGeometry(g)
+        ret = active_lyr.CreateFeature(f)
+        if ret != 0:
+            gdaltest.post_reason('fail')
+            print(wkt)
+            return 'fail'
+        fid = f.GetFID()
+
+        # AsEWKT() in PostGIS 1.X does not like CIRCULARSTRING EMPTY
+        if not gdaltest.pg_has_postgis_2 and wkt.find('CIRCULARSTRING') >= 0 and wkt.find('EMPTY') >= 0:
+            continue
+
+        lyr = gdaltest.pg_ds.ExecuteSQL("SELECT %s(wkb_geometry) FROM %s WHERE ogc_fid = %d" % (fct, active_lyr.GetName(), fid))
+        f = lyr.GetNextFeature()
+        g = f.GetGeometryRef()
+        out_wkt = g.ExportToWkt()
+        gdaltest.pg_ds.ReleaseResultSet(lyr)
+        g = None
+        f = None
+        
+        if out_wkt != wkt:
+            gdaltest.post_reason('fail')
+            print(wkt)
+            print(out_wkt)
+            return 'fail'
+
+    return 'success'
+
+###############################################################################
 # 
 
 def ogr_pg_table_cleanup():
@@ -3543,6 +3712,8 @@ def ogr_pg_table_cleanup():
     gdaltest.pg_ds.ExecuteSQL( 'DELLAYER:ogr_pg_67' )
     gdaltest.pg_ds.ExecuteSQL( 'DELLAYER:ogr_pg_68' )
     gdaltest.pg_ds.ExecuteSQL( 'DELLAYER:ogr_pg_70' )
+    gdaltest.pg_ds.ExecuteSQL( 'DELLAYER:test_curve' )
+    gdaltest.pg_ds.ExecuteSQL( 'DELLAYER:test_curve_3d' )
     
     # Drop second 'tpoly' from schema 'AutoTest-schema' (do NOT quote names here)
     gdaltest.pg_ds.ExecuteSQL( 'DELLAYER:AutoTest-schema.tpoly' )
@@ -3645,6 +3816,7 @@ gdaltest_list_internal = [
     ogr_pg_68,
     ogr_pg_69,
     ogr_pg_70,
+    ogr_pg_71,
     ogr_pg_cleanup ]
 
 ###############################################################################
@@ -3655,14 +3827,16 @@ def ogr_pg_with_and_without_postgis():
     gdaltest.run_tests( [ ogr_pg_1 ] )
     if gdaltest.pg_ds is None:
         return 'skip'
-
-    gdaltest.run_tests( gdaltest_list_internal )
-
-    if gdaltest.pg_has_postgis:
-        gdal.SetConfigOption("PG_USE_POSTGIS", "NO")
-        gdaltest.run_tests( [ ogr_pg_1 ] )
+    #gdaltest.run_tests( [ ogr_pg_71 ] )
+    #gdaltest.run_tests( [ ogr_pg_cleanup ] )
+    if True:
         gdaltest.run_tests( gdaltest_list_internal )
-        gdal.SetConfigOption("PG_USE_POSTGIS", "YES")
+
+        if gdaltest.pg_has_postgis:
+            gdal.SetConfigOption("PG_USE_POSTGIS", "NO")
+            gdaltest.run_tests( [ ogr_pg_1 ] )
+            gdaltest.run_tests( gdaltest_list_internal )
+            gdal.SetConfigOption("PG_USE_POSTGIS", "YES")
 
     return 'success'
 

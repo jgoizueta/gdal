@@ -1101,6 +1101,8 @@ def ogr_gml_27():
     lyr = ds.GetLayer(0)
 
     if lyr.GetGeomType() != ogr.wkbPolygon25D:
+        gdaltest.post_reason('fail')
+        print(lyr.GetGeomType())
         return 'fail'
 
     ds = None
@@ -2946,7 +2948,7 @@ def ogr_gml_63():
     
     # check number of layers
     nlayers = ds.GetLayerCount()
-    if nlayers != 8: 
+    if nlayers != 11: 
         return 'fail'
 
     # check number of features
@@ -2993,14 +2995,16 @@ def ogr_gml_65():
                              ['SRSDIMENSION_LOC=GEOMETRY,POSLIST', '<ogr:geometryProperty><gml:MultiSurface srsDimension="3"><gml:surfaceMember><gml:Polygon><gml:exterior><gml:LinearRing><gml:posList srsDimension="3">0 1 2 3 4 5 6 7 8 0 1 2</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember></gml:MultiSurface></ogr:geometryProperty>'],
                            ]
     for (option, expected) in option_expected_list:
-        ds = ogr.GetDriverByName('GML').CreateDataSource('/vsimem/ogr_gml_65.gml', options = ['FORMAT=GML3',option])
+        filename = '/vsimem/ogr_gml_65.gml'
+        #filename = 'ogr_gml_65.gml'
+        ds = ogr.GetDriverByName('GML').CreateDataSource(filename, options = ['FORMAT=GML3',option])
         lyr = ds.CreateLayer('lyr')
         feat = ogr.Feature(lyr.GetLayerDefn())
         feat.SetGeometry(ogr.CreateGeometryFromWkt("MULTIPOLYGON (((0 1 2,3 4 5,6 7 8,0 1 2)))"))
         lyr.CreateFeature(feat)
         ds = None
 
-        f = gdal.VSIFOpenL('/vsimem/ogr_gml_65.gml', 'rb')
+        f = gdal.VSIFOpenL(filename, 'rb')
         data = gdal.VSIFReadL(1, 10000, f)
         gdal.VSIFCloseL(f)
 
@@ -3008,16 +3012,473 @@ def ogr_gml_65():
             gdaltest.post_reason('fail')
             return 'fail'
 
-        ds = ogr.Open('/vsimem/ogr_gml_65.gml')
+        ds = ogr.Open(filename)
         lyr = ds.GetLayer(0)
         feat = lyr.GetNextFeature()
         if feat.GetGeometryRef().ExportToWkt() != "MULTIPOLYGON (((0 1 2,3 4 5,6 7 8,0 1 2)))":
             gdaltest.post_reason('fail')
+            feat.DumpReadable()
             return 'fail'
         ds = None
 
-        gdal.Unlink('/vsimem/ogr_gml_65.gml')
-        gdal.Unlink('/vsimem/ogr_gml_65.xsd')
+        gdal.Unlink(filename)
+        gdal.Unlink(filename[0:-3]+"xsd")
+
+    return 'success'
+
+###############################################################################
+# Test curve geometries
+
+def ogr_gml_66():
+
+    if not gdaltest.have_gml_reader:
+        return 'skip'
+
+    filename = '/vsimem/ogr_gml_66.gml'
+    #filename = 'ogr_gml_66.gml'
+    ds = ogr.GetDriverByName('GML').CreateDataSource(filename, options = ['FORMAT=GML3'])
+    lyr = ds.CreateLayer('compoundcurve', geom_type = ogr.wkbCompoundCurve)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('COMPOUNDCURVE (CIRCULARSTRING (0 0,1 1,2 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('CIRCULARSTRING (0 0,1 1,2 0)'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING (0 0,1 1,2 0)'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('curvepolygon', geom_type = ogr.wkbCurvePolygon)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('CURVEPOLYGON ( CIRCULARSTRING(0 0,1 0,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('POLYGON ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('multisurface', geom_type = ogr.wkbMultiSurface)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTISURFACE (CURVEPOLYGON ( CIRCULARSTRING(0 0,1 0,0 0)))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTIPOLYGON (((0 0,0 1,1 1,0 0)))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('multicurve', geom_type = ogr.wkbMultiCurve)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTICURVE ( CIRCULARSTRING(0 0,1 0,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTICURVE ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('polygon', geom_type = ogr.wkbPolygon)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('POLYGON ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('linestring', geom_type = ogr.wkbLineString)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING (0 0,0 1,1 1,0 0)'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('multipolygon', geom_type = ogr.wkbMultiPolygon)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTIPOLYGON (((0 0,0 1,1 1,0 0)))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('multilinestring', geom_type = ogr.wkbMultiLineString)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTILINESTRING ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('compoundcurve_untyped')
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING (0 0,1 1,2 0)'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('COMPOUNDCURVE (CIRCULARSTRING (0 0,1 1,2 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('LINESTRING (0 0,1 1,2 0)'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('curvepolygon_untyped')
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('POLYGON ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('CURVEPOLYGON ( CIRCULARSTRING(0 0,1 0,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('POLYGON ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('multisurface_untyped')
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTIPOLYGON (((0 0,0 1,1 1,0 0)))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTISURFACE (CURVEPOLYGON ( CIRCULARSTRING(0 0,1 0,0 0)))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTIPOLYGON (((0 0,0 1,1 1,0 0)))'))
+    lyr.CreateFeature(f)
+    f = None
+
+    lyr = ds.CreateLayer('multicurve_untyped')
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTILINESTRING ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTICURVE (CIRCULARSTRING (0 0,1 1,2 0))'))
+    lyr.CreateFeature(f)
+    f = None
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('MULTILINESTRING ((0 0,0 1,1 1,0 0))'))
+    lyr.CreateFeature(f)
+    f = None
+
+
+    ds = None
+
+    # Test first with .xsd and then without
+    for i in range(3):
+
+        ds = ogr.Open(filename)
+
+        lyr = ds.GetLayerByName('compoundcurve')
+        if lyr.GetGeomType() != ogr.wkbCompoundCurve:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'COMPOUNDCURVE (CIRCULARSTRING (0 0,1 1,2 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'COMPOUNDCURVE (CIRCULARSTRING (0 0,1 1,2 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'COMPOUNDCURVE ((0 0,1 1,2 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('curvepolygon')
+        if lyr.GetGeomType() != ogr.wkbCurvePolygon:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'CURVEPOLYGON (CIRCULARSTRING (0 0,0.5 0.5,1 0,0.5 -0.5,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'CURVEPOLYGON ((0 0,0 1,1 1,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('multisurface')
+        if lyr.GetGeomType() != ogr.wkbMultiSurface:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTISURFACE (CURVEPOLYGON (CIRCULARSTRING (0 0,0.5 0.5,1 0,0.5 -0.5,0 0)))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTISURFACE (((0 0,0 1,1 1,0 0)))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('multicurve')
+        if lyr.GetGeomType() != ogr.wkbMultiCurve:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTICURVE (CIRCULARSTRING (0 0,0.5 0.5,1 0,0.5 -0.5,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTICURVE ((0 0,0 1,1 1,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('polygon')
+        if lyr.GetGeomType() != ogr.wkbPolygon:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'POLYGON ((0 0,0 1,1 1,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('linestring')
+        if lyr.GetGeomType() != ogr.wkbLineString:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'LINESTRING (0 0,0 1,1 1,0 0)':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('multipolygon')
+        if lyr.GetGeomType() != ogr.wkbMultiPolygon:
+            print(lyr.GetGeomType())
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTIPOLYGON (((0 0,0 1,1 1,0 0)))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('multilinestring')
+        if lyr.GetGeomType() != ogr.wkbMultiLineString:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTILINESTRING ((0 0,0 1,1 1,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('compoundcurve_untyped')
+        if i != 0:
+            if lyr.GetGeomType() != ogr.wkbCompoundCurve:
+                print(lyr.GetGeomType())
+                gdaltest.post_reason('fail')
+                return 'fail'
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'COMPOUNDCURVE ((0 0,1 1,2 0))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        else:
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'LINESTRING (0 0,1 1,2 0)':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'COMPOUNDCURVE (CIRCULARSTRING (0 0,1 1,2 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('curvepolygon_untyped')
+        if i != 0:
+            if lyr.GetGeomType() != ogr.wkbCurvePolygon:
+                gdaltest.post_reason('fail')
+                return 'fail'
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'CURVEPOLYGON ((0 0,0 1,1 1,0 0))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        else:
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'POLYGON ((0 0,0 1,1 1,0 0))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'CURVEPOLYGON (CIRCULARSTRING (0 0,0.5 0.5,1 0,0.5 -0.5,0 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('multisurface_untyped')
+        if i != 0:
+            if lyr.GetGeomType() != ogr.wkbMultiSurface:
+                gdaltest.post_reason('fail')
+                return 'fail'
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'MULTISURFACE (((0 0,0 1,1 1,0 0)))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        else:
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'MULTIPOLYGON (((0 0,0 1,1 1,0 0)))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTISURFACE (CURVEPOLYGON (CIRCULARSTRING (0 0,0.5 0.5,1 0,0.5 -0.5,0 0)))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        lyr = ds.GetLayerByName('multicurve_untyped')
+        if i != 0:
+            if lyr.GetGeomType() != ogr.wkbMultiCurve:
+                gdaltest.post_reason('fail')
+                return 'fail'
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'MULTICURVE ((0 0,0 1,1 1,0 0))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        else:
+            feat = lyr.GetNextFeature()
+            if feat.GetGeometryRef().ExportToWkt() != 'MULTILINESTRING ((0 0,0 1,1 1,0 0))':
+                gdaltest.post_reason('fail')
+                feat.DumpReadable()
+                return 'fail'
+        feat = lyr.GetNextFeature()
+        if feat.GetGeometryRef().ExportToWkt() != 'MULTICURVE (CIRCULARSTRING (0 0,1 1,2 0))':
+            gdaltest.post_reason('fail')
+            feat.DumpReadable()
+            return 'fail'
+
+        ds = None
+
+        gdal.Unlink(filename[0:-3]+"xsd")
+
+    gdal.Unlink(filename)
+    gdal.Unlink(filename[0:-3]+"gfs")
+
+    return 'success'
+
+###############################################################################
+# Test boolean and int16 type
+
+def ogr_gml_67():
+
+    if not gdaltest.have_gml_reader:
+        return 'skip'
+
+    filename = '/vsimem/ogr_gml_67.gml'
+    ds = ogr.GetDriverByName('GML').CreateDataSource(filename)
+    lyr = ds.CreateLayer('test')
+    fld_defn = ogr.FieldDefn('b1', ogr.OFTInteger)
+    fld_defn.SetSubType(ogr.OFSTBoolean)
+    lyr.CreateField(fld_defn)
+    fld_defn = ogr.FieldDefn('b2', ogr.OFTInteger)
+    fld_defn.SetSubType(ogr.OFSTBoolean)
+    lyr.CreateField(fld_defn)
+    fld_defn = ogr.FieldDefn('bool_list', ogr.OFTIntegerList)
+    fld_defn.SetSubType(ogr.OFSTBoolean)
+    lyr.CreateField(fld_defn)
+    fld_defn = ogr.FieldDefn('short', ogr.OFTInteger)
+    fld_defn.SetSubType(ogr.OFSTInt16)
+    lyr.CreateField(fld_defn)
+    fld_defn = ogr.FieldDefn('float', ogr.OFTReal)
+    fld_defn.SetSubType(ogr.OFSTFloat32)
+    lyr.CreateField(fld_defn)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    f.SetField(1, 0)
+    f.SetFieldIntegerList(2, [1,0])
+    f.SetField(3, -32768)
+    f.SetField(4, 1.23)
+    lyr.CreateFeature(f)
+    f = None
+
+    ds = None
+
+    # Test first with .xsd and then without
+    for i in range(3):
+
+        ds = ogr.Open(filename)
+        lyr = ds.GetLayer(0)
+        if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('b1')).GetType() != ogr.OFTInteger or \
+           lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('b1')).GetSubType() != ogr.OFSTBoolean:
+            print(i)
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('bool_list')).GetType() != ogr.OFTIntegerList or \
+           lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('bool_list')).GetSubType() != ogr.OFSTBoolean:
+            print(i)
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if i == 0:
+            if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('short')).GetType() != ogr.OFTInteger or \
+            lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('short')).GetSubType() != ogr.OFSTInt16:
+                print(i)
+                gdaltest.post_reason('fail')
+                return 'fail'
+        if i == 0:
+            if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('float')).GetType() != ogr.OFTReal or \
+            lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('float')).GetSubType() != ogr.OFSTFloat32:
+                print(i)
+                gdaltest.post_reason('fail')
+                return 'fail'
+        f = lyr.GetNextFeature()
+        if f.GetField('b1') != 1 or f.GetField('b2') != 0 or f.GetFieldAsString('bool_list') != '(2:1,0)' or f.GetField('short') != -32768 or f.GetField('float') != 1.23:
+            print(i)
+            gdaltest.post_reason('fail')
+            f.DumpReadable()
+            return 'fail'
+        ds = None
+
+        gdal.Unlink(filename[0:-3]+"xsd")
+
+    gdal.Unlink(filename)
+    gdal.Unlink(filename[0:-3]+"gfs")
+
+    return 'success'
+
+###############################################################################
+# Test reading GML with xsd with a choice of geometry properites
+
+def ogr_gml_68():
+
+    if not gdaltest.have_gml_reader:
+        return 'skip'
+
+    ds = ogr.Open('data/choicepolygonmultipolygon.gml')
+
+    expected_results = [ 'MULTIPOLYGON (((0 0,0 1,1 1,1 0,0 0)))',
+                         'MULTIPOLYGON (((0 0,0 1,1 1,1 0,0 0)),((10 0,10 1,11 1,11 0,10 0)))' ]
+
+    lyr = ds.GetLayer(0)
+    if lyr.GetGeomType() != ogr.wkbMultiPolygon:
+        gdaltest.post_reason(' did not get expected layer geometry type' )
+        return 'fail'
+    for i in range(2):
+        feat = lyr.GetNextFeature()
+        geom = feat.GetGeometryRef()
+        got_wkt = geom.ExportToWkt()
+        if got_wkt != expected_results[i]:
+            gdaltest.post_reason('did not get expected geometry' )
+            print(got_wkt)
+            return 'fail'
+
+    ds = None
 
     return 'success'
 
@@ -3218,7 +3679,16 @@ gdaltest_list = [
     ogr_gml_63,
     ogr_gml_64,
     ogr_gml_65,
+    ogr_gml_66,
+    ogr_gml_67,
+    ogr_gml_68,
     ogr_gml_cleanup ]
+
+#gdaltest_list = [ 
+#    ogr_gml_clean_files,
+#    ogr_gml_1,
+#    ogr_gml_66,
+#    ogr_gml_cleanup ]
 
 if __name__ == '__main__':
 

@@ -119,20 +119,20 @@ OGRFeature* OGRXLSXLayer::GetFeature( long nFeatureId )
 }
 
 /************************************************************************/
-/*                           SetFeature()                               */
+/*                           ISetFeature()                               */
 /************************************************************************/
 
-OGRErr OGRXLSXLayer::SetFeature( OGRFeature *poFeature )
+OGRErr OGRXLSXLayer::ISetFeature( OGRFeature *poFeature )
 {
     Init();
     if (poFeature == NULL)
-        return OGRMemLayer::SetFeature(poFeature);
+        return OGRMemLayer::ISetFeature(poFeature);
 
     long nFID = poFeature->GetFID();
     if (nFID != OGRNullFID)
         poFeature->SetFID(nFID - (1 + bHasHeaderLine));
     SetUpdated();
-    OGRErr eErr = OGRMemLayer::SetFeature(poFeature);
+    OGRErr eErr = OGRMemLayer::ISetFeature(poFeature);
     poFeature->SetFID(nFID);
     return eErr;
 }
@@ -468,7 +468,7 @@ static void SetField(OGRFeature* poFeature,
         strcmp(pszCellType, "datetime") == 0)
     {
         struct tm sTm;
-        double dfNumberOfDaysSince1900 = atof(pszValue);
+        double dfNumberOfDaysSince1900 = CPLAtof(pszValue);
 #define NUMBER_OF_DAYS_BETWEEN_1900_AND_1970        25569
 #define NUMBER_OF_SECONDS_PER_DAY                   86400
         GIntBig nUnixTime = (GIntBig)((dfNumberOfDaysSince1900 -
@@ -1623,11 +1623,16 @@ static void WriteWorkbook(const char* pszName, OGRDataSource* poDS)
 
 static void BuildColString(char szCol[5], int nCol)
 {
+    /*
+    A Z   AA AZ   BA BZ   ZA   ZZ   AAA    ZZZ      AAAA
+    0 25  26 51   52 77   676  701  702    18277    18278
+    */
     int k = 0;
     szCol[k++] = (nCol % 26) + 'A';
     while(nCol >= 26)
     {
         nCol /= 26;
+        nCol --; /* We wouldn't need that if this was a proper base 26 numeration scheme ! */
         szCol[k++] = (nCol % 26) + 'A';
     }
     szCol[k] = 0;

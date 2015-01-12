@@ -754,6 +754,10 @@ NETCDF_HAS_NC4
 NETCDF_ROOT
 NETCDF_SETTING
 NETCDF_NCCONFIG
+KEA_LIB
+KEA_INC
+HAVE_KEA
+KEA_CONFIG
 HDF5_INCLUDE
 HAVE_HDF5
 HDF4_INCLUDE
@@ -798,6 +802,8 @@ RENAME_INTERNAL_LIBTIFF_SYMBOLS
 HAVE_HIDE_INTERNAL_SYMBOLS
 HAVE_AVX_AT_COMPILE_TIME
 AVXFLAGS
+HAVE_SSE_AT_COMPILE_TIME
+SSEFLAGS
 HAVE_GCC_ATOMIC_BUILTINS
 HAVE_LIBTOOL
 SO_EXT
@@ -930,6 +936,7 @@ with_fme
 with_sosi
 with_hdf4
 with_hdf5
+with_kea
 with_netcdf
 with_jasper
 with_openjpeg
@@ -1670,6 +1677,7 @@ Optional Packages:
   --with-sosi=ARG        Include SOSI support (ARG=SOSI lib Path, yes or no)
   --with-hdf4=ARG       Include HDF4 support (ARG=path)
   --with-hdf5=ARG       Include HDF5 support (ARG=path)
+  --with-kea=ARG      Include kealib (ARG=path to kea-config) [default=yes]
   --with-netcdf=ARG     Include netCDF support (ARG=no or netCDF tree prefix)
   --with-jasper=ARG     Include JPEG-2000 support via JasPer library (ARG=path)
   --with-openjpeg=ARG     Include JPEG-2000 support via OpenJPEG 2.0 library (ARG=path)
@@ -16880,13 +16888,21 @@ $as_echo "#define VSI_NEED_LARGEFILE64_SOURCE 1" >>confdefs.h
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 
-    ac_fn_c_check_func "$LINENO" "stat64" "ac_cv_func_stat64"
+    case "${host_os}" in
+      darwin*)
+        VSI_STAT64=stat
+        VSI_STAT64_T=stat
+        ;;
+      *)
+        ac_fn_c_check_func "$LINENO" "stat64" "ac_cv_func_stat64"
 if test "x$ac_cv_func_stat64" = xyes; then :
   VSI_STAT64=stat64 VSI_STAT64_T=stat64
 else
   VSI_STAT64=stat VSI_STAT64_T=stat
 fi
 
+        ;;
+    esac
     ac_fn_c_check_func "$LINENO" "fopen64" "ac_cv_func_fopen64"
 if test "x$ac_cv_func_fopen64" = xyes; then :
   VSI_FOPEN64=fopen64
@@ -17417,13 +17433,13 @@ if test "$with_sse" = "yes" -o "$with_sse" = ""; then
     if test -z "`${CXX} ${CXXFLAGS} -o detectsse detectsse.cpp 2>&1`" ; then
         { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
-        SSEFLAGS="-DHAVE_SSE_AT_COMPILE_TIME"
+        SSEFLAGS=""
         HAVE_SSE_AT_COMPILE_TIME=yes
     else
         if test -z "`${CXX} ${CXXFLAGS} -msse -o detectsse detectsse.cpp 2>&1`" ; then
             { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
-            SSEFLAGS="-msse -DHAVE_SSE_AT_COMPILE_TIME"
+            SSEFLAGS="-msse"
             HAVE_SSE_AT_COMPILE_TIME=yes
         else
             { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
@@ -17457,16 +17473,16 @@ $as_echo "no" >&6; }
        esac
     fi
 
-    if test "$HAVE_SSE_AT_COMPILE_TIME" = "yes"; then
-      CFLAGS="$CFLAGS $SSEFLAGS"
-      CXXFLAGS="$CXXFLAGS $SSEFLAGS"
-    fi
-
     rm -f detectsse*
 else
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
 fi
+
+SSEFLAGS=$SSEFLAGS
+
+HAVE_SSE_AT_COMPILE_TIME=$HAVE_SSE_AT_COMPILE_TIME
+
 
 
 
@@ -21609,6 +21625,105 @@ if test "$HAVE_HDF5" != "no" ; then
 fi
 
 
+KEA_CONFIG=no
+
+
+# Check whether --with-kea was given.
+if test "${with_kea+set}" = set; then :
+  withval=$with_kea;
+fi
+
+
+if test "$with_kea" = "yes" -o "x$with_kea" = "x" ; then
+  # Extract the first word of "kea-config", so it can be a program name with args.
+set dummy kea-config; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_KEA_CONFIG+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $KEA_CONFIG in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_KEA_CONFIG="$KEA_CONFIG" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_KEA_CONFIG="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  test -z "$ac_cv_path_KEA_CONFIG" && ac_cv_path_KEA_CONFIG="no"
+  ;;
+esac
+fi
+KEA_CONFIG=$ac_cv_path_KEA_CONFIG
+if test -n "$KEA_CONFIG"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $KEA_CONFIG" >&5
+$as_echo "$KEA_CONFIG" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+else
+   KEA_CONFIG=$with_kea
+fi
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for kea" >&5
+$as_echo_n "checking for kea... " >&6; }
+
+if test "$KEA_CONFIG" = "no" ; then
+
+  HAVE_KEA=no
+  KEA_LIB=
+  KEA_INC=
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+
+else
+  if test -d $KEA_CONFIG ; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+      as_fn_error $? "--with-kea argument is a directory.  It should be the path to the kea_config script, often somewhere like /usr/local/bin/kea_config." "$LINENO" 5
+  fi
+
+  if test \! -x $KEA_CONFIG ; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+      as_fn_error $? "--with-kea argument is a not an executable file.  It should be the path to the kea_config script, often somewhere like /usr/local/bin/kea_config." "$LINENO" 5
+  fi
+
+  HAVE_KEA=yes
+  KEA_LIB="`$KEA_CONFIG --libs`"
+  KEA_INC="`$KEA_CONFIG --cflags`"
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+fi
+
+HAVE_KEA=$HAVE_KEA
+
+KEA_INC=$KEA_INC
+
+KEA_LIB=$KEA_LIB
+
+
+if test "$HAVE_KEA" != "no" ; then
+  OPT_GDAL_FORMATS="kea $OPT_GDAL_FORMATS"
+fi
+
+
 NETCDF_SETTING=
 NETCDF_ROOT=
 NETCDF_HAS_NC4=
@@ -22606,22 +22721,24 @@ fi
       ECW_LIBS="-lecwj2 $CARBON_FRAMEWORK"
     fi
   fi
-  # ECWJP2 SDK 5.1 style
-  if test "$ECW_SETTING" = "no" ; then
-        if test -r /Intergraph/ERDASEcwJpeg2000SDK5.1/lib/libEcwJp2SDK.a; then
-                ECW_LIBDIR=/Intergraph/ERDASEcwJpeg2000SDK5.1/lib
-                ECW_INCLUDE=-I/Intergraph/ERDASEcwJpeg2000SDK5.1/include
-                ECW_LIBS="-L$ECW_LIBDIR -lEcwJp2SDK -framework Cocoa"
-                ECW_SETTING=yes
-                ECW_FLAGS="-DHAVE_ECW_BUILDNUMBER_H $ECW_FLAGS"
-                { $as_echo "$as_me:${as_lineno-$LINENO}: result: found Intergraph ERDAS EcwJpeg2000 SDK 5.1 in /Intergraph/ERDASEcwJpeg2000SDK5.1/." >&5
-$as_echo "found Intergraph ERDAS EcwJpeg2000 SDK 5.1 in /Intergraph/ERDASEcwJpeg2000SDK5.1/." >&6; }
-        fi
-  fi
 else
 
-  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for libNCSEcw.so or libecwj2" >&5
-$as_echo_n "checking for libNCSEcw.so or libecwj2... " >&6; }
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for libNCSEcw.a or libecwj2" >&5
+$as_echo_n "checking for libNCSEcw.a or libecwj2... " >&6; }
+  ECW_ARCH=x86
+  ECW_CONF="release"
+  ECW_FLAGS="-DLINUX -DX86 -DPOSIX -DHAVE_COMPRESS -DECW_COMPRESS_RW_SDK_VERSION"
+  ECW_FRAMEWORK_COCOA=""
+  if test "`arch`" = "x86_64" ; then
+    ECW_ARCH="x64"
+  fi
+  if test ! -z "`uname | grep Darwin`" ; then
+    ECW_ARCH=""
+    ECW_CONF=""
+    ECW_FLAGS=""
+    ECW_FRAMEWORK_COCOA=" -framework Cocoa "
+  fi
+
   ECW_SETTING=yes
   if test -r $with_ecw/lib/libNCSCnet.so -o -r $with_ecw/lib/libNCSCnet.dylib ; then
     ECW_LIBS="-L$with_ecw/lib -lNCSEcw -lNCSEcwC -lNCSCnet -lNCSUtil"
@@ -22640,27 +22757,28 @@ $as_echo "found in $with_ecw/bin." >&6; }
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: found libecwj2 in $with_ecw/lib." >&5
 $as_echo "found libecwj2 in $with_ecw/lib." >&6; }
 
-  # ECW SDK 5.0 style
-  elif test -r $with_ecw/lib/x64/release/libNCSEcw.so ; then
-    if test `arch` == "x86_64" ; then
-      ECW_LIBDIR=$with_ecw/lib/x64/release
-    else
-      ECW_LIBDIR=$with_ecw/lib/x86/release
-    fi
-    ECW_FLAGS="-DLINUX -DX86 -DPOSIX -DHAVE_COMPRESS -DECW_COMPRESS_RW_SDK_VERSION"
-    ECW_LIBS="-L$ECW_LIBDIR -lNCSEcw"
+  # ECW SDK 5.0 style and also for the case where license type is included in path i.e. specific license type is requested.
+  elif test -r $with_ecw/lib/$ECW_ARCH/$ECW_CONF/libNCSEcw.a ; then
+    ECW_LIBDIR=$with_ecw/lib/$ECW_ARCH/$ECW_CONF
+    ECW_LIBS="-L$ECW_LIBDIR -lNCSEcw $ECW_FRAMEWORK_COCOA"
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: found Intergraph 5.x+ SDK in ${ECW_LIBDIR}." >&5
 $as_echo "found Intergraph 5.x+ SDK in ${ECW_LIBDIR}." >&6; }
  # ECWJP2 SDK 5.1 style
-  elif test -r $with_ecw/lib/libEcwJp2SDK.a; then
-        ECW_LIBDIR=$with_ecw/lib
-        ECW_INCLUDE=-I$with_ecw/include
-        ECW_LIBS="-L$ECW_LIBDIR -lEcwJp2SDK -framework Cocoa"
-        ECW_FLAGS="-DHAVE_ECW_BUILDNUMBER_H $ECW_FLAGS"
-        { $as_echo "$as_me:${as_lineno-$LINENO}: result: found Intergraph 5.1+ SDK in $ {with_ecw}." >&5
-$as_echo "found Intergraph 5.1+ SDK in $ {with_ecw}." >&6; }
+  elif test -d $with_ecw; then
+    ecw_license_types=( "Desktop_Read-Write" "Server_Read-Only_EndUser" "Server_Read-Only" "Server_Read-Write" "Desktop_Read-Only"   )
+    for ecw_license_type in ${ecw_license_types[@]};
+      do
+        ECW_LIBDIR=$with_ecw/$ecw_license_type/lib/$ECW_ARCH/$ECW_CONF
+        if test -r $ECW_LIBDIR/libNCSEcw.a; then
+          ECW_LIBS="-L$ECW_LIBDIR -lNCSEcw $ECW_FRAMEWORK_COCOA"
+          with_ecw=$with_ecw/$ecw_license_type
+          { $as_echo "$as_me:${as_lineno-$LINENO}: result: found Intergraph 5.x+ SDK in ${ECW_LIBDIR}." >&5
+$as_echo "found Intergraph 5.x+ SDK in ${ECW_LIBDIR}." >&6; }
+          break
+        fi
+      done
  else
-    as_fn_error $? "not found in $with_ecw/lib or $with_ecw/bin." "$LINENO" 5
+    as_fn_error $? "not found in $with_ecw." "$LINENO" 5
   fi
 
   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for NCSECWClient.h in $with_ecw/include" >&5
@@ -23107,13 +23225,14 @@ Please, locate Oracle directories using --with-oci or \
             CPPFLAGS="$CPPFLAGS -I$oracle_include_dir3"
         fi
 
-                        saved_LDFLAGS="$LDFLAGS"
-	if test -n "$oracle_include_dir" ; then
+                        if test -n "$oracle_include_dir" ; then
           oci_ldflags="-L$oracle_lib_dir -lclntsh"
         else
           oci_ldflags="-L$oracle_lib_dir -L$oracle_lib_dir2 -lclntsh"
         fi
-        LDFLAGS="$LDFLAGS $oci_ldflags"
+
+        saved_LIBS="$LIBS"
+        LIBS="$LIBS $oci_ldflags"
 
                                 if test -f "$oracle_include_dir/oci.h"; then
             ACTIVE_INCLUDE_DIR="$oracle_include_dir"
@@ -23243,7 +23362,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
         fi
 
         CPPFLAGS="$saved_CPPFLAGS"
-        LDFLAGS="$saved_LDFLAGS"
+        LIBS="$saved_LIBS"
     fi
 
                 oracle_version_req=$ORACLE_OCI_REQ_VERSION
@@ -23467,22 +23586,19 @@ $as_echo "no" >&6; }
   fi
 
   MYSQL_VERSION="`$MYSQL_CONFIG --version`"
+  MYSQL_MAJOR_VERSION=${MYSQL_VERSION%%'.'*}
 
-  case ${MYSQL_VERSION} in
-    [0-3]*)
-      HAVE_MYSQL=no
-      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no, mysql is pre-4.x" >&5
+  if test $MYSQL_MAJOR_VERSION -le 3 ; then
+    HAVE_MYSQL=no
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: no, mysql is pre-4.x" >&5
 $as_echo "no, mysql is pre-4.x" >&6; }
-	;;
-    *)
+  else
       HAVE_MYSQL=yes
       MYSQL_LIB="`$MYSQL_CONFIG --libs`"
       MYSQL_INC="`$MYSQL_CONFIG --include`"
       { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
-
-	;;
-  esac
+  fi
 fi
 
 HAVE_MYSQL=$HAVE_MYSQL
@@ -24726,13 +24842,14 @@ Please, locate Oracle directories using --with-oci or \
             CPPFLAGS="$CPPFLAGS -I$oracle_include_dir3"
         fi
 
-                        saved_LDFLAGS="$LDFLAGS"
-	if test -n "$oracle_include_dir" ; then
+                        if test -n "$oracle_include_dir" ; then
           oci_ldflags="-L$oracle_lib_dir -lclntsh"
         else
           oci_ldflags="-L$oracle_lib_dir -L$oracle_lib_dir2 -lclntsh"
         fi
-        LDFLAGS="$LDFLAGS $oci_ldflags"
+
+        saved_LIBS="$LIBS"
+        LIBS="$LIBS $oci_ldflags"
 
                                 if test -f "$oracle_include_dir/oci.h"; then
             ACTIVE_INCLUDE_DIR="$oracle_include_dir"
@@ -24862,7 +24979,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
         fi
 
         CPPFLAGS="$saved_CPPFLAGS"
-        LDFLAGS="$saved_LDFLAGS"
+        LIBS="$saved_LIBS"
     fi
 
                 oracle_version_req=$ORACLE_OCI_REQ_VERSION
@@ -29215,8 +29332,16 @@ $as_echo "yes" >&6; }
             { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
         else
-            { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+            # clang 3.4 needs linking against libstdc++ (ubuntu 14.04)
+            if test -z "`${CXX} ${CPPFLAGS} testarmadillo.cpp -o testarmadillo -larmadillo -lstdc++ 2>&1`" ; then
+                HAVE_ARMADILLO=yes
+                LIBS="-larmadillo -lstdc++ ${LIBS}"
+                { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+            else
+                { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
 $as_echo "no" >&6; }
+            fi
         fi
     fi
     rm -f testarmadillo.*
@@ -31729,6 +31854,9 @@ echo "  HDF4 support:              ${HAVE_HDF4}"
 
 
 echo "  HDF5 support:              ${HAVE_HDF5}"
+
+
+echo "  Kea support:               ${HAVE_KEA}"
 
 
 echo "  NetCDF support:            ${NETCDF_SETTING}"

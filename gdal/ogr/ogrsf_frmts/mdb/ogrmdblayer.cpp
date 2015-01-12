@@ -483,7 +483,7 @@ const char *OGRMDBLayer::GetFIDColumn()
 /*                             Initialize()                             */
 /************************************************************************/
 
-CPLErr OGRMDBLayer::Initialize( const char *pszTableName,
+CPLErr OGRMDBLayer::Initialize( CPL_UNUSED const char *pszTableName,
                                 const char *pszGeomCol,
                                 int nShapeType,
                                 double dfExtentLeft,
@@ -558,7 +558,7 @@ CPLErr OGRMDBLayer::Initialize( const char *pszTableName,
     }
 
     if( eOGRType != wkbUnknown && eOGRType != wkbNone && bHasZ )
-        eOGRType = (OGRwkbGeometryType)(((int) eOGRType) | wkb25DBit);
+        eOGRType = wkbSetZ(eOGRType);
 
     poFeatureDefn->SetGeomType(eOGRType);
 
@@ -570,7 +570,7 @@ CPLErr OGRMDBLayer::Initialize( const char *pszTableName,
 /*                             Initialize()                             */
 /************************************************************************/
 
-CPLErr OGRMDBLayer::Initialize( const char *pszTableName,
+CPLErr OGRMDBLayer::Initialize( CPL_UNUSED const char *pszTableName,
                                 const char *pszGeomCol,
                                 OGRSpatialReference* poSRS )
 

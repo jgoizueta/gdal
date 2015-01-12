@@ -98,9 +98,24 @@ def ogr_sql_sqlite_1():
         lyr.CreateField(field_defn)
         field_defn = ogr.FieldDefn('from', ogr.OFTString)
         lyr.CreateField(field_defn)
+        field_defn = ogr.FieldDefn('boolfield', ogr.OFTInteger)
+        field_defn.SetSubType(ogr.OFSTBoolean)
+        lyr.CreateField(field_defn)
+        field_defn = ogr.FieldDefn('int16field', ogr.OFTInteger)
+        field_defn.SetSubType(ogr.OFSTInt16)
+        lyr.CreateField(field_defn)
+        field_defn = ogr.FieldDefn('float32field', ogr.OFTReal)
+        field_defn.SetSubType(ogr.OFSTFloat32)
+        lyr.CreateField(field_defn)
+        field_defn = ogr.FieldDefn('intlistfield', ogr.OFTIntegerList)
+        lyr.CreateField(field_defn)
+        field_defn = ogr.FieldDefn('doublelistfield', ogr.OFTRealList)
+        lyr.CreateField(field_defn)
+        field_defn = ogr.FieldDefn('strlistfield', ogr.OFTStringList)
+        lyr.CreateField(field_defn)
 
         # Test INSERT
-        sql_lyr = ds.ExecuteSQL( "INSERT INTO my_layer (intfield, nullablefield, doublefield, strfield, binaryfield, datetimefield, datefield, timefield, \"from\") VALUES (1,NULL,2.34,'foo',x'0001FF', '2012-08-23 21:24', '2012-08-23', '21:24', 'from_val')", dialect = 'SQLite' )
+        sql_lyr = ds.ExecuteSQL( "INSERT INTO my_layer (intfield, nullablefield, doublefield, strfield, binaryfield, datetimefield, datefield, timefield, \"from\", boolfield, int16field, float32field, intlistfield, doublelistfield, strlistfield) VALUES (1,NULL,2.34,'foo',x'0001FF', '2012-08-23 21:24', '2012-08-23', '21:24', 'from_val', 1, -32768, 1.23, '(2:2,3)', '(1:1.23)', '(1:a)')", dialect = 'SQLite' )
         ds.ReleaseResultSet( sql_lyr )
 
         lyr.ResetReading()
@@ -142,6 +157,24 @@ def ogr_sql_sqlite_1():
 
         # Test SELECT
         sql_lyr = ds.ExecuteSQL( "SELECT * FROM my_layer", dialect = 'SQLite' )
+        if sql_lyr.GetLayerDefn().GetFieldDefn(sql_lyr.GetLayerDefn().GetFieldIndex('boolfield')).GetSubType() != ogr.OFSTBoolean:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if sql_lyr.GetLayerDefn().GetFieldDefn(sql_lyr.GetLayerDefn().GetFieldIndex('int16field')).GetSubType() != ogr.OFSTInt16:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if sql_lyr.GetLayerDefn().GetFieldDefn(sql_lyr.GetLayerDefn().GetFieldIndex('float32field')).GetSubType() != ogr.OFSTFloat32:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if sql_lyr.GetLayerDefn().GetFieldDefn(sql_lyr.GetLayerDefn().GetFieldIndex('intlistfield')).GetType() != ogr.OFTIntegerList:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if sql_lyr.GetLayerDefn().GetFieldDefn(sql_lyr.GetLayerDefn().GetFieldIndex('doublelistfield')).GetType() != ogr.OFTRealList:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if sql_lyr.GetLayerDefn().GetFieldDefn(sql_lyr.GetLayerDefn().GetFieldIndex('strlistfield')).GetType() != ogr.OFTStringList:
+            gdaltest.post_reason('fail')
+            return 'fail'
         feat = sql_lyr.GetNextFeature()
         if feat.GetField('intfield') != 2 or \
            feat.GetField('nullablefield') is not None or \
@@ -149,7 +182,13 @@ def ogr_sql_sqlite_1():
            feat.GetField('strfield') != 'bar' or \
            feat.GetField('datetimefield') != '2012/08/23 21:24:00' or \
            feat.GetField('datefield') != '2012/08/23' or \
-           feat.GetField('timefield') != '12:34:00':
+           feat.GetField('timefield') != '12:34:00' or \
+           feat.GetField('boolfield') != 1 or \
+           feat.GetField('int16field') != -32768 or \
+           feat.GetField('float32field') != 1.23 or \
+           feat.GetField('intlistfield') != [2, 3] or \
+           feat.GetField('doublelistfield') != [1.23] or \
+           feat.GetField('strlistfield') != ['a']:
             gdaltest.post_reason('failure')
             feat.DumpReadable()
             return 'fail'
@@ -1662,6 +1701,39 @@ def ogr_sql_sqlite_28():
 
     return 'success'
 
+###############################################################################
+# Test compat with curve geometries
+
+def ogr_sql_sqlite_29():
+
+    if not ogrtest.has_sqlite_dialect:
+        return 'skip'
+
+    ds = ogr.GetDriverByName('Memory').CreateDataSource('')
+    lyr = ds.CreateLayer('test', geom_type = ogr.wkbCircularString)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt('CIRCULARSTRING(0 0,1 0,0 0)'))
+    lyr.CreateFeature(f)
+    f = None
+    sql_lyr = ds.ExecuteSQL('select * from test', dialect = 'SQLite')
+    geom_type = sql_lyr.GetGeomType()
+    f = sql_lyr.GetNextFeature()
+    got_wkt = f.GetGeometryRef().ExportToWkt()
+    ds.ReleaseResultSet(sql_lyr)
+    ds = None
+    
+    if geom_type != ogr.wkbCircularString:
+        gdaltest.post_reason('fail')
+        print(geom_type)
+        return 'fail'
+    
+    if got_wkt != 'CIRCULARSTRING (0 0,1 0,0 0)':
+        gdaltest.post_reason('fail')
+        print(got_wkt)
+        return 'fail'
+
+    return 'success'
+
 gdaltest_list = [
     ogr_sql_sqlite_1,
     ogr_sql_sqlite_2,
@@ -1692,7 +1764,8 @@ gdaltest_list = [
     ogr_sql_sqlite_25,
     ogr_sql_sqlite_26,
     ogr_sql_sqlite_27,
-    ogr_sql_sqlite_28
+    ogr_sql_sqlite_28,
+    ogr_sql_sqlite_29
 ]
 
 if __name__ == '__main__':

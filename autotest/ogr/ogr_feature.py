@@ -268,6 +268,14 @@ def ogr_feature_cp_4():
     if not check( dst_feature, 'field_binary', '0123465789ABCDEF' ):
         return 'failure'
 
+    expected = '\x01\x23\x46\x57\x89\xAB\xCD\xEF'
+    if sys.version_info >= (3,0,0):
+        expected = expected.encode('LATIN1')
+    if dst_feature.GetFieldAsBinary('field_binary') != expected:
+        return 'failure'
+    if dst_feature.GetFieldAsBinary(dst_feature.GetDefnRef().GetFieldIndex('field_binary')) != expected:
+        return 'failure'
+
     if not check( dst_feature, 'field_date', None ):
         return 'failure'
 
@@ -534,6 +542,28 @@ def ogr_feature_cp_10():
     
     return 'success'
 
+
+###############################################################################
+# Test SetField() with unicode string
+
+def ogr_feature_cp_11():
+    from sys import version_info
+    if sys.version_info >= (3,0,0):
+        return 'skip'
+
+    feat_def = ogr.FeatureDefn( 'test' )
+
+    field_def = ogr.FieldDefn( 'field_string', ogr.OFTString )
+    feat_def.AddFieldDefn( field_def )
+
+    src_feature = ogr.Feature( feat_def )
+    src_feature.SetField( 'field_string', 'abc def'.decode('utf-8') )
+    if src_feature.GetField('field_string') != 'abc def':
+        return 'failure'
+
+    return 'success'
+
+
 def ogr_feature_cleanup():
 
     gdaltest.src_feature = None
@@ -551,6 +581,7 @@ gdaltest_list = [
     ogr_feature_cp_8,
     ogr_feature_cp_9,
     ogr_feature_cp_10,
+    ogr_feature_cp_11,
     ogr_feature_cleanup ]
 
 if __name__ == '__main__':

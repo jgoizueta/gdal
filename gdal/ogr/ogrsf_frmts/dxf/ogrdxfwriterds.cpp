@@ -128,7 +128,8 @@ int OGRDXFWriterDS::TestCapability( const char * pszCap )
 
 {
     if( EQUAL(pszCap,ODsCCreateLayer) )
-        return TRUE;
+        // Unable to have more than one OGR entities layer in a DXF file, with one options blocks layer.
+        return poBlocksLayer == NULL || poLayer == NULL;
     else
         return FALSE;
 }
@@ -312,10 +313,7 @@ static int WriteValue( VSILFILE *fp, int nCode, double dfValue )
 {
     char szLinePair[64];
 
-    snprintf(szLinePair, sizeof(szLinePair), "%3d\n%.15g\n", nCode, dfValue );
-    char* pszComma = strchr(szLinePair, ',');
-    if (pszComma)
-        *pszComma = '.';
+    CPLsnprintf(szLinePair, sizeof(szLinePair), "%3d\n%.15g\n", nCode, dfValue );
     size_t nLen = strlen(szLinePair);
     if( VSIFWriteL( szLinePair, 1, nLen, fp ) != nLen )
     {

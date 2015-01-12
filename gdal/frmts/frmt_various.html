@@ -112,6 +112,17 @@ limited.  Additional sample prj.adf files may be sent to the maintainer,
 
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 
+<h2><a name="ARG">ARG -- Azavea Raster Grid</a></h2>
+
+<p>Driver implementation for a raw format that is used in 
+<a href="http://geotrellis.io/">GeoTrellis</a> and called ARG. 
+<a href="http://geotrellis.io/documentation/0.9.0/geotrellis/io/arg/">ARG format 
+specification</a>. Format is essentially a raw format, with a companion .JSON file.</p>
+
+<p>NOTE: Implemented as <tt>gdal/frmts/arg/argdataset.cpp</tt>.</p>
+
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+
 <h2><a name="BSB">BSB -- Maptech/NOAA BSB Nautical Chart Format</a></h2>
 
 <p>BSB Nautical Chart format is supported for read access, including reading 
@@ -972,6 +983,12 @@ details.</li>
 The default is 6.  A value of 1 is fast but does no compression, and a value
 of 9 is slow but does the best compression.</li>
 
+<li> <b>TITLE=value</b>: Title, written in a TEXT or iTXt chunk (GDAL &gt;= 2.0 )</li>
+<li> <b>DESCRIPTION=value</b>: Description, written in a TEXT or iTXt chunk (GDAL &gt;= 2.0 )</li>
+<li> <b>COPYRIGHT=value</b>: Copyright, written in a TEXT or iTXt chunk (GDAL &gt;= 2.0 )</li>
+<li> <b>COMMENT=value</b>: Comment, written in a TEXT or iTXt chunk (GDAL &gt;= 2.0 )</li>
+<li> <b>WRITE_METADATA_AS_TEXT=YES/NO</b>: Whether to write source dataset metadata in TEXT chunks (GDAL &gt;= 2.0 )</li>
+
 </ul>
 
 <p>NOTE: Implemented as <tt>gdal/frmts/png/pngdataset.cpp</tt>.</p> 
@@ -1000,6 +1017,21 @@ software which is not liberal to this value.</li>
 </ul>
 
 <p>NOTE: Implemented as <tt>gdal/frmts/raw/pnmdataset.cpp</tt>.</p>
+
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+
+<h2><a name="ROI_PAC">ROI_PAC</a></h2>
+
+<p>Read-only driver for the image formats used in the JPL's ROI_PAC 
+project (<a href="https://aws.roipac.org/">https://aws.roipac.org/</a>).
+All image type are supported excepted .raw images.</p>
+
+<p>Metadata are stored in the ROI_PAC domain.</p>
+
+<p>Georeferencing is supported, but expect problems when using the UTM 
+projection, as ROI_PAC format do not store any hemisphere field.</p>
+
+<p>NOTE: Implemented as <tt>gdal/frmts/raw/roipacdataset.cpp</tt>.</p>
 
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 

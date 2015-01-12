@@ -486,43 +486,61 @@ void OGRCSVLayer::BuildFeatureDefn( const char* pszNfdcGeomField,
 
         OGRFieldDefn oField(pszFieldName, OFTString);
         if (papszFieldTypes!=NULL && iField<CSLCount(papszFieldTypes)) {
-
-            char* pszLeftParenthesis = strchr(papszFieldTypes[iField], '(');
-            if (pszLeftParenthesis && pszLeftParenthesis != papszFieldTypes[iField] &&
-                pszLeftParenthesis[1] >= '0' && pszLeftParenthesis[1] <= '9')
+            if (EQUAL(papszFieldTypes[iField], "Integer(Boolean)"))
             {
-                int nWidth = 0;
-                int nPrecision = 0;
-
-                char* pszDot = strchr(pszLeftParenthesis, '.');
-                if (pszDot) *pszDot = 0;
-                *pszLeftParenthesis = 0;
-
-                if (pszLeftParenthesis[-1] == ' ')
-                    pszLeftParenthesis[-1] = 0;
-
-                nWidth = atoi(pszLeftParenthesis+1);
-                if (pszDot)
-                    nPrecision = atoi(pszDot+1);
-
-                oField.SetWidth(nWidth);
-                oField.SetPrecision(nPrecision);
-            }
-
-            if (EQUAL(papszFieldTypes[iField], "Integer"))
                 oField.SetType(OFTInteger);
-            else if (EQUAL(papszFieldTypes[iField], "Real"))
+                oField.SetSubType(OFSTBoolean);
+                oField.SetWidth(1);
+            }
+            else if (EQUAL(papszFieldTypes[iField], "Integer(Int16)"))
+            {
+                oField.SetType(OFTInteger);
+                oField.SetSubType(OFSTInt16);
+            }
+            else if (EQUAL(papszFieldTypes[iField], "Real(Float32)"))
+            {
                 oField.SetType(OFTReal);
-            else if (EQUAL(papszFieldTypes[iField], "String"))
-                oField.SetType(OFTString);
-            else if (EQUAL(papszFieldTypes[iField], "Date"))
-                oField.SetType(OFTDate); 
-            else if (EQUAL(papszFieldTypes[iField], "Time"))
-                oField.SetType(OFTTime);
-            else if (EQUAL(papszFieldTypes[iField], "DateTime"))
-                oField.SetType(OFTDateTime);
+                oField.SetSubType(OFSTFloat32);
+            }
             else
-                CPLError(CE_Warning, CPLE_NotSupported, "Unknown type : %s", papszFieldTypes[iField]);
+            {
+                char* pszLeftParenthesis = strchr(papszFieldTypes[iField], '(');
+                if (pszLeftParenthesis && pszLeftParenthesis != papszFieldTypes[iField] &&
+                    pszLeftParenthesis[1] >= '0' && pszLeftParenthesis[1] <= '9')
+                {
+                    int nWidth = 0;
+                    int nPrecision = 0;
+
+                    char* pszDot = strchr(pszLeftParenthesis, '.');
+                    if (pszDot) *pszDot = 0;
+                    *pszLeftParenthesis = 0;
+
+                    if (pszLeftParenthesis[-1] == ' ')
+                        pszLeftParenthesis[-1] = 0;
+
+                    nWidth = atoi(pszLeftParenthesis+1);
+                    if (pszDot)
+                        nPrecision = atoi(pszDot+1);
+
+                    oField.SetWidth(nWidth);
+                    oField.SetPrecision(nPrecision);
+                }
+
+                if (EQUAL(papszFieldTypes[iField], "Integer"))
+                    oField.SetType(OFTInteger);
+                else if (EQUAL(papszFieldTypes[iField], "Real"))
+                    oField.SetType(OFTReal);
+                else if (EQUAL(papszFieldTypes[iField], "String"))
+                    oField.SetType(OFTString);
+                else if (EQUAL(papszFieldTypes[iField], "Date"))
+                    oField.SetType(OFTDate); 
+                else if (EQUAL(papszFieldTypes[iField], "Time"))
+                    oField.SetType(OFTTime);
+                else if (EQUAL(papszFieldTypes[iField], "DateTime"))
+                    oField.SetType(OFTDateTime);
+                else
+                    CPLError(CE_Warning, CPLE_NotSupported, "Unknown type : %s", papszFieldTypes[iField]);
+            }
         }
 
         if( (EQUAL(oField.GetNameRef(),"WKT") ||
@@ -537,7 +555,7 @@ void OGRCSVLayer::BuildFeatureDefn( const char* pszNfdcGeomField,
                 EQUAL(pszFieldName,"WKT") ? "" : CPLSPrintf("geom_%s", pszFieldName),
                 wkbUnknown );
 
-            /* Usefull hack for RFC 41 testing */
+            /* Useful hack for RFC 41 testing */
             const char* pszEPSG = strstr(pszFieldName, "_EPSG_");
             if( pszEPSG != NULL )
             {
@@ -656,6 +674,26 @@ void OGRCSVLayer::BuildFeatureDefn( const char* pszNfdcGeomField,
 }
 
 /************************************************************************/
+/*                             OGRCSVIsTrue()                           */
+/************************************************************************/
+
+static int OGRCSVIsTrue(const char* pszStr)
+{
+    return EQUAL(pszStr, "t") || EQUAL(pszStr, "true") || EQUAL(pszStr, "y") ||
+           EQUAL(pszStr, "yes") || EQUAL(pszStr, "on");
+}
+
+/************************************************************************/
+/*                            OGRCSVIsFalse()                           */
+/************************************************************************/
+
+static int OGRCSVIsFalse(const char* pszStr)
+{
+    return EQUAL(pszStr, "f") || EQUAL(pszStr, "false") || EQUAL(pszStr, "n") ||
+           EQUAL(pszStr, "no") || EQUAL(pszStr, "off");
+}
+
+/************************************************************************/
 /*                        AutodetectFieldTypes()                        */
 /************************************************************************/
 
@@ -691,6 +729,9 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
     else if( EQUAL(pszAutodetectWidth, "STRING_ONLY") )
         bAutodetectWidth = TRUE;
 
+    int bQuotedFieldAsString = CSLTestBoolean(CSLFetchNameValueDef(papszOpenOptions,
+                                                      "QUOTED_FIELDS_AS_STRING", "NO"));
+
     char* pszData = (char*) VSIMalloc( nBytes );
     if( pszData != NULL && (vsi_l_offset)nBytes > VSIFTellL(fpCSV) )
     {
@@ -705,10 +746,12 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                                                 FALSE );
 
         std::vector<OGRFieldType> aeFieldType;
+        std::vector<int> abFieldBoolean;
         std::vector<int> abFieldSet;
         std::vector<int> anFieldWidth;
         std::vector<int> anFieldPrecision;
         aeFieldType.resize(nFieldCount);
+        abFieldBoolean.resize(nFieldCount);
         abFieldSet.resize(nFieldCount);
         anFieldWidth.resize(nFieldCount);
         anFieldPrecision.resize(nFieldCount);
@@ -716,7 +759,11 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
 
         while( !VSIFEofL(fpMem) )
         {
-            char** papszTokens = OGRCSVReadParseLineL( fpMem, chDelimiter, FALSE, TRUE );
+            char** papszTokens = OGRCSVReadParseLineL( fpMem, chDelimiter, FALSE,
+                                                       bQuotedFieldAsString );
+            /* Can happen if we just reach EOF while trying to read new bytes */
+            if( papszTokens == NULL )
+                break;
 
             /* Ignore last line if it is truncated */
             if( VSIFEofL(fpMem) && nRead == nRequested &&
@@ -758,6 +805,7 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                 }
 
                 OGRFieldType eOGRFieldType;
+                int bIsBoolean = FALSE;
                 if( eType == CPL_VALUE_INTEGER )
                 {
                     eOGRFieldType = OFTInteger;
@@ -769,6 +817,11 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                 else if( abFieldSet[iField] && aeFieldType[iField] == OFTString )
                 {
                     eOGRFieldType = OFTString;
+                    if( abFieldBoolean[iField] )
+                    {
+                        abFieldBoolean[iField] = OGRCSVIsTrue(papszTokens[iField]) ||
+                                                 OGRCSVIsFalse(papszTokens[iField]);
+                    }
                 }
                 else
                 {
@@ -790,14 +843,19 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                             eOGRFieldType = OFTTime;
                     }
                     else
+                    {
                         eOGRFieldType = OFTString;
+                        bIsBoolean = OGRCSVIsTrue(papszTokens[iField]) ||
+                                     OGRCSVIsFalse(papszTokens[iField]);
+                    }
                 }
 
                 if( !abFieldSet[iField] )
                 {
                     aeFieldType[iField] = eOGRFieldType;
                     abFieldSet[iField] = TRUE;
-                    if( eOGRFieldType == OFTString )
+                    abFieldBoolean[iField] = bIsBoolean;
+                    if( eOGRFieldType == OFTString && !bIsBoolean )
                         nStringFieldCount ++;
                 }
                 else if( aeFieldType[iField] != eOGRFieldType )
@@ -878,21 +936,26 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                 osFieldType = "Date";
             else if( aeFieldType[iField] == OFTTime  )
                 osFieldType = "Time";
+            else if( abFieldBoolean[iField] )
+                osFieldType = "Integer(Boolean)";
             else
                 osFieldType = "String";
 
-            if( anFieldWidth[iField] > 0 &&
-                (aeFieldType[iField] == OFTString ||
-                 (bAutodetectWidthForIntOrReal && aeFieldType[iField] == OFTInteger)) )
+            if( !abFieldBoolean[iField] )
             {
-                osFieldType += CPLSPrintf(" (%d)", anFieldWidth[iField]);
-            }
-            else if ( anFieldWidth[iField] > 0 &&
-                      bAutodetectWidthForIntOrReal &&
-                      aeFieldType[iField] == OFTReal )
-            {
-                osFieldType += CPLSPrintf(" (%d.%d)", anFieldWidth[iField],
-                                          anFieldPrecision[iField]);
+                if( anFieldWidth[iField] > 0 &&
+                    (aeFieldType[iField] == OFTString ||
+                    (bAutodetectWidthForIntOrReal && aeFieldType[iField] == OFTInteger)) )
+                {
+                    osFieldType += CPLSPrintf(" (%d)", anFieldWidth[iField]);
+                }
+                else if ( anFieldWidth[iField] > 0 &&
+                        bAutodetectWidthForIntOrReal &&
+                        aeFieldType[iField] == OFTReal )
+                {
+                    osFieldType += CPLSPrintf(" (%d.%d)", anFieldWidth[iField],
+                                            anFieldPrecision[iField]);
+                }
             }
 
             papszFieldTypes[iField] = CPLStrdup(osFieldType);
@@ -1053,7 +1116,32 @@ OGRFeature * OGRCSVLayer::GetNextUnfilteredFeature()
 
         OGRFieldDefn* poFieldDefn = poFeatureDefn->GetFieldDefn(iOGRField);
         OGRFieldType eFieldType = poFieldDefn->GetType();
-        if ( eFieldType == OFTReal || eFieldType == OFTInteger )
+        OGRFieldSubType eFieldSubType = poFieldDefn->GetSubType();
+        if( eFieldType == OFTInteger && eFieldSubType == OFSTBoolean )
+        {
+            if (papszTokens[iAttr][0] != '\0' && !poFieldDefn->IsIgnored() )
+            {
+                if( OGRCSVIsTrue(papszTokens[iAttr]) ||
+                    strcmp(papszTokens[iAttr], "1") == 0 )
+                {
+                    poFeature->SetField( iOGRField, 1 );
+                }
+                else if( OGRCSVIsFalse(papszTokens[iAttr]) ||
+                    strcmp(papszTokens[iAttr], "0") == 0 )
+                {
+                    poFeature->SetField( iOGRField, 0 );
+                }
+                else if( !bWarningBadTypeOrWidth )
+                {
+                    bWarningBadTypeOrWidth = TRUE;
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                                "Invalid value type found in record %d for field %s. "
+                                "This warning will no longer be emitted",
+                                nNextFID, poFieldDefn->GetNameRef());
+                }
+            }
+        }
+        else if( eFieldType == OFTReal || eFieldType == OFTInteger )
         {
             if (papszTokens[iAttr][0] != '\0' && !poFieldDefn->IsIgnored() )
             {
@@ -1210,10 +1298,10 @@ OGRFeature * OGRCSVLayer::GetNextUnfilteredFeature()
          papszTokens[iNfdcLongitudeS][0] != 0 &&
          papszTokens[iNfdcLatitudeS][0] != 0)
     {
-        double dfLon = atof(papszTokens[iNfdcLongitudeS]) / 3600;
+        double dfLon = CPLAtof(papszTokens[iNfdcLongitudeS]) / 3600;
         if (strchr(papszTokens[iNfdcLongitudeS], 'W'))
             dfLon *= -1;
-        double dfLat = atof(papszTokens[iNfdcLatitudeS]) / 3600;
+        double dfLat = CPLAtof(papszTokens[iNfdcLatitudeS]) / 3600;
         if (strchr(papszTokens[iNfdcLatitudeS], 'S'))
             dfLat *= -1;
         if( !(poFeatureDefn->GetGeomFieldDefn(0)->IsIgnored()) )
@@ -1236,8 +1324,8 @@ OGRFeature * OGRCSVLayer::GetNextUnfilteredFeature()
             papszTokens[iLatitudeField][0] != '0' ||
             papszTokens[iLatitudeField][1] != '\0')
         {
-            double dfLon = atof(papszTokens[iLongitudeField]);
-            double dfLat = atof(papszTokens[iLatitudeField]);
+            double dfLon = CPLAtof(papszTokens[iLongitudeField]);
+            double dfLat = CPLAtof(papszTokens[iLatitudeField]);
             if( !(poFeatureDefn->GetGeomFieldDefn(0)->IsIgnored()) )
                 poFeature->SetGeometryDirectly( new OGRPoint(dfLon, dfLat) );
         }
@@ -1304,6 +1392,8 @@ int OGRCSVLayer::TestCapability( const char * pszCap )
     else if( EQUAL(pszCap,OLCCreateGeomField) )
         return bNew && !bHasFieldNames && eGeometryFormat == OGR_CSV_GEOM_AS_WKT;
     else if( EQUAL(pszCap,OLCIgnoreFields) )
+        return TRUE;
+    else if( EQUAL(pszCap,OLCCurveGeometries) )
         return TRUE;
     else
         return FALSE;
@@ -1530,18 +1620,44 @@ OGRErr OGRCSVLayer::WriteHeader()
 
             if (fpCSVT)
             {
+                int nWidth = poFeatureDefn->GetFieldDefn(iField)->GetWidth();
+                int nPrecision = poFeatureDefn->GetFieldDefn(iField)->GetPrecision();
+
                 switch( poFeatureDefn->GetFieldDefn(iField)->GetType() )
                 {
-                  case OFTInteger:  VSIFPrintfL( fpCSVT, "%s", "Integer"); break;
-                  case OFTReal:     VSIFPrintfL( fpCSVT, "%s", "Real"); break;
+                  case OFTInteger:  
+                  {
+                      if( poFeatureDefn->GetFieldDefn(iField)->GetSubType() == OFSTBoolean )
+                      {
+                          nWidth = 0;
+                          VSIFPrintfL( fpCSVT, "%s", "Integer(Boolean)");
+                      }
+                      else if( poFeatureDefn->GetFieldDefn(iField)->GetSubType() == OFSTInt16 )
+                      {
+                          nWidth = 0;
+                          VSIFPrintfL( fpCSVT, "%s", "Integer(Int16)");
+                      }
+                      else
+                          VSIFPrintfL( fpCSVT, "%s", "Integer");
+                      break;
+                  }
+                  case OFTReal:
+                  {
+                      if( poFeatureDefn->GetFieldDefn(iField)->GetSubType() == OFSTFloat32 )
+                      {
+                          nWidth = 0;
+                          VSIFPrintfL( fpCSVT, "%s", "Real(Float32)");
+                      }
+                      else
+                          VSIFPrintfL( fpCSVT, "%s", "Real");
+                      break;
+                  }
                   case OFTDate:     VSIFPrintfL( fpCSVT, "%s", "Date"); break;
                   case OFTTime:     VSIFPrintfL( fpCSVT, "%s", "Time"); break;
                   case OFTDateTime: VSIFPrintfL( fpCSVT, "%s", "DateTime"); break;
                   default:          VSIFPrintfL( fpCSVT, "%s", "String"); break;
                 }
 
-                int nWidth = poFeatureDefn->GetFieldDefn(iField)->GetWidth();
-                int nPrecision = poFeatureDefn->GetFieldDefn(iField)->GetPrecision();
                 if (nWidth != 0)
                 {
                     if (nPrecision != 0)
@@ -1577,10 +1693,10 @@ OGRErr OGRCSVLayer::WriteHeader()
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRCSVLayer::CreateFeature( OGRFeature *poNewFeature )
+OGRErr OGRCSVLayer::ICreateFeature( OGRFeature *poNewFeature )
 
 {
     int iField;
@@ -1730,10 +1846,6 @@ OGRErr OGRCSVLayer::CreateFeature( OGRFeature *poNewFeature )
         else if (poFeatureDefn->GetFieldDefn(iField)->GetType() == OFTReal)
         {
             pszEscaped = CPLStrdup(poNewFeature->GetFieldAsString(iField));
-            /* Use point as decimal separator */
-            char* pszComma = strchr(pszEscaped, ',');
-            if (pszComma)
-                *pszComma = '.';
         }
         else
         {

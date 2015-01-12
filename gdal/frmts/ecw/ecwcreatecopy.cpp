@@ -212,7 +212,7 @@ CNCSError GDALECWCompressor::WriteReadLine( UINT32 nNextLine,
                                 pabyLineBuf, sFileInfo.nSizeX, 1, 
                                 eWorkDT, 
                                 sFileInfo.nBands, panBandMap,
-                                nWordSize, 0, nWordSize * sFileInfo.nSizeX );
+                                nWordSize, 0, nWordSize * sFileInfo.nSizeX, NULL );
 
     for( iBand = 0; iBand < (int) sFileInfo.nBands; iBand++ )
     {
@@ -323,7 +323,7 @@ CPLErr  GDALECWCompressor::PrepareCoverageBox(
 /* -------------------------------------------------------------------- */
     char szDoc[4000];
 
-    sprintf( szDoc, 
+    CPLsprintf( szDoc, 
 "<gml:FeatureCollection\n"
 "   xmlns:gml=\"http://www.opengis.net/gml\"\n"
 "   xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n"
@@ -582,7 +582,7 @@ CPLErr GDALECWCompressor::Initialize(
     if( CSLFetchNameValue(papszOptions, "TARGET") != NULL )
     {
         fTargetCompression = (float) 
-            atof(CSLFetchNameValue(papszOptions, "TARGET"));
+            CPLAtof(CSLFetchNameValue(papszOptions, "TARGET"));
 
         /* The max allowed value should be 100 - 100 / 65535 = 99.9984740978 */
         /* so that nCompressionRate fits on a uint16 (see below) */
@@ -817,7 +817,7 @@ CPLErr GDALECWCompressor::Initialize(
 
         pszOption = CSLFetchNameValue(papszOptions, "GEODATA_USAGE");
         if( pszOption == NULL )
-            // Default to supressing ECW SDK geodata, just use our own stuff.
+            // Default to suppressing ECW SDK geodata, just use our own stuff.
             SetGeodataUsage( JP2_GEODATA_USE_NONE );
         else if( EQUAL(pszOption,"NONE") )
             SetGeodataUsage( JP2_GEODATA_USE_NONE );
@@ -843,7 +843,7 @@ CPLErr GDALECWCompressor::Initialize(
         if( pszOption != NULL )
             SetParameter( 
                 CNCSJP2FileView::JPC_DECOMPRESS_RECONSTRUCTION_PARAMETER, 
-                (IEEE4) atof(pszOption) );
+                (IEEE4) CPLAtof(pszOption) );
     }
                                   
 /* -------------------------------------------------------------------- */
@@ -1475,7 +1475,7 @@ class IRasterIORequest
                           int nXOff, int nYOff, int nXSize, int nYSize,
                           void * pData, int nBufXSize, int nBufYSize,
                           GDALDataType eBufType, 
-                          int nPixelSpace, int nLineSpace ) :
+                          GSpacing nPixelSpace, GSpacing nLineSpace ) :
                             poBand(poBand),
                             nXOff(nXOff),
                             nYOff(nYOff),
@@ -1547,7 +1547,9 @@ class CPL_DLL ECWWriteDataset : public GDALDataset
                               void * pData, int nBufXSize, int nBufYSize,
                               GDALDataType eBufType, 
                               int nBandCount, int *panBandMap,
-                              int nPixelSpace, int nLineSpace, int nBandSpace);
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg);
 #endif
 };
 
@@ -1592,7 +1594,8 @@ class ECWWriteRasterBand : public GDALRasterBand
                               int nXOff, int nYOff, int nXSize, int nYSize,
                               void * pData, int nBufXSize, int nBufYSize,
                               GDALDataType eBufType, 
-                              int nPixelSpace, int nLineSpace);
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GDALRasterIOExtraArg* psExtraArg);
 #endif
 };
 
@@ -1824,7 +1827,9 @@ CPLErr ECWWriteDataset::IRasterIO( GDALRWFlag eRWFlag,
                               void * pData, int nBufXSize, int nBufYSize,
                               GDALDataType eBufType, 
                               int nBandCount, int *panBandMap,
-                              int nPixelSpace, int nLineSpace, int nBandSpace)
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg)
 {
     ECWWriteRasterBand* po4thBand = NULL;
     IRasterIORequest* poIORequest = NULL;
@@ -1888,7 +1893,7 @@ CPLErr ECWWriteDataset::IRasterIO( GDALRWFlag eRWFlag,
                               pData, nBufXSize, nBufYSize,
                               eBufType, 
                               nBandCount, panBandMap,
-                              nPixelSpace, nLineSpace, nBandSpace);
+                              nPixelSpace, nLineSpace, nBandSpace, psExtraArg);
 }
 #endif
 
@@ -1957,7 +1962,8 @@ CPLErr ECWWriteRasterBand::IRasterIO( GDALRWFlag eRWFlag,
                               int nXOff, int nYOff, int nXSize, int nYSize,
                               void * pData, int nBufXSize, int nBufYSize,
                               GDALDataType eBufType, 
-                              int nPixelSpace, int nLineSpace)
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GDALRasterIOExtraArg* psExtraArg)
 {
     if( eRWFlag == GF_Write && nBand == 4 && poGDS->nBands == 4 &&
         poGDS->nPrevIRasterIOBand < 0 )
@@ -1979,7 +1985,7 @@ CPLErr ECWWriteRasterBand::IRasterIO( GDALRWFlag eRWFlag,
                               nXOff, nYOff, nXSize, nYSize,
                               pData, nBufXSize, nBufYSize,
                               eBufType, 
-                              nPixelSpace, nLineSpace );
+                              nPixelSpace, nLineSpace, psExtraArg );
 }
 #endif
 

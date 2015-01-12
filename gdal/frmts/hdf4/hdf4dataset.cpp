@@ -164,11 +164,11 @@ char *SPrintArray( GDALDataType eDataType, const void *paDataArray,
                      (i < nValues - 1)?pszDelimiter:"" );
                 break;
             case GDT_Float32:
-                sprintf( pszField, "%.10g%s", ((float *)paDataArray)[i],
+                CPLsprintf( pszField, "%.10g%s", ((float *)paDataArray)[i],
                      (i < nValues - 1)?pszDelimiter:"" );
                 break;
             case GDT_Float64:
-                sprintf( pszField, "%.15g%s", ((double *)paDataArray)[i],
+                CPLsprintf( pszField, "%.15g%s", ((double *)paDataArray)[i],
                      (i < nValues - 1)?pszDelimiter:"" );
                 break;
         }
@@ -1208,7 +1208,7 @@ GDALDataset *HDF4Dataset::Open( GDALOpenInfo * poOpenInfo )
 /*                           HDF4UnloadDriver()                         */
 /************************************************************************/
 
-static void HDF4UnloadDriver(GDALDriver* poDriver)
+static void HDF4UnloadDriver(CPL_UNUSED GDALDriver* poDriver)
 {
     if( hHDF4Mutex != NULL )
         CPLDestroyMutex(hHDF4Mutex);

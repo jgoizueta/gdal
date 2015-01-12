@@ -74,8 +74,20 @@ per line.  The CoordSys lines should follow the MIF specs, and MUST
 include the optional Bounds definition at the end of the line, e.g.
 <pre>
 # Lambert 93 French bounds
-CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49, 700000, 6600000 Bounds (75000, 6000000) (1275000, 7200000)
+CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49.00000000002, 700000, 6600000 Bounds (75000, 6000000) (1275000, 7200000)
 </pre>
+
+It is also possible to establish a mapping between a source CoordSys and a
+target CoordSys with bounds. Such a mapping is specified by adding a line starting
+with "Source = " followed by a CoordSys (spaces before or after the equal sign
+do not matter). The following line should start with "Destination = "
+followed by a CoordSys with bounds, e.g.
+<pre>
+# Map generic Lambert 93 to French Lambert 93, Europe bounds
+Source      = CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49, 700000, 6600000
+Destination = CoordSys Earth Projection 3, 33, "m", 3, 46.5, 44, 49.00000000001, 700000, 6600000 Bounds (-792421, 5278231) (3520778, 9741029)
+</pre>
+
 </li>
 <li>use the BOUNDS layer creation option (see below)</li>
 </ul>
@@ -104,15 +116,10 @@ truncated</li>
 
 <ul>
 <li><b>FORMAT=MIF</b>: To create MIF/MID instead of TAB files (TAB is the default).</li>
-<li><b>SPATIAL_INDEX_MODE=QUICK</b>: Use this to turn on "quick spatial index
-mode". The default behavior of MITAB since GDAL v1.5.0 is to generate an
-optimized spatial index, but this results in slower write speed than what we
-used to get with GDAL 1.4.x and older. Applications that want faster write
-speed and do not care about the performance of spatial queries on the resulting
-file can use this option to require the creation of a non-optimal spatial index
-(actually emulating the type of spatial index produced by OGR's TAB driver
-before GDAL 1.5.0). In this mode writing files can be about 5 times faster, but
-spatial queries can be up to 30 times slower.</li>
+<li><b>SPATIAL_INDEX_MODE=QUICK/OPTIMIZED</b>: The default is QUICK force
+"quick spatial index mode". In this mode writing files can be about 5 times faster, but
+spatial queries can be up to 30 times slower. This can be set to OPTIMIZED in
+GDAL 2.0 to generate optimized spatial index.</li>
 </ul>
 
 <h3>Layer Creation Options</h3>

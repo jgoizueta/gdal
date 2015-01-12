@@ -374,7 +374,7 @@ OGRLayer * OGRMSSQLSpatialDataSource::ICreateLayer( const char * pszLayerName,
 
     if( eType == wkbNone ) 
     { 
-        oStmt.Appendf("CREATE TABLE [%s].[%s] ([ogr_fid] [int] IDENTITY(1,1) NOT NULL"
+        oStmt.Appendf("CREATE TABLE [%s].[%s] ([ogr_fid] [int] IDENTITY(1,1) NOT NULL, "
             "CONSTRAINT [PK_%s] PRIMARY KEY CLUSTERED ([ogr_fid] ASC))",
             pszSchemaName, pszTableName, pszTableName);
     }
@@ -409,6 +409,15 @@ OGRLayer * OGRMSSQLSpatialDataSource::ICreateLayer( const char * pszLayerName,
     const char *pszSI = CSLFetchNameValue( papszOptions, "SPATIAL_INDEX" );
     int bCreateSpatialIndex = ( pszSI == NULL || CSLTestBoolean(pszSI) );
     poLayer->SetSpatialIndexFlag( bCreateSpatialIndex );
+
+    const char *pszUploadGeometryFormat = CSLFetchNameValue( papszOptions, "UPLOAD_GEOM_FORMAT" );
+    if (pszUploadGeometryFormat)
+    {
+        if (EQUALN(pszUploadGeometryFormat,"wkb",5))
+            poLayer->SetUploadGeometryFormat(MSSQLGEOMETRY_WKB);
+        else if (EQUALN(pszUploadGeometryFormat, "wkt",3))
+            poLayer->SetUploadGeometryFormat(MSSQLGEOMETRY_WKT);
+    }
 
     char *pszWKT = NULL;
     if( poSRS && poSRS->exportToWkt( &pszWKT ) != OGRERR_NONE )
@@ -700,6 +709,48 @@ int OGRMSSQLSpatialDataSource::Open( const char * pszNewName, int bUpdate,
     }
 
     char** papszTypes = NULL;
+
+    /* read metadata for the specified tables */
+    if (papszTableNames != NULL && bUseGeometryColumns)
+    {
+        for( int iTable = 0; 
+            papszTableNames != NULL && papszTableNames[iTable] != NULL; 
+            iTable++ )
+        {        
+            CPLODBCStatement oStmt( &oSession );
+            
+            /* Use join to make sure the existence of the referred column/table */
+            oStmt.Appendf( "SELECT f_geometry_column, coord_dimension, g.srid, srtext, geometry_type FROM dbo.geometry_columns g JOIN INFORMATION_SCHEMA.COLUMNS ON f_table_schema = TABLE_SCHEMA and f_table_name = TABLE_NAME and f_geometry_column = COLUMN_NAME left outer join dbo.spatial_ref_sys s on g.srid = s.srid WHERE f_table_schema = '%s' AND f_table_name = '%s'", papszSchemaNames[iTable], papszTableNames[iTable]);
+
+            if( oStmt.ExecuteSQL() )
+            {
+                while( oStmt.Fetch() )
+                {
+                    if (papszGeomColumnNames == NULL)
+                            CSLAddString( papszGeomColumnNames, oStmt.GetColData(0) );
+                    else if (*papszGeomColumnNames[iTable] == 0)
+                    {
+                        CPLFree(papszGeomColumnNames[iTable]);
+                        papszGeomColumnNames[iTable] = CPLStrdup( oStmt.GetColData(0) );
+                    }
+
+                    papszCoordDimensions = 
+                            CSLAddString( papszCoordDimensions, oStmt.GetColData(1, "2") );
+                    papszSRIds = 
+                            CSLAddString( papszSRIds, oStmt.GetColData(2, "0") );
+                    papszSRTexts = 
+                        CSLAddString( papszSRTexts, oStmt.GetColData(3, "") );
+                    papszTypes = 
+                            CSLAddString( papszTypes, oStmt.GetColData(4, "GEOMETRY") );
+                }
+            }
+            else
+            {
+                /* probably the table is missing at all */
+                InitializeMetadataTables();
+            }
+        }
+    }
 
     /* if requesting all user database table then this takes priority */ 
  	if (papszTableNames == NULL && bListAllTables) 

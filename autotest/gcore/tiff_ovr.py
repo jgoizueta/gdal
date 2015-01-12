@@ -367,6 +367,11 @@ def tiff_ovr_8():
 
 def tiff_ovr_9():
 
+    drv = gdal.GetDriverByName( 'GTiff' )
+    md = drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('BigTIFF') == -1:
+        return 'skip'
+
     shutil.copyfile( 'data/rgbsmall.tif', 'tmp/ovr9.tif' )
 
     gdal.SetConfigOption('COMPRESS_OVERVIEW', 'JPEG')
@@ -1203,19 +1208,150 @@ def tiff_ovr_31():
 
 def tiff_ovr_32():
 
+    drv = gdal.GetDriverByName( 'GTiff' )
+    md = drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('BigTIFF') == -1:
+        return 'skip'
+
+    # 4 regular band
     shutil.copyfile( 'data/stefan_full_rgba_photometric_rgb.tif', 'tmp/ovr32.tif' )
 
     ds = gdal.Open( 'tmp/ovr32.tif', gdal.GA_Update )
     ds.BuildOverviews( 'cubic', overviewlist = [2,5] )
 
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
-    expected_cs = 19589
+    expected_cs = 21168
     if cs != expected_cs:
         gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 0.' % (cs, expected_cs))
         return 'fail'
 
     cs = ds.GetRasterBand(3).GetOverview(1).Checksum()
-    expected_cs = 1415
+    expected_cs = 1851
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 1.' % (cs, expected_cs))
+        return 'fail'
+
+    ds = None
+
+    gdaltest.tiff_drv.Delete( 'tmp/ovr32.tif' )
+    
+    # Same, but with non-byte data type (help testing the non-SSE2 code path)
+    src_ds = gdal.Open( 'data/stefan_full_rgba_photometric_rgb.tif' )
+
+    tmp_ds = gdal.GetDriverByName('GTiff').Create( '/vsimem/ovr32_float.tif', src_ds.RasterXSize, src_ds.RasterYSize, src_ds.RasterCount, gdal.GDT_Float32)
+    src_data = src_ds.ReadRaster(0, 0, src_ds.RasterXSize, src_ds.RasterYSize)
+    tmp_ds.WriteRaster(0, 0, src_ds.RasterXSize, src_ds.RasterYSize, src_data, buf_type = gdal.GDT_Byte)
+    tmp_ds.BuildOverviews( 'cubic', overviewlist = [2] )
+
+    tmp2_ds = gdal.GetDriverByName('GTiff').Create( '/vsimem/ovr32_byte.tif', tmp_ds.RasterXSize, tmp_ds.RasterYSize, tmp_ds.RasterCount)
+    tmp2_ds.BuildOverviews( 'NONE', overviewlist = [2] )
+    tmp2_ovr_ds = tmp2_ds.GetRasterBand(1).GetOverview(0).GetDataset()
+    tmp_ovr_ds = tmp_ds.GetRasterBand(1).GetOverview(0).GetDataset()
+    src_data = tmp_ovr_ds.ReadRaster(0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, buf_type = gdal.GDT_Byte)
+    tmp2_ovr_ds.WriteRaster(0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, src_data)
+
+    cs = tmp2_ds.GetRasterBand(1).GetOverview(0).Checksum()
+    expected_cs = 21168
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 0.' % (cs, expected_cs))
+        return 'fail'
+
+    src_ds = None
+    tmp_ds = None
+    tmp2_ds = None
+    gdaltest.tiff_drv.Delete( '/vsimem/ovr32_float.tif' )
+    gdaltest.tiff_drv.Delete( '/vsimem/ovr32_byte.tif' )
+    
+    # Test GDALRegenerateOverviewsMultiBand
+    shutil.copyfile( 'data/stefan_full_rgba_photometric_rgb.tif', 'tmp/ovr32.tif' )
+
+    ds = gdal.Open( 'tmp/ovr32.tif' )
+    gdal.SetConfigOption('COMPRESS_OVERVIEW', 'DEFLATE')
+    gdal.SetConfigOption('INTERLEAVE_OVERVIEW', 'PIXEL')
+    ds.BuildOverviews( 'cubic', overviewlist = [2,5] )
+    gdal.SetConfigOption('COMPRESS_OVERVIEW', None)
+    gdal.SetConfigOption('INTERLEAVE_OVERVIEW', None)
+
+    cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
+    expected_cs = 21168
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 0.' % (cs, expected_cs))
+        return 'fail'
+
+    cs = ds.GetRasterBand(3).GetOverview(1).Checksum()
+    expected_cs = 1851
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 1.' % (cs, expected_cs))
+        return 'fail'
+
+    ds = None
+
+    gdaltest.tiff_drv.Delete( 'tmp/ovr32.tif' )
+    
+
+    # 3 bands + alpha
+    shutil.copyfile( 'data/stefan_full_rgba.tif', 'tmp/ovr32.tif' )
+
+    ds = gdal.Open( 'tmp/ovr32.tif', gdal.GA_Update )
+    ds.BuildOverviews( 'cubic', overviewlist = [2,5] )
+
+    cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
+    expected_cs = 21656
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 0.' % (cs, expected_cs))
+        return 'fail'
+
+    cs = ds.GetRasterBand(3).GetOverview(1).Checksum()
+    expected_cs = 2132
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 1.' % (cs, expected_cs))
+        return 'fail'
+
+    ds = None
+
+    gdaltest.tiff_drv.Delete( 'tmp/ovr32.tif' )
+    
+    # Same, but with non-byte data type (help testing the non-SSE2 code path)
+    src_ds = gdal.Open( 'data/stefan_full_rgba.tif' )
+
+    tmp_ds = gdal.GetDriverByName('GTiff').Create( '/vsimem/ovr32_float.tif', src_ds.RasterXSize, src_ds.RasterYSize, src_ds.RasterCount, gdal.GDT_Float32)
+    src_data = src_ds.ReadRaster(0, 0, src_ds.RasterXSize, src_ds.RasterYSize)
+    tmp_ds.WriteRaster(0, 0, src_ds.RasterXSize, src_ds.RasterYSize, src_data, buf_type = gdal.GDT_Byte)
+    tmp_ds.BuildOverviews( 'cubic', overviewlist = [2] )
+
+    tmp2_ds = gdal.GetDriverByName('GTiff').Create( '/vsimem/ovr32_byte.tif', tmp_ds.RasterXSize, tmp_ds.RasterYSize, tmp_ds.RasterCount)
+    tmp2_ds.BuildOverviews( 'NONE', overviewlist = [2] )
+    tmp2_ovr_ds = tmp2_ds.GetRasterBand(1).GetOverview(0).GetDataset()
+    tmp_ovr_ds = tmp_ds.GetRasterBand(1).GetOverview(0).GetDataset()
+    src_data = tmp_ovr_ds.ReadRaster(0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, buf_type = gdal.GDT_Byte)
+    tmp2_ovr_ds.WriteRaster(0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, src_data)
+
+    cs = tmp2_ds.GetRasterBand(1).GetOverview(0).Checksum()
+    #expected_cs = 21656
+    expected_cs = 21168
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 0.' % (cs, expected_cs))
+        return 'fail'
+
+    src_ds = None
+    tmp_ds = None
+    tmp2_ds = None
+    gdaltest.tiff_drv.Delete( '/vsimem/ovr32_float.tif' )
+    gdaltest.tiff_drv.Delete( '/vsimem/ovr32_byte.tif' )
+    
+    # Same test with a compressed dataset
+    src_ds = gdal.Open('data/stefan_full_rgba.tif')
+    ds = gdal.GetDriverByName('GTiff').CreateCopy('tmp/ovr32.tif', src_ds, options = ['COMPRESS=DEFLATE'])
+    ds.BuildOverviews( 'cubic', overviewlist = [2,5] )
+
+    cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
+    expected_cs = 21656
+    if cs != expected_cs:
+        gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 0.' % (cs, expected_cs))
+        return 'fail'
+
+    cs = ds.GetRasterBand(3).GetOverview(1).Checksum()
+    expected_cs = 2132
     if cs != expected_cs:
         gdaltest.post_reason('Checksum is %d. Expected checksum is %d for overview 1.' % (cs, expected_cs))
         return 'fail'
@@ -1846,6 +1982,48 @@ def tiff_ovr_48():
     return 'success'
 
 ###############################################################################
+# Test possible stride computation issue in GDALRegenerateOverviewsMultiBand (#5653)
+
+def tiff_ovr_49():
+
+    ds = gdal.GetDriverByName('GTiff').Create('/vsimem/tiff_ovr_49.tif', 1023, 1023, 1)
+    ds.GetRasterBand(1).Fill(0)
+    c = '\xFF'
+    # Fails on 1.11.1 with col = 255 or col = 1019
+    col = 1019
+    ds.GetRasterBand(1).WriteRaster(col,0,1,1023,c,1,1)
+    ds = None
+    ds = gdal.Open('/vsimem/tiff_ovr_49.tif')
+    gdal.SetConfigOption('COMPRESS_OVERVIEW', 'DEFLATE')
+    ds.BuildOverviews( 'AVERAGE', overviewlist = [2] )
+    gdal.SetConfigOption('COMPRESS_OVERVIEW', None)
+    ds = None
+    ds = gdal.Open('/vsimem/tiff_ovr_49.tif.ovr')
+    if ds.GetRasterBand(1).Checksum() == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+    gdal.GetDriverByName('GTiff').Delete('/vsimem/tiff_ovr_49.tif')
+
+    return 'success'
+
+###############################################################################
+# Test overviews when X dimension is smaller than Y (#5794)
+
+def tiff_ovr_50():
+    
+    ds = gdal.GetDriverByName('GTiff').Create('/vsimem/tiff_ovr_50.tif', 6, 8192, 3,
+                                              options=['COMPRESS=DEFLATE'])
+    ds.GetRasterBand(1).Fill(255)
+    # We just check that it doesn't crash
+    ds.BuildOverviews( 'AVERAGE', overviewlist = [2,4,8,16,32] )
+    ds.BuildOverviews( 'AVERAGE', overviewlist = [2,4,8,16,32] )
+    ds = None
+    gdal.GetDriverByName('GTiff').Delete('/vsimem/tiff_ovr_50.tif')
+    
+    return 'success'
+
+###############################################################################
 # Cleanup
 
 def tiff_ovr_cleanup():
@@ -1938,6 +2116,8 @@ gdaltest_list_internal = [
     tiff_ovr_46,
     tiff_ovr_47,
     tiff_ovr_48,
+    tiff_ovr_49,
+    tiff_ovr_50,
     tiff_ovr_cleanup ]
 
 def tiff_ovr_invert_endianness():

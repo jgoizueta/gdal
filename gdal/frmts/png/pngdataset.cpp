@@ -126,6 +126,9 @@ class PNGDataset : public GDALPamDataset
 
     int         bHasReadICCMetadata;
     void        LoadICCProfile();
+    
+    static void WriteMetadataAsText(png_structp hPNG, png_infop psPNGInfo,
+                                    const char* pszKey, const char* pszValue);
 
   public:
                  PNGDataset();
@@ -149,6 +152,13 @@ class PNGDataset : public GDALPamDataset
     virtual char  **GetMetadata( const char * pszDomain = "" );
     virtual const char *GetMetadataItem( const char * pszName,
                                          const char * pszDomain = NULL );
+
+    virtual CPLErr      IRasterIO( GDALRWFlag, int, int, int, int,
+                                   void *, int, int, GDALDataType,
+                                   int, int *,
+                                   GSpacing, GSpacing,
+                                   GSpacing,
+                                   GDALRasterIOExtraArg* psExtraArg );
 
     // semi-private.
     jmp_buf     sSetJmpContext;
@@ -464,6 +474,98 @@ PNGDataset::~PNGDataset()
 }
 
 /************************************************************************/
+/*                            IsFullBandMap()                           */
+/************************************************************************/
+
+static int IsFullBandMap(int *panBandMap, int nBands)
+{
+    for(int i=0;i<nBands;i++)
+    {
+        if( panBandMap[i] != i + 1 )
+            return FALSE;
+    }
+    return TRUE;
+}
+
+/************************************************************************/
+/*                             IRasterIO()                              */
+/************************************************************************/
+
+CPLErr PNGDataset::IRasterIO( GDALRWFlag eRWFlag,
+                              int nXOff, int nYOff, int nXSize, int nYSize,
+                              void *pData, int nBufXSize, int nBufYSize,
+                              GDALDataType eBufType,
+                              int nBandCount, int *panBandMap,
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg )
+
+{
+    if((eRWFlag == GF_Read) &&
+       (nBandCount == nBands) &&
+       (nXOff == 0) && (nYOff == 0) &&
+       (nXSize == nBufXSize) && (nXSize == nRasterXSize) &&
+       (nYSize == nBufYSize) && (nYSize == nRasterYSize) &&
+       (eBufType == GDT_Byte) &&
+       (eBufType == GetRasterBand(1)->GetRasterDataType()) &&
+       (pData != NULL) &&
+       (panBandMap != NULL) && IsFullBandMap(panBandMap, nBands))
+    {
+        int y;
+        CPLErr tmpError;
+        int x;
+
+        // Pixel interleaved case
+        if( nBandSpace == 1 )
+        {
+            for(y = 0; y < nYSize; ++y)
+            {
+                tmpError = LoadScanline(y);
+                if(tmpError != CE_None) return tmpError;
+                GByte* pabyScanline = pabyBuffer 
+                    + (y - nBufferStartLine) * nBands * nXSize;
+                if( nPixelSpace == nBandSpace * nBandCount )
+                {
+                    memcpy(&(((GByte*)pData)[(y*nLineSpace)]),
+                           pabyScanline, nBandCount * nXSize);
+                }
+                else
+                {
+                    for(x = 0; x < nXSize; ++x)
+                    {
+                        memcpy(&(((GByte*)pData)[(y*nLineSpace) + (x*nPixelSpace)]), 
+                               (const GByte*)&(pabyScanline[x* nBandCount]), nBandCount);
+                    }
+                }
+            }
+        }
+        else
+        {
+            for(y = 0; y < nYSize; ++y)
+            {
+                tmpError = LoadScanline(y);
+                if(tmpError != CE_None) return tmpError;
+                GByte* pabyScanline = pabyBuffer 
+                    + (y - nBufferStartLine) * nBands * nXSize;
+                for(x = 0; x < nXSize; ++x)
+                {
+                    for(int iBand=0;iBand<nBands;iBand++)
+                        ((GByte*)pData)[(y*nLineSpace) + (x*nPixelSpace) + iBand * nBandSpace] = pabyScanline[x*nBands+iBand];
+                }
+            }
+        }
+
+        return CE_None;
+    }
+
+    return GDALPamDataset::IRasterIO(eRWFlag, nXOff, nYOff, nXSize, nYSize,
+                                     pData, nBufXSize, nBufYSize, eBufType, 
+                                     nBandCount, panBandMap, 
+                                     nPixelSpace, nLineSpace, nBandSpace,
+                                     psExtraArg);
+}
+
+/************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
@@ -741,7 +843,7 @@ void PNGDataset::CollectMetadata()
                 pszTag[i] = '_';
         }
 
-        SetMetadataItem( pszTag, text_ptr[iText].text );
+        GDALDataset::SetMetadataItem( pszTag, text_ptr[iText].text );
         CPLFree( pszTag );
     }
 }
@@ -1260,6 +1362,42 @@ char **PNGDataset::GetFileList()
 }
 
 /************************************************************************/
+/*                          WriteMetadataAsText()                       */
+/************************************************************************/
+
+#if defined(PNG_iTXt_SUPPORTED) || ((PNG_LIBPNG_VER_MAJOR == 1 && PNG_LIBPNG_VER_MINOR >= 4) || PNG_LIBPNG_VER_MAJOR > 1)
+#define HAVE_ITXT_SUPPORT
+#endif
+
+#ifdef HAVE_ITXT_SUPPORT
+static int IsASCII(const char* pszStr)
+{
+    for(int i=0;pszStr[i]!='\0';i++)
+    {
+        if( ((GByte*)pszStr)[i] >= 128 )
+            return FALSE;
+    }
+    return TRUE;
+}
+#endif
+
+void PNGDataset::WriteMetadataAsText(png_structp hPNG, png_infop psPNGInfo,
+                                     const char* pszKey, const char* pszValue)
+{
+    png_text sText;
+    memset(&sText, 0, sizeof(png_text));
+    sText.compression = PNG_TEXT_COMPRESSION_NONE;
+    sText.key = (png_charp) pszKey;
+    sText.text = (png_charp) pszValue;
+#ifdef HAVE_ITXT_SUPPORT
+    // UTF-8 values should be written in iTXt, whereas TEXT should be LATIN-1 
+    if( !IsASCII(pszValue) && CPLIsUTF8(pszValue, -1) )
+        sText.compression = PNG_ITXT_COMPRESSION_NONE;
+#endif
+    png_set_text(hPNG, psPNGInfo, &sText, 1);
+}
+
+/************************************************************************/
 /*                             CreateCopy()                             */
 /************************************************************************/
 
@@ -1501,7 +1639,7 @@ PNGDataset::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
         if (pszGamma != NULL)
         {
-            double dfGamma = atof(pszGamma);
+            double dfGamma = CPLAtof(pszGamma);
             png_set_gAMA(hPNG, psPNGInfo, dfGamma);
         }
 
@@ -1543,7 +1681,7 @@ PNGDataset::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                 {
                     for( int j = 0; j < 3; j++ )
                     {
-                        double v = atof(apapszTokenList[i][j]);
+                        double v = CPLAtof(apapszTokenList[i][j]);
 
                         if (j == 2)
                         {
@@ -1641,6 +1779,48 @@ PNGDataset::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         }
     }
 
+/* -------------------------------------------------------------------- */
+/*      Add text info                                                   */
+/* -------------------------------------------------------------------- */
+    /* Predefined keywords. See "4.2.7 tEXt Textual data" of http://www.w3.org/TR/PNG-Chunks.html */
+    const char* apszKeywords[] = { "Title", "Author", "Description", "Copyright",
+                                   "Creation Time", "Software", "Disclaimer",
+                                   "Warning", "Source", "Comment", NULL };
+    int bWriteMetadataAsText = CSLTestBoolean(
+        CSLFetchNameValueDef(papszOptions, "WRITE_METADATA_AS_TEXT", "FALSE"));
+    for(int i=0;apszKeywords[i]!=NULL;i++)
+    {
+        const char* pszKey = apszKeywords[i];
+        const char* pszValue = CSLFetchNameValue(papszOptions, pszKey);
+        if( pszValue == NULL && bWriteMetadataAsText )
+            pszValue = poSrcDS->GetMetadataItem(pszKey);
+        if( pszValue != NULL )
+        {
+            WriteMetadataAsText(hPNG, psPNGInfo, pszKey, pszValue);
+        }
+    }
+    if( bWriteMetadataAsText )
+    {
+        char** papszSrcMD = poSrcDS->GetMetadata();
+        for( ; papszSrcMD && *papszSrcMD; papszSrcMD++ )
+        {
+            char* pszKey = NULL;
+            const char* pszValue = CPLParseNameValue(*papszSrcMD, &pszKey );
+            if( pszKey && pszValue )
+            {
+                if( CSLFindString((char**)apszKeywords, pszKey) < 0 &&
+                    !EQUAL(pszKey, "AREA_OR_POINT") && !EQUAL(pszKey, "NODATA_VALUES") )
+                {
+                    WriteMetadataAsText(hPNG, psPNGInfo, pszKey, pszValue);
+                }
+                CPLFree(pszKey);
+            }
+        }
+    }
+
+/* -------------------------------------------------------------------- */
+/*      Write infos                                                     */
+/* -------------------------------------------------------------------- */
     png_write_info( hPNG, psPNGInfo );
 
 /* -------------------------------------------------------------------- */
@@ -1663,7 +1843,7 @@ PNGDataset::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                      pabyScanline + iBand*nWordSize, 
                                      nXSize, 1, eType,
                                      nBands * nWordSize, 
-                                     nBands * nXSize * nWordSize );
+                                     nBands * nXSize * nWordSize, NULL );
         }
 
 #ifdef CPL_LSB
@@ -1721,7 +1901,10 @@ PNGDataset::CreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         CPLPopErrorHandler();
         if( poDS )
         {
-            poDS->CloneInfo( poSrcDS, GCIF_PAM_DEFAULT );
+            int nFlags = GCIF_PAM_DEFAULT;
+            if( bWriteMetadataAsText )
+                nFlags &= ~GCIF_METADATA;
+            poDS->CloneInfo( poSrcDS, nFlags );
             return poDS;
         }
         CPLErrorReset();
@@ -1836,7 +2019,7 @@ void GDALRegister_PNG()
                                    "Byte UInt16" );
         poDriver->SetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST, 
 "<CreationOptionList>\n"
-"   <Option name='WORLDFILE' type='boolean' description='Create world file'/>\n"
+"   <Option name='WORLDFILE' type='boolean' description='Create world file' default='FALSE'/>\n"
 "   <Option name='ZLEVEL' type='int' description='DEFLATE compression level 1-9' default='6'/>\n"
 "   <Option name='SOURCE_ICC_PROFILE' type='string' description='ICC Profile'/>\n"
 "   <Option name='SOURCE_ICC_PROFILE_NAME' type='string' descriptor='ICC Profile name'/>\n"
@@ -1845,6 +2028,11 @@ void GDALRegister_PNG()
 "   <Option name='SOURCE_PRIMARIES_BLUE' type='string' description='x,y,1.0 (xyY) blue chromaticity'/>\n"
 "   <Option name='SOURCE_WHITEPOINT' type='string' description='x,y,1.0 (xyY) whitepoint'/>\n"
 "   <Option name='PNG_GAMMA' type='string' description='Gamma'/>\n"
+"   <Option name='TITLE' type='string' description='Title'/>\n"
+"   <Option name='DESCRIPTION' type='string' description='Description'/>\n"
+"   <Option name='COPYRIGHT' type='string' description='Copyright'/>\n"
+"   <Option name='COMMENT' type='string' description='Comment'/>\n"
+"   <Option name='WRITE_METADATA_AS_TEXT' type='boolean' description='Whether to write source dataset metadata in TEXT chunks' default='FALSE'/>\n"
 "</CreationOptionList>\n" );
 
         poDriver->SetMetadataItem( GDAL_DCAP_VIRTUALIO, "YES" );

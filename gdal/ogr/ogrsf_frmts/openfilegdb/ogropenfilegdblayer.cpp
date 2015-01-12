@@ -201,7 +201,7 @@ int OGROpenFileGDBLayer::BuildGeometryColumnGDBv10()
         m_eGeomType =
             FileGDBOGRGeometryConverter::GetGeometryTypeFromESRI(pszShapeType);
         if( bHasZ )
-            m_eGeomType = (OGRwkbGeometryType)( m_eGeomType | wkb25DBit );
+            m_eGeomType = wkbSetZ( m_eGeomType );
 
         const char* pszWKT = CPLGetXMLValue( psInfo, "SpatialReference.WKT", NULL );
         int nWKID = atoi(CPLGetXMLValue( psInfo, "SpatialReference.WKID", "0" ));
@@ -381,14 +381,21 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
 
         const FileGDBField* poGDBField = m_poLyrTable->GetField(i);
         OGRFieldType eType = OFTString;
+        OGRFieldSubType eSubType = OFSTNone;
         /* int nWidth = 0; */
         switch( poGDBField->GetType() )
         {
             case FGFT_INT16:
+                eType = OFTInteger;
+                eSubType = OFSTInt16;
+                break;
             case FGFT_INT32:
                 eType = OFTInteger;
                 break;
             case FGFT_FLOAT32:
+                eType = OFTReal;
+                eSubType = OFSTFloat32;
+                break;
             case FGFT_FLOAT64:
                 eType = OFTReal;
                 break;
@@ -426,6 +433,7 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
             }
         }
         OGRFieldDefn oFieldDefn(poGDBField->GetName().c_str(), eType);
+        oFieldDefn.SetSubType(eSubType);
         /* oFieldDefn.SetWidth(nWidth); */
         m_poFeatureDefn->AddFieldDefn(&oFieldDefn);
     }
@@ -819,7 +827,7 @@ FileGDBIterator* OGROpenFileGDBLayer::BuildIteratorFromExprNode(swq_expr_node* p
         poNode->nOperation == SWQ_AND && poNode->nSubExprCount == 2 )
     {
         /* Even if there's only one branch of the 2 that results to an iterator, */
-        /* it is usefull. Of course, the iterator will not be sufficient to evaluate */
+        /* it is useful. Of course, the iterator will not be sufficient to evaluate */
         /* the filter, but it will be a super-set of the features */
         FileGDBIterator* poIter1 = BuildIteratorFromExprNode(poNode->papoSubExpr[0]);
 

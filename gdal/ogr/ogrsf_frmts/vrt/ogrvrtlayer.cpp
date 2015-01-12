@@ -888,6 +888,44 @@ try_again:
              }
 
 /* -------------------------------------------------------------------- */
+/*      Subtype                                                         */
+/* -------------------------------------------------------------------- */
+             pszArg = CPLGetXMLValue( psChild, "subtype", NULL );
+             if( pszArg != NULL )
+             {
+                 int iType;
+                 OGRFieldSubType eSubType = OFSTNone;
+
+                 for( iType = 0; iType <= (int) OFSTMaxSubType; iType++ )
+                 {
+                     if( EQUAL(pszArg,OGRFieldDefn::GetFieldSubTypeName(
+                                   (OGRFieldSubType)iType)) )
+                     {
+                         eSubType = (OGRFieldSubType) iType;
+                         break;
+                     }
+                 }
+
+                 if( iType > (int) OFSTMaxSubType )
+                 {
+                     CPLError( CE_Failure, CPLE_AppDefined, 
+                               "Unable to identify Field subtype '%s'.",
+                               pszArg );
+                     goto error;
+                 }
+
+                 if( !OGR_AreTypeSubTypeCompatible(oFieldDefn.GetType(), eSubType) )
+                 {
+                     CPLError( CE_Failure, CPLE_AppDefined, 
+                               "Invalid subtype '%s' for type '%s'.",
+                               pszArg, OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType()) );
+                     goto error;
+                 }
+
+                 oFieldDefn.SetSubType( eSubType );
+             }
+
+/* -------------------------------------------------------------------- */
 /*      Width and precision.                                            */
 /* -------------------------------------------------------------------- */
              int nWidth = atoi(CPLGetXMLValue( psChild, "width", "0" ));
@@ -1165,9 +1203,6 @@ int OGRVRTLayer::ResetSourceReading()
                 if( osFilter.size() != 0 )
                 {
                     pszFilter = CPLStrdup(osFilter);
-                    char* pszComma;
-                    while((pszComma = strchr(pszFilter, ',')) != NULL)
-                        *pszComma = '.';
                 }
             }
 
@@ -1787,10 +1822,10 @@ OGRFeature* OGRVRTLayer::TranslateVRTFeatureToSrcFeature( OGRFeature* poVRTFeatu
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRVRTLayer::CreateFeature( OGRFeature* poVRTFeature )
+OGRErr OGRVRTLayer::ICreateFeature( OGRFeature* poVRTFeature )
 {
     if (!bHasFullInitialized) FullInitialize();
     if (!poSrcLayer || poDS->GetRecursionDetected()) return OGRERR_FAILURE;
@@ -1825,10 +1860,10 @@ OGRErr OGRVRTLayer::CreateFeature( OGRFeature* poVRTFeature )
 }
 
 /************************************************************************/
-/*                             SetFeature()                             */
+/*                             ISetFeature()                             */
 /************************************************************************/
 
-OGRErr OGRVRTLayer::SetFeature( OGRFeature* poVRTFeature )
+OGRErr OGRVRTLayer::ISetFeature( OGRFeature* poVRTFeature )
 {
     if (!bHasFullInitialized) FullInitialize();
     if (!poSrcLayer || poDS->GetRecursionDetected()) return OGRERR_FAILURE;
@@ -1986,6 +2021,9 @@ int OGRVRTLayer::TestCapability( const char * pszCap )
 
     else if( EQUAL(pszCap,OLCIgnoreFields) )
         return poSrcLayer->TestCapability(pszCap);
+
+    else if( EQUAL(pszCap,OLCCurveGeometries) )
+        return TRUE;
 
     return FALSE;
 }
@@ -2263,8 +2301,26 @@ OGRErr OGRVRTLayer::SetIgnoredFields( const char **papszFields )
                 int iSrcField = anSrcField[iVRTField];
                 if (iSrcField >= 0)
                 {
-                    OGRFieldDefn *poSrcDefn = poSrcFeatureDefn->GetFieldDefn( iSrcField );
-                    papszFieldsSrc = CSLAddString(papszFieldsSrc, poSrcDefn->GetNameRef());
+                    /* If we are asked to ignore x or y for a VGS_PointFromColumns */
+                    /* geometry field, we must NOT pass that order to the underlying */
+                    /* layer */
+                    int bOKToIgnore = TRUE;
+                    for(int iGeomVRTField = 0;
+                            iGeomVRTField < GetLayerDefn()->GetGeomFieldCount(); iGeomVRTField++)
+                    {
+                        if( (iSrcField == apoGeomFieldProps[iGeomVRTField]->iGeomXField ||
+                             iSrcField == apoGeomFieldProps[iGeomVRTField]->iGeomYField ||
+                             iSrcField == apoGeomFieldProps[iGeomVRTField]->iGeomZField) )
+                        {
+                            bOKToIgnore = FALSE;
+                            break;
+                        }
+                    }
+                    if( bOKToIgnore )
+                    {
+                        OGRFieldDefn *poSrcDefn = poSrcFeatureDefn->GetFieldDefn( iSrcField );
+                        papszFieldsSrc = CSLAddString(papszFieldsSrc, poSrcDefn->GetNameRef());
+                    }
                 }
             }
             else
@@ -2300,6 +2356,8 @@ OGRErr OGRVRTLayer::SetIgnoredFields( const char **papszFields )
     {
         OGRVRTGeometryStyle eGeometryStyle =
             apoGeomFieldProps[iVRTField]->eGeometryStyle;
+        /* For a VGS_PointFromColumns geometry field, we must not ignore */
+        /* the fields that help building it */
         if( eGeometryStyle == VGS_PointFromColumns )
         {
             int iSrcField = apoGeomFieldProps[iVRTField]->iGeomXField;
@@ -2312,6 +2370,7 @@ OGRErr OGRVRTLayer::SetIgnoredFields( const char **papszFields )
             if (iSrcField >= 0)
                 panSrcFieldsUsed[iSrcField] = TRUE;
         }
+        /* Similarly for other kinds of geometry fields */
         else if( eGeometryStyle == VGS_WKT || eGeometryStyle == VGS_WKB ||
                  eGeometryStyle == VGS_Shape )
         {

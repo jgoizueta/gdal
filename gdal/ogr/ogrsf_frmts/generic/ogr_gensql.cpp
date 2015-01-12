@@ -150,7 +150,7 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer( GDALDataset *poSrcDS,
     poSrcLayer = papoTableLayers[0];
 
 /* -------------------------------------------------------------------- */
-/*      If the user has explicitely requested a OGRSQL dialect, then    */
+/*      If the user has explicitly requested a OGRSQL dialect, then    */
 /*      we should avoid to forward the where clause to the source layer */
 /*      when there is a risk it cannot understand it (#4022)            */
 /* -------------------------------------------------------------------- */
@@ -263,7 +263,15 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer( GDALDataset *poSrcDS,
                 psColDef->field_type == SWQ_DATE ||
                 psColDef->field_type == SWQ_TIME ||
                 psColDef->field_type == SWQ_TIMESTAMP )
+            {
                 oFDefn.SetType( poSrcFDefn->GetType() );
+                if( psColDef->col_func == SWQCF_NONE ||
+                    psColDef->col_func == SWQCF_MIN ||
+                    psColDef->col_func == SWQCF_MAX )
+                {
+                    oFDefn.SetSubType( poSrcFDefn->GetSubType() );
+                }
+            }
             else
                 oFDefn.SetType( OFTReal );
             if( psColDef->col_func != SWQCF_AVG &&
@@ -298,10 +306,14 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer( GDALDataset *poSrcDS,
             switch( psColDef->field_type )
             {
               case SWQ_INTEGER:
-              case SWQ_BOOLEAN:
                 oFDefn.SetType( OFTInteger );
                 break;
-                
+
+              case SWQ_BOOLEAN:
+                oFDefn.SetType( OFTInteger );
+                oFDefn.SetSubType( OFSTBoolean );
+                break;
+
               case SWQ_FLOAT:
                 oFDefn.SetType( OFTReal );
                 break;
@@ -318,8 +330,11 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer( GDALDataset *poSrcDS,
           case SWQ_OTHER:
             break;
           case SWQ_INTEGER:
+            oFDefn.SetType( OFTInteger );
+            break;
           case SWQ_BOOLEAN:
             oFDefn.SetType( OFTInteger );
+            oFDefn.SetSubType( OFSTBoolean );
             break;
           case SWQ_FLOAT:
             oFDefn.SetType( OFTReal );
@@ -344,6 +359,8 @@ OGRGenSQLResultsLayer::OGRGenSQLResultsLayer( GDALDataset *poSrcDS,
             oFDefn.SetType( OFTString );
             break;
         }
+        if( psColDef->target_subtype != OFSTNone )
+            oFDefn.SetSubType( psColDef->target_subtype );
 
         if (psColDef->field_length > 0)
         {
@@ -1117,7 +1134,7 @@ OGRFeature *OGRGenSQLResultsLayer::TranslateFeature( OGRFeature *poSrcFeat )
         
         // If joining a (primary) numeric column with a (secondary) string column
         // then add implicit casting of the secondary column to numeric. This behaviour
-        // worked in GDAL < 1.8, and it is consistant with how sqlite behaves too. See #4321
+        // worked in GDAL < 1.8, and it is consistent with how sqlite behaves too. See #4321
         // For the reverse case, joining a string column with a numeric column, the
         // string constant will be cast to float by SWQAutoConvertStringToNumeric (#4259)
         if( eSecondaryFieldType == OFTString &&
@@ -1215,6 +1232,7 @@ OGRFeature *OGRGenSQLResultsLayer::TranslateFeature( OGRFeature *poSrcFeat )
 
         switch( poResult->field_type )
         {
+          case SWQ_BOOLEAN:
           case SWQ_INTEGER:
             poDstFeat->SetField( iRegularField++, poResult->int_value );
             break;
@@ -1745,7 +1763,7 @@ void OGRGenSQLResultsLayer::CreateOrderByIndex()
 
     /* If it is already sorted, then free than panFIDIndex array */
     /* so that GetNextFeature() can call a sequential GetNextFeature() */
-    /* on the source array. Very usefull for layers where random access */
+    /* on the source array. Very useful for layers where random access */
     /* is slow. */
     /* Use case: the GML result of a WFS GetFeature with a SORTBY */
     if (bAlreadySorted)

@@ -167,9 +167,6 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
     char                *pszSchemaName = NULL;
     int                  nDimension = 3;
     int                  bHavePostGIS = TRUE;
-    
-    if( nLayers == 0 )
-         Log("SET standard_conforming_strings = OFF");
 
     const char* pszFIDColumnName = CSLFetchNameValue(papszOptions, "FID");
     CPLString osFIDColumnName;
@@ -323,8 +320,12 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
 /* -------------------------------------------------------------------- */
     int nUnknownSRSId = -1;
     const char* pszPostgisVersion = CSLFetchNameValue( papszOptions, "POSTGIS_VERSION" );
+    int bPostGIS2 = FALSE;
     if( pszPostgisVersion != NULL && atoi(pszPostgisVersion) >= 2 )
+    {
+        bPostGIS2 = TRUE;
         nUnknownSRSId = 0;
+    }
 
     int nSRSId = nUnknownSRSId;
     int nForcedSRSId = -2;
@@ -491,6 +492,7 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
     poLayer->SetUnknownSRSId(nUnknownSRSId);
     poLayer->SetForcedSRSId(nForcedSRSId);
     poLayer->SetCreateSpatialIndexFlag(bCreateSpatialIndex);
+    poLayer->SetPostGIS2(bPostGIS2);
 
     if( bHavePostGIS )
     {
@@ -527,6 +529,8 @@ int OGRPGDumpDataSource::TestCapability( const char * pszCap )
         return TRUE;
     else if( EQUAL(pszCap,ODsCCreateGeomFieldAfterCreateLayer) )
         return TRUE;
+    else if( EQUAL(pszCap,ODsCCurveGeometries) )
+        return TRUE;
     else
         return FALSE;
 }
@@ -548,18 +552,18 @@ OGRLayer *OGRPGDumpDataSource::GetLayer( int iLayer )
 /*                                  Log()                               */
 /************************************************************************/
 
-void  OGRPGDumpDataSource::Log(const char* pszStr, int bAddSemiColumn)
+int  OGRPGDumpDataSource::Log(const char* pszStr, int bAddSemiColumn)
 {
     if (fp == NULL)
     {
         if (bTriedOpen)
-            return;
+            return FALSE;
         bTriedOpen = TRUE;
         fp = VSIFOpenL(pszName, "wb");
         if (fp == NULL)
         {
             CPLError(CE_Failure, CPLE_FileIO, "Cannot create %s", pszName);
-            return;
+            return FALSE;
         }
     }
 
@@ -567,6 +571,7 @@ void  OGRPGDumpDataSource::Log(const char* pszStr, int bAddSemiColumn)
         VSIFPrintfL(fp, "%s;%s", pszStr, pszEOL);
     else
         VSIFPrintfL(fp, "%s%s", pszStr, pszEOL);
+    return TRUE;
 }
 
 /************************************************************************/

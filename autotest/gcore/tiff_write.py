@@ -431,7 +431,8 @@ def tiff_write_13():
         return 'skip'
 
     src_ds = gdal.Open('data/sasha.tif')
-    ds = gdaltest.tiff_drv.CreateCopy('tmp/sasha.tif', src_ds, options = [ 'TILED=YES',
+    ds = gdaltest.tiff_drv.CreateCopy('tmp/sasha.tif', src_ds, options = [ 'PROFILE=BASELINE',
+                                                                           'TILED=YES',
                                                                            'COMPRESS=JPEG',
                                                                            'PHOTOMETRIC=YCBCR',
                                                                            'JPEG_QUALITY=31' ])
@@ -441,10 +442,19 @@ def tiff_write_13():
     cs = ds.GetRasterBand(3).Checksum()
     ds = None
 
-    os.unlink('tmp/sasha.tif')
+    size = os.stat('tmp/sasha.tif').st_size
+
+    gdaltest.tiff_drv.Delete('tmp/sasha.tif')
     if cs != 17347 and cs != 14445:
+        gdaltest.post_reason('fail: bad checksum')
         print(cs)
         return 'fail'
+
+    if md['LIBTIFF'] == 'INTERNAL':
+        if size > 22804:
+            gdaltest.post_reason('fail: bad size')
+            print(size)
+            return 'fail'
 
     return 'success'
 
@@ -935,11 +945,14 @@ def tiff_write_24():
 
     new_ds = None
 
-    os.unlink( 'tmp/stefan_full_greyunspecified.tif.aux.xml' )
-
     new_ds = gdal.Open( 'tmp/stefan_full_greyunspecified.tif' )
-    if new_ds.GetRasterBand(2).GetRasterColorInterpretation() != gdal.GCI_Undefined:
+    if new_ds.RasterCount != 2:
         return 'fail'
+    for i in range(2):
+        if new_ds.GetRasterBand(i+1).GetRasterColorInterpretation() != src_ds.GetRasterBand(i+1).GetRasterColorInterpretation():
+            return 'fail'
+        if new_ds.GetRasterBand(i+1).Checksum() != src_ds.GetRasterBand(i+1).Checksum():
+            return 'fail'
 
     new_ds = None
     src_ds = None
@@ -3353,6 +3366,8 @@ def tiff_write_87():
 
     src_ds = gdal.Open('tmp/tiff_write_87_src.tif', gdal.GA_Update)
     src_ds.BuildOverviews( 'NEAR', overviewlist = [2, 4] )
+    expected_cs1 = src_ds.GetRasterBand(1).GetOverview(0).Checksum()
+    expected_cs2 = src_ds.GetRasterBand(1).GetOverview(1).Checksum()
     ds = gdaltest.tiff_drv.CreateCopy('tmp/tiff_write_87_dst.tif', src_ds, options = ['COPY_SRC_OVERVIEWS=YES', 'ENDIANNESS=LITTLE'])
     ds = None
     src_ds = None
@@ -3381,10 +3396,12 @@ def tiff_write_87():
         return 'fail'
 
     # Check checksums
-    if cs1 != 28926 or cs2 != 7332:
+    if cs1 != expected_cs1 or cs2 != expected_cs2:
         gdaltest.post_reason('did not get expected checksums')
         print(cs1)
         print(cs2)
+        print(expected_cs1)
+        print(expected_cs2)
         return 'fail'
 
     return 'success'
@@ -3613,6 +3630,7 @@ def tiff_write_91():
 
 ###############################################################################
 # Test the effect of JPEG_QUALITY_OVERVIEW while creating (internal) overviews after re-opening
+# This will test that we correctly guess the quality of the main dataset
 
 def tiff_write_92():
     md = gdaltest.tiff_drv.GetMetadata()
@@ -3625,7 +3643,7 @@ def tiff_write_92():
 
     last_size = 0
     quality = 30
-    for use_jpeg_quality_overview in [False, True]:
+    for jpeg_quality_overview in [False, 30, 40]:
         src_ds = gdal.Open('../gdrivers/data/utm.tif')
 
         ds = gdal.GetDriverByName('GTiff').Create('tmp/tiff_write_92.tif', 1024, 1024, 3, \
@@ -3638,8 +3656,8 @@ def tiff_write_92():
         ds = None
 
         ds = gdal.Open('tmp/tiff_write_92.tif', gdal.GA_Update)
-        if use_jpeg_quality_overview:
-            gdal.SetConfigOption('JPEG_QUALITY_OVERVIEW', '%d' % quality)
+        if jpeg_quality_overview is not False:
+            gdal.SetConfigOption('JPEG_QUALITY_OVERVIEW', '%d' % jpeg_quality_overview)
         ds.BuildOverviews( 'NEAR', overviewlist = [2, 4])
         gdal.SetConfigOption('JPEG_QUALITY_OVERVIEW', None)
 
@@ -3653,9 +3671,15 @@ def tiff_write_92():
 
         #print('quality = %d, size = %d' % (quality, size))
 
-        if use_jpeg_quality_overview:
-            if size >= last_size:
-                gdaltest.post_reason('did not get decreasing file sizes')
+        if jpeg_quality_overview == 30:
+            if size != last_size:
+                gdaltest.post_reason('did not get equal file sizes')
+                print(size)
+                print(last_size)
+                return 'fail'
+        elif jpeg_quality_overview == 40:
+            if size <= last_size:
+                gdaltest.post_reason('did not get growing file sizes')
                 print(size)
                 print(last_size)
                 return 'fail'
@@ -4789,6 +4813,7 @@ def tiff_write_126():
     src_ds = gdal.Open('../gdrivers/data/small_world_400pct.vrt')
 
     options_list = [ (['COMPRESS=JPEG', 'PHOTOMETRIC=YCBCR'], [48788,56561], [61397,2463], [29605,33654], [10904,10453]),
+                     (['COMPRESS=JPEG', 'PHOTOMETRIC=YCBCR', 'JPEGTABLESMODE=0'], [48788,56561], [61397,2463], [29605,33654], [10904,10453]),
                      (['COMPRESS=JPEG', 'PHOTOMETRIC=YCBCR', 'TILED=YES'], [48788,56561], [61397,2463], [29605,33654], [10904,10453]),
                      (['COMPRESS=JPEG', 'PHOTOMETRIC=YCBCR', 'BLOCKYSIZE=800'], [48788,56561], [61397,2463], [29605,33654], [10904,10453]),
                      (['COMPRESS=JPEG', 'PHOTOMETRIC=YCBCR', 'BLOCKYSIZE=64'], [48788,56561], [61397,2463], [29605,33654], [10904,10453]),
@@ -4800,8 +4825,10 @@ def tiff_write_126():
                    ]
 
     for (options, cs1, cs2, cs3, cs4) in options_list:
+        os.environ['JPEGMEM'] =  '500M'
         ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_126.tif', src_ds, options = options)
         ds = None
+        del os.environ['JPEGMEM']
 
         ds = gdal.Open('/vsimem/tiff_write_126.tif')
         # Officially we have 0 public overviews...
@@ -4862,8 +4889,10 @@ def tiff_write_126():
                    ]
 
     for (options, cs1, cs3, cs4) in options_list:
+        os.environ['JPEGMEM'] =  '500M'
         ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_126.tif', src_ds, options = options)
         ds = None
+        del os.environ['JPEGMEM']
 
         ds = gdal.Open('/vsimem/tiff_write_126.tif')
         # Officially we have 0 public overviews...
@@ -4924,16 +4953,20 @@ def tiff_write_126():
 
     gdaltest.tiff_drv.Delete('/vsimem/tiff_write_126.tif')
 
+    # We need libtiff 4.0.4 (unreleased at that time)
+    if md['LIBTIFF'] != 'INTERNAL':
+        print('skipping tests that will fail without internal libtiff')
+        return 'success'
+
     # Test with completely sparse file
     ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_126.tif', 1024, 1024, options = ['COMPRESS=JPEG', 'SPARSE_OK=YES'])
     ds = None
 
     ds = gdal.Open('/vsimem/tiff_write_126.tif')
-    # We don't even have JPEGTABLES !
-    if ds.GetRasterBand(1).GetOverview(0) is not None:
+    if ds.GetRasterBand(1).GetOverview(0) is None:
         gdaltest.post_reason('fail')
         return 'fail'
-    if ds.GetRasterBand(1).GetMetadataItem('JPEGTABLES', 'TIFF') is not None:
+    if ds.GetRasterBand(1).GetMetadataItem('JPEGTABLES', 'TIFF') is None:
         gdaltest.post_reason('fail')
         return 'fail'
     if ds.GetRasterBand(1).GetMetadataItem('BLOCK_OFFSET_0_0', 'TIFF') is not None:
@@ -5027,7 +5060,188 @@ def tiff_write_127():
     gdaltest.tiff_drv.Delete('/vsimem/tiff_write_127.tif')
 
     return 'success'
+
+###############################################################################
+# Test lossless copying of a CMYK JPEG into JPEG-in-TIFF (#5712)
+
+def tiff_write_128():
+
+    md = gdaltest.tiff_drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('JPEG') == -1:
+        return 'skip'
+
+    gdal.SetConfigOption('GDAL_JPEG_TO_RGB', 'NO')
+    src_ds = gdal.Open('../gdrivers/data/rgb_ntf_cmyk.jpg')
+    gdal.SetConfigOption('GDAL_JPEG_TO_RGB', None)
+
+    # Will received implictely CMYK photometric interpreation
+    old_val = gdal.GetConfigOption('GDAL_PAM_ENABLED')
+    gdal.SetConfigOption('GDAL_PAM_ENABLED', 'NO')
+    ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_128.tif', src_ds, options = [ 'COMPRESS=JPEG' ] )
+    ds = None
+    gdal.SetConfigOption('GDAL_PAM_ENABLED', old_val)
+
+    # We need to reopen in raw to avoig automatic CMYK->RGBA to trigger
+    ds = gdal.Open('GTIFF_RAW:/vsimem/tiff_write_128.tif')
+    for i in range(4):
+        if src_ds.GetRasterBand(i+1).GetColorInterpretation() != ds.GetRasterBand(i+1).GetColorInterpretation():
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if src_ds.GetRasterBand(i+1).Checksum() != ds.GetRasterBand(i+1).Checksum():
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_128.tif')
     
+    # Try with explicit CMYK photometric interpreation
+    old_val = gdal.GetConfigOption('GDAL_PAM_ENABLED')
+    gdal.SetConfigOption('GDAL_PAM_ENABLED', 'NO')
+    ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_128.tif', src_ds, options = [ 'COMPRESS=JPEG', 'PHOTOMETRIC=CMYK' ] )
+    ds = None
+    gdal.SetConfigOption('GDAL_PAM_ENABLED', old_val)
+
+    # We need to reopen in raw to avoig automatic CMYK->RGBA to trigger
+    ds = gdal.Open('GTIFF_RAW:/vsimem/tiff_write_128.tif')
+    for i in range(4):
+        if src_ds.GetRasterBand(i+1).GetColorInterpretation() != ds.GetRasterBand(i+1).GetColorInterpretation():
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if src_ds.GetRasterBand(i+1).Checksum() != ds.GetRasterBand(i+1).Checksum():
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_128.tif')
+    
+    # Try with more neutral colorspace in the case the source JPEG is not really CMYK (yes that happens !)
+    old_val = gdal.GetConfigOption('GDAL_PAM_ENABLED')
+    gdal.SetConfigOption('GDAL_PAM_ENABLED', 'NO')
+    ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_128.tif', src_ds, options = [ 'COMPRESS=JPEG', 'PHOTOMETRIC=MINISBLACK' ] )
+    ds = None
+    gdal.SetConfigOption('GDAL_PAM_ENABLED', old_val)
+
+    # Here we can reopen without GTIFF_RAW trick
+    ds = gdal.Open('/vsimem/tiff_write_128.tif')
+    for i in range(4):
+        # The color interpretation will NOT be CMYK
+        if src_ds.GetRasterBand(i+1).GetColorInterpretation() == ds.GetRasterBand(i+1).GetColorInterpretation():
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if src_ds.GetRasterBand(i+1).Checksum() != ds.GetRasterBand(i+1).Checksum():
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_128.tif')
+
+    return 'success'
+
+###############################################################################
+# Check effective guessing of existing JPEG quality
+
+def tiff_write_129():
+    md = gdaltest.tiff_drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('BigTIFF') == -1:
+        return 'skip'
+
+    if md['DMD_CREATIONOPTIONLIST'].find('JPEG') == -1:
+        return 'skip'
+
+    for jpegtablesmode in [ '1', '3']:
+        for photometric in [ 'RGB', 'YCBCR' ]:
+            cs_ref = 0
+            for i in range(2):
+                ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_129.tif', 64, 32, 3,
+                    options = ['COMPRESS=JPEG', 'TILED=YES', 'BLOCKXSIZE=32', 'BLOCKYSIZE=32', 'JPEG_QUALITY=50', 'PHOTOMETRIC=' + photometric, 'JPEGTABLESMODE=' + jpegtablesmode])
+                src_ds = gdal.Open('data/rgbsmall.tif')
+                data = src_ds.ReadRaster(0,0,32,32)
+                ds.WriteRaster(0,0,32,32,data)
+
+                # In second pass, we re-open the dataset
+                if i == 1:
+                    ds = None
+                    ds = gdal.Open('/vsimem/tiff_write_129.tif', gdal.GA_Update)
+                ds.WriteRaster(32,0,32,32,data)
+                ds = None
+
+                ds = gdal.Open('/vsimem/tiff_write_129.tif')
+                cs = ds.GetRasterBand(1).Checksum()
+                ds = None
+                gdaltest.tiff_drv.Delete('/vsimem/tiff_write_129.tif')
+                
+                if i == 0:
+                    cs_ref = cs
+                elif cs != cs_ref:
+                    gdaltest.post_reason('fail')
+                    print(jpegtablesmode)
+                    print(photometric)
+                    print(i)
+                    return 'fail'
+
+    return 'success'
+
+###############################################################################
+# Test cases where JPEG quality will fail
+
+def tiff_write_130():
+    md = gdaltest.tiff_drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('BigTIFF') == -1:
+        return 'skip'
+
+    if md['DMD_CREATIONOPTIONLIST'].find('JPEG') == -1:
+        return 'skip'
+
+    shutil.copyfile('data/byte_jpg_unusual_jpegtable.tif', 'tmp/byte_jpg_unusual_jpegtable.tif')
+    ds = gdal.Open('tmp/byte_jpg_unusual_jpegtable.tif', gdal.GA_Update)
+    if ds.GetRasterBand(1).Checksum() != 4771:
+        gdaltest.post_reason('fail')
+        print(ds.GetRasterBand(1).Checksum())
+        return 'fail'
+    src_ds = gdal.Open('data/byte.tif', gdal.GA_Update)
+    ds.WriteRaster(0,0,20,20,src_ds.ReadRaster())
+    src_ds = None
+    ds = None
+    ds = gdal.Open('tmp/byte_jpg_unusual_jpegtable.tif')
+    if ds.GetRasterBand(1).Checksum() != 4743:
+        gdaltest.post_reason('fail')
+        print(ds.GetRasterBand(1).Checksum())
+        return 'fail'
+    ds = None
+    os.unlink('tmp/byte_jpg_unusual_jpegtable.tif')
+
+    shutil.copyfile('data/byte_jpg_tablesmodezero.tif', 'tmp/byte_jpg_tablesmodezero.tif')
+    ds = gdal.Open('tmp/byte_jpg_tablesmodezero.tif', gdal.GA_Update)
+    if ds.GetRasterBand(1).Checksum() != 4743:
+        gdaltest.post_reason('fail')
+        print(ds.GetRasterBand(1).Checksum())
+        return 'fail'
+    src_ds = gdal.Open('data/byte.tif', gdal.GA_Update)
+    ds.WriteRaster(0,0,20,20,src_ds.ReadRaster())
+    src_ds = None
+    ds = None
+    ds = gdal.Open('tmp/byte_jpg_tablesmodezero.tif')
+    if ds.GetRasterBand(1).Checksum() != 4743:
+        gdaltest.post_reason('fail')
+        print(ds.GetRasterBand(1).Checksum())
+        return 'fail'
+    ds = None
+    os.unlink('tmp/byte_jpg_tablesmodezero.tif')
+
+    return 'success'
+
+###############################################################################
+# Test LZMA compression
+
+def tiff_write_131():
+
+    md = gdaltest.tiff_drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('LZMA') == -1:
+        return 'skip'
+
+    ut = gdaltest.GDALTest( 'GTiff', 'byte.tif', 1, 4672,
+                            options = [ 'COMPRESS=LZMA', 'LZMA_PRESET=9' ] )
+    return ut.testCreateCopy()
 
 ###############################################################################
 # Ask to run again tests with GDAL_API_PROXY=YES
@@ -5187,6 +5401,10 @@ gdaltest_list = [
     tiff_write_125,
     tiff_write_126,
     tiff_write_127,
+    tiff_write_128,
+    tiff_write_129,
+    tiff_write_130,
+    tiff_write_131,
     #tiff_write_api_proxy,
     tiff_write_cleanup ]
 

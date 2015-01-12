@@ -125,7 +125,9 @@ class EHdrRasterBand : public RawRasterBand
 
     virtual CPLErr IRasterIO( GDALRWFlag, int, int, int, int,
                               void *, int, int, GDALDataType,
-                              int, int );
+                              GSpacing nPixelSpace,
+                              GSpacing nLineSpace,
+                              GDALRasterIOExtraArg* psExtraArg );
 
   public:
     EHdrRasterBand( GDALDataset *poDS, int nBand, VSILFILE * fpRaw,
@@ -357,7 +359,9 @@ CPLErr EHdrRasterBand::IRasterIO( GDALRWFlag eRWFlag,
                                   int nXOff, int nYOff, int nXSize, int nYSize,
                                   void * pData, int nBufXSize, int nBufYSize,
                                   GDALDataType eBufType,
-                                  int nPixelSpace, int nLineSpace )
+                                  GSpacing nPixelSpace,
+                                  GSpacing nLineSpace,
+                                  GDALRasterIOExtraArg* psExtraArg )
 
 {
     // Defer to RawRasterBand
@@ -365,14 +369,14 @@ CPLErr EHdrRasterBand::IRasterIO( GDALRWFlag eRWFlag,
         return RawRasterBand::IRasterIO( eRWFlag, 
                                          nXOff, nYOff, nXSize, nYSize,
                                          pData, nBufXSize, nBufYSize, 
-                                         eBufType, nPixelSpace, nLineSpace );
+                                         eBufType, nPixelSpace, nLineSpace, psExtraArg );
 
     // Force use of IReadBlock() and IWriteBlock()
     else
         return GDALRasterBand::IRasterIO( eRWFlag, 
                                           nXOff, nYOff, nXSize, nYSize,
                                           pData, nBufXSize, nBufYSize, 
-                                          eBufType, nPixelSpace, nLineSpace );
+                                          eBufType, nPixelSpace, nLineSpace, psExtraArg );
 }
 
 /************************************************************************/
@@ -822,8 +826,8 @@ CPLErr EHdrDataset::ReadSTX()
             if (i > 0 && i <= nBands)
             {
               EHdrRasterBand* poBand = (EHdrRasterBand*)papoBands[i-1];
-              poBand->dfMin = atof(papszTokens[1]);
-              poBand->dfMax = atof(papszTokens[2]);
+              poBand->dfMin = CPLAtof(papszTokens[1]);
+              poBand->dfMax = CPLAtof(papszTokens[2]);
 
               int bNoDataSet = FALSE;
               double dfNoData = poBand->GetNoDataValue(&bNoDataSet);
@@ -842,12 +846,12 @@ CPLErr EHdrDataset::ReadSTX()
               // reads optional mean and stddev
               if ( !EQUAL(papszTokens[3], "#") )
               {
-                poBand->dfMean   = atof(papszTokens[3]);
+                poBand->dfMean   = CPLAtof(papszTokens[3]);
                 poBand->minmaxmeanstddev |= HAS_MEAN_FLAG;
               }
               if ( !EQUAL(papszTokens[4], "#") )
               {
-                poBand->dfStdDev = atof(papszTokens[4]);
+                poBand->dfStdDev = CPLAtof(papszTokens[4]);
                 poBand->minmaxmeanstddev |= HAS_STDDEV_FLAG;
               }
 

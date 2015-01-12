@@ -126,6 +126,7 @@ json_object* OGRGeoJSONWriteAttributes( OGRFeature* poFeature )
         OGRFieldDefn* poFieldDefn = poDefn->GetFieldDefn( nField );
         CPLAssert( NULL != poFieldDefn );
         OGRFieldType eType = poFieldDefn->GetType();
+        OGRFieldSubType eSubType = poFieldDefn->GetSubType();
 
         if( !poFeature->IsFieldSet(nField) )
         {
@@ -133,8 +134,12 @@ json_object* OGRGeoJSONWriteAttributes( OGRFeature* poFeature )
         }
         else if( OFTInteger == eType )
         {
-            poObjProp = json_object_new_int( 
-                poFeature->GetFieldAsInteger( nField ) );
+            if( eSubType == OFSTBoolean )
+                poObjProp = json_object_new_boolean( 
+                    poFeature->GetFieldAsInteger( nField ) );
+            else
+                poObjProp = json_object_new_int( 
+                    poFeature->GetFieldAsInteger( nField ) );
         }
         else if( OFTReal == eType )
         {
@@ -153,7 +158,11 @@ json_object* OGRGeoJSONWriteAttributes( OGRFeature* poFeature )
             poObjProp = json_object_new_array();
             for(int i=0;i<nSize;i++)
             {
-                json_object_array_add(poObjProp,
+                if( eSubType == OFSTBoolean )
+                    json_object_array_add(poObjProp,
+                            json_object_new_boolean(panList[i]));
+                else
+                    json_object_array_add(poObjProp,
                             json_object_new_int(panList[i]));
             }
         }
@@ -612,7 +621,7 @@ static int OGR_json_double_with_precision_to_string(struct json_object *jso,
                      (nPrecision < 0) ? 15 : nPrecision );
     if( szBuffer[0] == 't' /*oobig */ )
     {
-        snprintf(szBuffer, sizeof(szBuffer), "%.18g", jso->o.c_double);
+        CPLsnprintf(szBuffer, sizeof(szBuffer), "%.18g", jso->o.c_double);
     }
     return printbuf_memappend(pb, szBuffer, strlen(szBuffer)); 
 }

@@ -163,6 +163,8 @@ OGRFeature *OGRKMLLayer::GetNextFeature()
     /*      Loop till we find a feature matching our criteria.              */
     /* -------------------------------------------------------------------- */
     KML *poKMLFile = poDS_->GetKMLFile();
+    if( poKMLFile == NULL )
+        return NULL;
     poKMLFile->selectLayer(nLayerNumber_);
 
     while(TRUE)
@@ -321,10 +323,10 @@ CPLString OGRKMLLayer::WriteSchema()
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRKMLLayer::CreateFeature( OGRFeature* poFeature )
+OGRErr OGRKMLLayer::ICreateFeature( OGRFeature* poFeature )
 {
     CPLAssert( NULL != poFeature );
     CPLAssert( NULL != poDS_ );
@@ -509,10 +511,6 @@ OGRErr OGRKMLLayer::CreateFeature( OGRFeature* poFeature )
             if (poFeatureDefn_->GetFieldDefn(iField)->GetType() == OFTReal)
             {
                 pszEscaped = CPLStrdup( pszRaw );
-                /* Use point as decimal separator */
-                char* pszComma = strchr(pszEscaped, ',');
-                if (pszComma)
-                    *pszComma = '.';
             }
             else
             {

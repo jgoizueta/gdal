@@ -151,16 +151,8 @@ OGRFeature *OGRNASLayer::GetNextFeature()
         if (papsGeometry[0] != NULL)
         {
             poGeom = (OGRGeometry*) OGR_G_CreateFromGMLTree(papsGeometry[0]);
-
-            if( EQUAL( papsGeometry[0]->pszValue, "CompositeCurve" ) ||
-                EQUAL( papsGeometry[0]->pszValue, "MultiCurve" ) ||
-                EQUAL( papsGeometry[0]->pszValue, "LineString" ) ||
-                EQUAL( papsGeometry[0]->pszValue, "MultiLineString" ) ||
-                EQUAL( papsGeometry[0]->pszValue, "Curve" ) )
-            {
-                poGeom = OGRGeometryFactory::forceToLineString( poGeom, false );
-            }
-
+            poGeom = NASReader::ConvertGeometry(poGeom);
+            poGeom = OGRGeometryFactory::forceTo(poGeom, GetGeomType());
             // poGeom->dumpReadable( 0, "NAS: " );
 
             // We assume the OGR_G_CreateFromGMLTree() function would have already
@@ -237,6 +229,9 @@ OGRFeature *OGRNASLayer::GetNextFeature()
             }
         }
 
+        poOGRFeature->SetGeometryDirectly( poGeom );
+        poGeom = NULL;
+
 /* -------------------------------------------------------------------- */
 /*      Test against the attribute query.                               */
 /* -------------------------------------------------------------------- */
@@ -250,14 +245,6 @@ OGRFeature *OGRNASLayer::GetNextFeature()
 /* -------------------------------------------------------------------- */
 /*      Wow, we got our desired feature. Return it.                     */
 /* -------------------------------------------------------------------- */
-        if( poGeom && poOGRFeature->SetGeometryDirectly( poGeom ) != OGRERR_NONE )
-        {
-            int iId = poNASFeature->GetClass()->GetPropertyIndex( "gml_id" );
-            const GMLProperty *poIdProp = poNASFeature->GetProperty(iId);
-            CPLError( CE_Warning, CPLE_AppDefined, "NAS: could not set geometry (gml_id:%s)",
-                      poIdProp && poIdProp->nSubProperties>0 && poIdProp->papszSubProperties[0] ? poIdProp->papszSubProperties[0] : "(null)" );
-        }
-
         delete poNASFeature;
 
         return poOGRFeature;

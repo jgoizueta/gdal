@@ -35,7 +35,7 @@
 #include "cpl_error.h"
 #include "ogr_spatialref.h"
 #include "ogr_geometry.h"
-#include "vrt/vrtdataset.h"
+#include "vrtdataset.h"
 
 #include "pdfobject.h"
 
@@ -2996,9 +2996,9 @@ int GDALPDFWriter::EndPage(const char* pszExtraImages,
         for(int i=0;i+4<=nCount; /* */)
         {
             const char* pszImageFilename = papszExtraImagesTokens[i+0];
-            double dfX = atof(papszExtraImagesTokens[i+1]);
-            double dfY = atof(papszExtraImagesTokens[i+2]);
-            double dfScale = atof(papszExtraImagesTokens[i+3]);
+            double dfX = CPLAtof(papszExtraImagesTokens[i+1]);
+            double dfY = CPLAtof(papszExtraImagesTokens[i+2]);
+            double dfScale = CPLAtof(papszExtraImagesTokens[i+3]);
             const char* pszLinkVal = NULL;
             i += 4;
             if( i < nCount && EQUALN(papszExtraImagesTokens[i],"link=",5) )
@@ -3412,7 +3412,7 @@ int GDALPDFWriter::WriteMask(GDALDataset* poSrcDS,
             nXOff, nYOff,
             nReqXSize, nReqYSize,
             pabyMask, nReqXSize, nReqYSize, GDT_Byte,
-            0, 0);
+            0, 0, NULL);
     if (eErr != CE_None)
     {
         VSIFree(pabyMask);
@@ -3669,7 +3669,7 @@ int GDALPDFWriter::WriteBlock(GDALDataset* poSrcDS,
                                 nReqXSize, nReqYSize,
                                 pabyMEMDSBuffer, nReqXSize, nReqYSize,
                                 GDT_Byte, nBands, NULL,
-                                0, 0, 0);
+                                0, 0, 0, NULL);
 
         if( eErr != CE_None )
         {
@@ -3853,7 +3853,7 @@ int GDALPDFWriter::WriteBlock(GDALDataset* poSrcDS,
             eErr = poBlockSrcDS->RasterIO(GF_Read,
                                           0, iLine, nReqXSize, 1,
                                           pabyLine, nReqXSize, 1, GDT_Byte,
-                                          nBands, NULL, nBands, 0, 1);
+                                          nBands, NULL, nBands, 0, 1, NULL);
             if( eErr != CE_None )
                 break;
 

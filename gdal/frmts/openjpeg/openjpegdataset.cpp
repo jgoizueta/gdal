@@ -49,7 +49,7 @@ CPL_CVSID("$Id$");
 /*                  JP2OpenJPEGDataset_ErrorCallback()                  */
 /************************************************************************/
 
-static void JP2OpenJPEGDataset_ErrorCallback(const char *pszMsg, void *unused)
+static void JP2OpenJPEGDataset_ErrorCallback(const char *pszMsg, CPL_UNUSED void *unused)
 {
     CPLError(CE_Failure, CPLE_AppDefined, "%s", pszMsg);
 }
@@ -58,7 +58,7 @@ static void JP2OpenJPEGDataset_ErrorCallback(const char *pszMsg, void *unused)
 /*               JP2OpenJPEGDataset_WarningCallback()                   */
 /************************************************************************/
 
-static void JP2OpenJPEGDataset_WarningCallback(const char *pszMsg, void *unused)
+static void JP2OpenJPEGDataset_WarningCallback(const char *pszMsg, CPL_UNUSED void *unused)
 {
     if( strcmp(pszMsg, "Empty SOT marker detected: Psot=12.\n") == 0 )
     {
@@ -75,7 +75,7 @@ static void JP2OpenJPEGDataset_WarningCallback(const char *pszMsg, void *unused)
 /*                 JP2OpenJPEGDataset_InfoCallback()                    */
 /************************************************************************/
 
-static void JP2OpenJPEGDataset_InfoCallback(const char *pszMsg, void *unused)
+static void JP2OpenJPEGDataset_InfoCallback(const char *pszMsg, CPL_UNUSED void *unused)
 {
     char* pszMsgTmp = CPLStrdup(pszMsg);
     int nLen = (int)strlen(pszMsgTmp);
@@ -209,7 +209,9 @@ class JP2OpenJPEGDataset : public GDALJP2AbstractDataset
                                void * pData, int nBufXSize, int nBufYSize,
                                GDALDataType eBufType, 
                                int nBandCount, int *panBandMap,
-                               int nPixelSpace, int nLineSpace, int nBandSpace);
+                               GSpacing nPixelSpace, GSpacing nLineSpace,
+                               GSpacing nBandSpace,
+                               GDALRasterIOExtraArg* psExtraArg);
 
     static void         WriteBox(VSILFILE* fp, GDALJP2Box* poBox);
 
@@ -247,7 +249,8 @@ class JP2OpenJPEGRasterBand : public GDALPamRasterBand
                                   int nXOff, int nYOff, int nXSize, int nYSize,
                                   void * pData, int nBufXSize, int nBufYSize,
                                   GDALDataType eBufType,
-                                  int nPixelSpace, int nLineSpace );
+                                  GSpacing nPixelSpace, GSpacing nLineSpace,
+                                  GDALRasterIOExtraArg* psExtraArg);
 
     virtual GDALColorInterp GetColorInterpretation();
     virtual GDALColorTable* GetColorTable() { return poCT; }
@@ -330,7 +333,8 @@ CPLErr JP2OpenJPEGRasterBand::IRasterIO( GDALRWFlag eRWFlag,
                                          int nXOff, int nYOff, int nXSize, int nYSize,
                                          void * pData, int nBufXSize, int nBufYSize,
                                          GDALDataType eBufType,
-                                         int nPixelSpace, int nLineSpace )
+                                         GSpacing nPixelSpace, GSpacing nLineSpace,
+                                         GDALRasterIOExtraArg* psExtraArg )
 {
     JP2OpenJPEGDataset *poGDS = (JP2OpenJPEGDataset *) poDS;
 
@@ -357,7 +361,7 @@ CPLErr JP2OpenJPEGRasterBand::IRasterIO( GDALRWFlag eRWFlag,
 
             return poOverviewBand->RasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                                             pData, nBufXSize, nBufYSize, eBufType,
-                                            nPixelSpace, nLineSpace );
+                                            nPixelSpace, nLineSpace, psExtraArg );
         }
     }
 
@@ -365,7 +369,7 @@ CPLErr JP2OpenJPEGRasterBand::IRasterIO( GDALRWFlag eRWFlag,
 
     CPLErr eErr = GDALPamRasterBand::IRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                                          pData, nBufXSize, nBufYSize, eBufType,
-                                         nPixelSpace, nLineSpace );
+                                         nPixelSpace, nLineSpace, psExtraArg );
 
     poGDS->bEnoughMemoryToLoadOtherBands = TRUE;
     return eErr;
@@ -541,7 +545,9 @@ CPLErr  JP2OpenJPEGDataset::IRasterIO( GDALRWFlag eRWFlag,
                                void * pData, int nBufXSize, int nBufYSize,
                                GDALDataType eBufType, 
                                int nBandCount, int *panBandMap,
-                               int nPixelSpace, int nLineSpace, int nBandSpace)
+                               GSpacing nPixelSpace, GSpacing nLineSpace,
+                               GSpacing nBandSpace,
+                               GDALRasterIOExtraArg* psExtraArg)
 {
     if( eRWFlag != GF_Read )
         return CE_Failure;
@@ -569,7 +575,8 @@ CPLErr  JP2OpenJPEGDataset::IRasterIO( GDALRWFlag eRWFlag,
             return papoOverviewDS[nOverview]->RasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                                                         pData, nBufXSize, nBufYSize, eBufType,
                                                         nBandCount, panBandMap,
-                                                        nPixelSpace, nLineSpace, nBandSpace );
+                                                        nPixelSpace, nLineSpace, nBandSpace,
+                                                        psExtraArg);
         }
     }
 
@@ -580,7 +587,8 @@ CPLErr  JP2OpenJPEGDataset::IRasterIO( GDALRWFlag eRWFlag,
                                         pData, nBufXSize, nBufYSize,
                                         eBufType, 
                                         nBandCount, panBandMap,
-                                        nPixelSpace, nLineSpace, nBandSpace );
+                                        nPixelSpace, nLineSpace, nBandSpace,
+                                        psExtraArg );
 
     bEnoughMemoryToLoadOtherBands = TRUE;
     return eErr;
@@ -1357,7 +1365,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
     int  nXSize = poSrcDS->GetRasterXSize();
     int  nYSize = poSrcDS->GetRasterYSize();
 
-    if( nBands != 1 && nBands != 3 )
+    if( nBands != 1 && nBands != 3 /* && nBands != 4 */ )
     {
         CPLError( CE_Failure, CPLE_NotSupported,
                   "Unable to export files with %d bands.", nBands );
@@ -1453,7 +1461,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
     const char* pszQuality = CSLFetchNameValueDef(papszOptions, "QUALITY", NULL);
     if (pszQuality)
     {
-        double dfQuality = atof(pszQuality);
+        double dfQuality = CPLAtof(pszQuality);
         if (dfQuality > 0 && dfQuality <= 100)
         {
             dfRate = 100 / dfQuality;
@@ -1566,7 +1574,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
     opj_set_warning_handler(pCodec, JP2OpenJPEGDataset_WarningCallback,NULL);
     opj_set_error_handler(pCodec, JP2OpenJPEGDataset_ErrorCallback,NULL);
 
-    OPJ_COLOR_SPACE eColorSpace = (bResample) ? OPJ_CLRSPC_SYCC : (nBands == 3) ? OPJ_CLRSPC_SRGB : OPJ_CLRSPC_GRAY;
+    OPJ_COLOR_SPACE eColorSpace = (bResample) ? OPJ_CLRSPC_SYCC : (nBands == 3 || nBands == 4) ? OPJ_CLRSPC_SRGB : OPJ_CLRSPC_GRAY;
 
     opj_image_t* psImage = opj_image_tile_create(nBands,pasBandParams,
                                                  eColorSpace);
@@ -1864,7 +1872,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
                                      pTempBuffer, nWidthToRead, nHeightToRead,
                                      eDataType,
                                      nBands, NULL,
-                                     0,0,0);
+                                     0,0,0,NULL);
             if (eErr == CE_None)
             {
                 if (bResample)

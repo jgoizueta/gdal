@@ -126,7 +126,7 @@ fields will be reported by the GML driver according to
 <a href="http://trac.osgeo.org/gdal/wiki/rfc41_multiple_geometry_fields">RFC 41</a>.<p>
 
 Starting with OGR 1.10, in case of multiple geometry occurences, if a geometry is in a &lt;geometry&gt; element,
-this will be the one selected. This will make default behaviour consistant with Inspire objects.<p>
+this will be the one selected. This will make default behaviour consistent with Inspire objects.<p>
 
 
 Starting with OGR 1.8.0, the user can change the .gfs file to select the appropriate
@@ -140,7 +140,7 @@ description of the .gfs syntax below.<p>
 OGR 1.8.0 adds support to "merge" the multiple geometries found in a feature by
 setting the configuration option <b>GML_FETCH_ALL_GEOMETRIES</b> to <b>YES</b>. The geometries
 will be collected into a GeometryCollection (or Multipolygon if individual geometries
-are polygons or multipolygons). This can be usefull when reading some GML application profiles.
+are polygons or multipolygons). This can be useful when reading some GML application profiles.
 If a &lt;GeometryElementPath&gt; element is specified in the .gfs, the fetching will be limited
 to paths that match the value of &lt;GeometryElementPath&gt;.<p>
 -->
@@ -153,6 +153,15 @@ are reported as OGRMultiLineString.  To retrieve the nodes, as OGRMultiPoint,
 the configuration option <b>GML_GET_SECONDARY_GEOM</b> should be set to the
 value <b>YES</b>.  When this is set only the secondary geometries are
 reported.<p>
+
+Starting with GDAL 2.0, Arc, ArcString, ArcByBulge, ArcByCenterPoint, Circle
+and CircleByCenterPoints will be returned as circular string OGR geometries.
+If they are included in other GML elements such as CurveComposite, MultiCurve, Surface,
+corresponding non-linear OGR geometries will be returned as well. When
+reading GML3 application schemas, declarations of geometry fields such as
+CurvePropertyType, SurfacePropertyType, MultiCurvePropertyType or MultiSurfacePropertyType
+will be also interpreted as being potential non-linear geometries, and corresponding
+OGR geometry type will be used for the layer geometry type.<p>
 
 <h2>gml:xlink resolving</h2>
 
@@ -312,7 +321,7 @@ the layers must be read in the order they appear in the file.<p>
 If no .xsd and .gfs files are found, the parser will detect the layout of layers when
 building the .gfs file. If the layers are found to be sequential, a <i>&lt;SequentialLayers&gt;true&lt;/SequentialLayers&gt;</i>
 element will be written in the .gfs file, so that the GML_READ_MODE will be automatically
-initialized to MONOBLOCK_LAYERS if not explicitely set by the user.<p>
+initialized to MONOBLOCK_LAYERS if not explicitly set by the user.<p>
 
 Starting with OGR 1.9.0, the GML_READ_MODE configuration option can be set to INTERLEAVED_LAYERS to be able
 to read a GML file whose features from different layers are interleaved. In the case, the semantics of the
@@ -372,11 +381,15 @@ the prefix of the application target namespace in the GML file.</p>
 <ul>
 <li><i>GML3</i> in order to write GML files that follow GML 3.1.1 SF-0 profile.</li>
 <li><i>GML3Deegree</i> (OGR &gt;= 1.9.0) in order to produce a GML 3.1.1 .XSD schema,
-with a few variations with respect to what is recommanded by GML3 SF-0 profile,
+with a few variations with respect to what is recommended by GML3 SF-0 profile,
 but that will be better accepted by some software (such as Deegree 3).</li>
 <li><i>GML3.2</i>(OGR &gt;= 1.9.0) in order to write GML files that follow GML 3.2.1 SF-0 profile.</li>
 </ul><br>
-If not specified, GML2 will be used.<br><br>
+If not specified, GML2 will be used.<br>
+Starting with GDAL 2.0, non-linear geometries can be written. This is only compatible
+with selecting on of that above GML3 format variant. Otherwise, such geometries will be
+approximating into their closest matching linear geometry.
+<br>
 Note: starting with OGR 1.11, fields of type StringList, RealList or IntegerList can be written. This
 will cause to advertize the SF-1 profile in the .XSD schema (such types are not supported by SF-0).<br>
 

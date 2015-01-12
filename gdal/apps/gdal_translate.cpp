@@ -33,7 +33,7 @@
 #include "cpl_string.h"
 #include "gdal_priv.h"
 #include "ogr_spatialref.h"
-#include "vrt/vrtdataset.h"
+#include "vrtdataset.h"
 #include "commonutils.h"
 
 CPL_CVSID("$Id$");
@@ -57,13 +57,15 @@ static void Usage(const char* pszErrorMsg = NULL, int bShort = TRUE)
             "       [-ot {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/\n"
             "             CInt16/CInt32/CFloat32/CFloat64}] [-strict]\n"
             "       [-of format] [-b band] [-mask band] [-expand {gray|rgb|rgba}]\n"
-            "       [-outsize xsize[%%] ysize[%%]]\n"
+            "       [-outsize xsize[%%] ysize[%%]] [-tr xres yres]\n"
+            "       [-r {nearest,bilinear,cubic,cubicspline,lanczos,average,mode}]\n"
             "       [-unscale] [-scale[_bn] [src_min src_max [dst_min dst_max]]]* [-exponent[_bn] exp_val]*\n"
             "       [-srcwin xoff yoff xsize ysize] [-projwin ulx uly lrx lry] [-epo] [-eco]\n"
             "       [-a_srs srs_def] [-a_ullr ulx uly lrx lry] [-a_nodata value]\n"
             "       [-gcp pixel line easting northing [elevation]]*\n" 
             "       [-mo \"META-TAG=VALUE\"]* [-q] [-sds]\n"
             "       [-co \"NAME=VALUE\"]* [-stats] [-norat]\n"
+            "       [-oo NAME=VALUE]*\n"
             "       src_dataset dst_dataset\n" );
 
     if( !bShort )
@@ -278,7 +280,7 @@ static int ProxyMain( int argc, char ** argv )
     int			i;
     int			nRasterXSize, nRasterYSize;
     const char		*pszSource=NULL, *pszDest=NULL, *pszFormat = "GTiff";
-    int bFormatExplicitelySet = FALSE;
+    int bFormatExplicitlySet = FALSE;
     GDALDriverH		hDriver;
     int			*panBandList = NULL; /* negative value of panBandList[i] means mask band of ABS(panBandList[i]) */
     int         nBandCount = 0, bDefBands = TRUE;
@@ -319,7 +321,9 @@ static int ProxyMain( int argc, char ** argv )
     int                 bErrorOnPartiallyOutside = FALSE;
     int                 bErrorOnCompletelyOutside = FALSE;
     int                 bNoRAT = FALSE;
-
+    char              **papszOpenOptions = NULL;
+    const char         *pszResampling = NULL;
+    double              dfXRes = 0.0, dfYRes = 0.0;
 
     anSrcWin[0] = 0;
     anSrcWin[1] = 0;
@@ -363,7 +367,7 @@ static int ProxyMain( int argc, char ** argv )
         else if( EQUAL(argv[i],"-of") && i < argc-1 )
         {
             pszFormat = argv[++i];
-            bFormatExplicitelySet = TRUE;
+            bFormatExplicitlySet = TRUE;
         }
 
         else if( EQUAL(argv[i],"-q") || EQUAL(argv[i],"-quiet") )
@@ -634,7 +638,18 @@ static int ProxyMain( int argc, char ** argv )
             CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(2);
             pszOXSize = argv[++i];
             pszOYSize = argv[++i];
-        }   
+        }
+        
+        else if( EQUAL(argv[i],"-tr") )
+        {
+            CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(2);
+            dfXRes = CPLAtofM(argv[++i]);
+            dfYRes = fabs(CPLAtofM(argv[++i]));
+            if( dfXRes == 0 || dfYRes == 0 )
+            {
+                Usage("Wrong value for -tr parameters.");
+            }
+        }
 
         else if( EQUAL(argv[i],"-srcwin") )
         {
@@ -713,6 +728,17 @@ static int ProxyMain( int argc, char ** argv )
         {
             bNoRAT = TRUE;
         }
+        else if( EQUAL(argv[i], "-oo") )
+        {
+            CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(1);
+            papszOpenOptions = CSLAddString( papszOpenOptions,
+                                                argv[++i] );
+        }
+        else if( EQUAL(argv[i],"-r") )
+        {
+            CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(1);
+            pszResampling = argv[++i];
+        }  
         else if( argv[i][0] == '-' )
         {
             Usage(CPLSPrintf("Unknown option name '%s'", argv[i]));
@@ -753,14 +779,27 @@ static int ProxyMain( int argc, char ** argv )
         pfnProgress = GDALDummyProgress;
     }
 
-    if (!bQuiet && !bFormatExplicitelySet)
+    if (!bQuiet && !bFormatExplicitlySet)
         CheckExtensionConsistency(pszDest, pszFormat);
+/* -------------------------------------------------------------------- */
+/*      Check that incompatible options are not used                    */
+/* -------------------------------------------------------------------- */
+
+    if( pszOXSize != NULL && (dfXRes != 0 && dfYRes != 0) )
+    {
+        Usage("-outsize and -tr options cannot be used at the same time.");
+    }
+    if( bGotBounds &&  (dfXRes != 0 && dfYRes != 0) )
+    {
+        Usage("-a_ullr and -tr options cannot be used at the same time.");
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Attempt to open source file.                                    */
 /* -------------------------------------------------------------------- */
 
-    hDataset = GDALOpenShared( pszSource, GA_ReadOnly );
+    hDataset = GDALOpenEx( pszSource, GDAL_OF_RASTER, NULL,
+                           (const char* const* )papszOpenOptions, NULL );
     
     if( hDataset == NULL )
     {
@@ -1025,6 +1064,7 @@ static int ProxyMain( int argc, char ** argv )
         GDALDestroyDriverManager();
         CSLDestroy( argv );
         CSLDestroy( papszCreateOptions );
+        CSLDestroy( papszOpenOptions );
         exit( 1 );
     }
 
@@ -1040,7 +1080,7 @@ static int ProxyMain( int argc, char ** argv )
            anSrcWin[0] == 0 && anSrcWin[1] == 0
         && anSrcWin[2] == GDALGetRasterXSize(hDataset)
         && anSrcWin[3] == GDALGetRasterYSize(hDataset)
-        && pszOXSize == NULL && pszOYSize == NULL );
+        && pszOXSize == NULL && pszOYSize == NULL && dfXRes == 0.0 );
 
     if( eOutputType == GDT_Unknown 
         && nScaleRepeat == 0 && nExponentRepeat == 0 && !bUnscale
@@ -1071,6 +1111,7 @@ static int ProxyMain( int argc, char ** argv )
 
         CSLDestroy( argv );
         CSLDestroy( papszCreateOptions );
+        CSLDestroy( papszOpenOptions );
 
         return hOutDS == NULL;
     }
@@ -1078,7 +1119,24 @@ static int ProxyMain( int argc, char ** argv )
 /* -------------------------------------------------------------------- */
 /*      Establish some parameters.                                      */
 /* -------------------------------------------------------------------- */
-    if( pszOXSize == NULL )
+    if( dfXRes != 0.0 )
+    {
+        if( !(GDALGetGeoTransform( hDataset, adfGeoTransform ) == CE_None &&
+              nGCPCount == 0 &&
+              adfGeoTransform[2] == 0.0 && adfGeoTransform[4] == 0.0) )
+        {
+            fprintf( stderr, 
+                     "The -tr option was used, but there's no geotransform or it is\n"
+                     "rotated.  This configuration is not supported.\n" );
+            GDALClose( hDataset );
+            CPLFree( panBandList );
+            GDALDestroyDriverManager();
+            exit( 1 );
+        }
+        nOXSize = int(anSrcWin[2] / dfXRes * adfGeoTransform[1] + 0.5);
+        nOYSize = int(anSrcWin[3] / dfYRes * fabs(adfGeoTransform[5]) + 0.5);
+    }
+    else if( pszOXSize == NULL )
     {
         nOXSize = anSrcWin[2];
         nOYSize = anSrcWin[3];
@@ -1089,6 +1147,15 @@ static int ProxyMain( int argc, char ** argv )
                           ? CPLAtofM(pszOXSize)/100*anSrcWin[2] : atoi(pszOXSize)));
         nOYSize = (int) ((pszOYSize[strlen(pszOYSize)-1]=='%' 
                           ? CPLAtofM(pszOYSize)/100*anSrcWin[3] : atoi(pszOYSize)));
+    }
+
+    if( nOXSize == 0 || nOYSize == 0 )
+    {
+        fprintf(stderr, "Attempt to create %dx%d dataset is illegal.\n", nOXSize, nOYSize);
+        GDALClose( hDataset );
+        CPLFree( panBandList );
+        GDALDestroyDriverManager();
+        exit( 1 );
     }
 
 /* ==================================================================== */
@@ -1140,6 +1207,12 @@ static int ProxyMain( int argc, char ** argv )
         adfGeoTransform[4] *= anSrcWin[2] / (double) nOXSize;
         adfGeoTransform[5] *= anSrcWin[3] / (double) nOYSize;
         
+        if( dfXRes != 0.0 )
+        {
+            adfGeoTransform[1] = dfXRes;
+            adfGeoTransform[5] = (adfGeoTransform[5] > 0) ? dfYRes : -dfYRes;
+        }
+
         poVDS->SetGeoTransform( adfGeoTransform );
     }
 
@@ -1258,6 +1331,7 @@ static int ProxyMain( int argc, char ** argv )
             GDALDestroyDriverManager();
             CSLDestroy( argv );
             CSLDestroy( papszCreateOptions );
+            CSLDestroy( papszOpenOptions );
             exit( 1 );
         }
         
@@ -1347,8 +1421,8 @@ static int ProxyMain( int argc, char ** argv )
                                       eBandType == GDT_UInt32 );
                 if( bSrcIsInteger && bDstIsInteger )
                 {
-                    GInt32 nDstMin;
-                    GUInt32 nDstMax;
+                    GInt32 nDstMin = 0;
+                    GUInt32 nDstMax = 0;
                     switch( eBandType )
                     {
                         case GDT_Byte:
@@ -1482,16 +1556,10 @@ static int ProxyMain( int argc, char ** argv )
 /*      Create a simple or complex data source depending on the         */
 /*      translation type required.                                      */
 /* -------------------------------------------------------------------- */
+        VRTSimpleSource* poSimpleSource;
         if( bUnscale || bScale || (nRGBExpand != 0 && i < nRGBExpand) )
         {
             VRTComplexSource* poSource = new VRTComplexSource();
-            poVRTBand->ConfigureSource( poSource,
-                                        poSrcBand,
-                                        FALSE,
-                                        anSrcWin[0], anSrcWin[1],
-                                        anSrcWin[2], anSrcWin[3],
-                                        anDstWin[0], anDstWin[1],
-                                        anDstWin[2], anDstWin[3] );
 
         /* -------------------------------------------------------------------- */
         /*      Set complex parameters.                                         */
@@ -1512,14 +1580,21 @@ static int ProxyMain( int argc, char ** argv )
 
             poSource->SetColorTableComponent(nComponent);
 
-            poVRTBand->AddSource( poSource );
+            poSimpleSource = poSource;
         }
         else
-            poVRTBand->AddSimpleSource( poSrcBand,
-                                        anSrcWin[0], anSrcWin[1],
-                                        anSrcWin[2], anSrcWin[3],
-                                        anDstWin[0], anDstWin[1],
-                                        anDstWin[2], anDstWin[3] );
+            poSimpleSource = new VRTSimpleSource();
+
+        poSimpleSource->SetResampling(pszResampling);
+        poVRTBand->ConfigureSource( poSimpleSource,
+                                    poSrcBand,
+                                    FALSE,
+                                    anSrcWin[0], anSrcWin[1],
+                                    anSrcWin[2], anSrcWin[3],
+                                    anDstWin[0], anDstWin[1],
+                                    anDstWin[2], anDstWin[3] );
+
+        poVRTBand->AddSource( poSimpleSource );
 
 /* -------------------------------------------------------------------- */
 /*      In case of color table translate, we only set the color         */
@@ -1702,6 +1777,7 @@ static int ProxyMain( int argc, char ** argv )
 
     CSLDestroy( argv );
     CSLDestroy( papszCreateOptions );
+    CSLDestroy( papszOpenOptions );
     
     return hOutDS == NULL;
 }
@@ -1790,7 +1866,9 @@ static void CopyBandInfo( GDALRasterBand * poSrcBand, GDALRasterBand * poDstBand
     }
 
     poDstBand->SetCategoryNames( poSrcBand->GetCategoryNames() );
-    if( !EQUAL(poSrcBand->GetUnitType(),"") )
+
+    // Copy unit only if the range of pixel values is not modified
+    if( bCanCopyStatsMetadata && bCopyScale && !EQUAL(poSrcBand->GetUnitType(),"") )
         poDstBand->SetUnitType( poSrcBand->GetUnitType() );
 }
 

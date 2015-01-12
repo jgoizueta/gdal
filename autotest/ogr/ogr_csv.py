@@ -1312,7 +1312,7 @@ def ogr_csv_32():
 
     # We limit to the first "1.5" line
     ds = gdal.OpenEx('data/testtypeautodetect.csv', gdal.OF_VECTOR, \
-        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=300'])
+        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=300', 'QUOTED_FIELDS_AS_STRING=YES'])
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     col_type = [ ogr.OFTString, ogr.OFTReal, ogr.OFTInteger, ogr.OFTReal, ogr.OFTInteger, ogr.OFTString,
@@ -1333,10 +1333,18 @@ def ogr_csv_32():
             print(i)
             f.DumpReadable()
             return 'fail'
-            
+
+    # Without QUOTED_FIELDS_AS_STRING=YES, str3 will be detected as integer
+    ds = gdal.OpenEx('data/testtypeautodetect.csv', gdal.OF_VECTOR, \
+        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=300'])
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('str3')).GetType() != ogr.OFTInteger:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    
     # We limit to the first 2 lines
     ds = gdal.OpenEx('data/testtypeautodetect.csv', gdal.OF_VECTOR, \
-        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350'])
+        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'QUOTED_FIELDS_AS_STRING=YES'])
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     col_type = [ ogr.OFTString, ogr.OFTReal, ogr.OFTReal, ogr.OFTReal, ogr.OFTInteger, ogr.OFTInteger,
@@ -1360,7 +1368,7 @@ def ogr_csv_32():
 
     # Test AUTODETECT_WIDTH=YES
     ds = gdal.OpenEx('data/testtypeautodetect.csv', gdal.OF_VECTOR, \
-        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'AUTODETECT_WIDTH=YES'])
+        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'AUTODETECT_WIDTH=YES', 'QUOTED_FIELDS_AS_STRING=YES'])
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     col_width = [ 0, 3, 3, 3, 1, 1, 0, 0, 0, 0, 0, 1, 2 , 1, 1, 3, 19, 10, 8, 0 ]
@@ -1384,7 +1392,7 @@ def ogr_csv_32():
 
     # Test AUTODETECT_WIDTH=STRING_ONLY
     ds = gdal.OpenEx('data/testtypeautodetect.csv', gdal.OF_VECTOR, \
-        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'AUTODETECT_WIDTH=STRING_ONLY'])
+        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'AUTODETECT_WIDTH=STRING_ONLY', 'QUOTED_FIELDS_AS_STRING=YES'])
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     col_width = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2 , 1, 1, 3, 19, 10, 8, 0 ]
@@ -1408,7 +1416,7 @@ def ogr_csv_32():
 
     # Test KEEP_SOURCE_COLUMNS=YES
     ds = gdal.OpenEx('data/testtypeautodetect.csv', gdal.OF_VECTOR, \
-        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'KEEP_SOURCE_COLUMNS=YES'])
+        open_options = ['AUTODETECT_TYPE=YES', 'AUTODETECT_SIZE_LIMIT=350', 'KEEP_SOURCE_COLUMNS=YES', 'QUOTED_FIELDS_AS_STRING=YES'])
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     col_values = [ '', 1.5, '1.5', 1, '1', 1.5, '1.5', 2, '2', None, None, \
@@ -1451,6 +1459,75 @@ def ogr_csv_32():
             print(fid)
             f.DumpReadable()
             return 'fail'
+
+    return 'success'
+
+###############################################################################
+# Test Boolean, Int16 and Float32 support
+
+def ogr_csv_33():
+
+    ds = gdal.OpenEx('data/testtypeautodetectboolean.csv', gdal.OF_VECTOR, \
+        open_options = ['AUTODETECT_TYPE=YES'])
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    col_values = [ 1,1,1,1,1,0,0,0,0,0,0,1,'y' ]
+    for i in range(lyr.GetLayerDefn().GetFieldCount()):
+        if (i < 10 and lyr.GetLayerDefn().GetFieldDefn(i).GetSubType() != ogr.OFSTBoolean) or \
+           (i >= 10 and lyr.GetLayerDefn().GetFieldDefn(i).GetSubType() == ogr.OFSTBoolean):
+            gdaltest.post_reason('fail')
+            print(i)
+            print(lyr.GetLayerDefn().GetFieldDefn(i).GetSubType())
+            return 'fail'
+        if f.GetField(i) != col_values[i]:
+            gdaltest.post_reason('fail')
+            print(i)
+            f.DumpReadable()
+            return 'fail'
+    ds = None
+    
+    ds = ogr.GetDriverByName('CSV').CreateDataSource('/vsimem/subtypes.csv')
+    lyr = ds.CreateLayer('test', options = ['CREATE_CSVT=YES'])
+    fld = ogr.FieldDefn('b', ogr.OFTInteger)
+    fld.SetSubType(ogr.OFSTBoolean)
+    lyr.CreateField(fld)
+    fld = ogr.FieldDefn('int16', ogr.OFTInteger)
+    fld.SetSubType(ogr.OFSTInt16)
+    lyr.CreateField(fld)
+    fld = ogr.FieldDefn('float32', ogr.OFTReal)
+    fld.SetSubType(ogr.OFSTFloat32)
+    lyr.CreateField(fld)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    f.SetField(1, -32768)
+    f.SetField(2, 1.23)
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+    
+    ds = ogr.Open('/vsimem/subtypes.csv')
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger or \
+       lyr.GetLayerDefn().GetFieldDefn(0).GetSubType() != ogr.OFSTBoolean:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(1).GetType() != ogr.OFTInteger or \
+       lyr.GetLayerDefn().GetFieldDefn(1).GetSubType() != ogr.OFSTInt16:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(2).GetType() != ogr.OFTReal or \
+       lyr.GetLayerDefn().GetFieldDefn(2).GetSubType() != ogr.OFSTFloat32:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 1 or f.GetField(1) != -32768 or f.GetField(2) != 1.23:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds = None
+
+    gdal.Unlink('/vsimem/subtypes.csv')
+    gdal.Unlink('/vsimem/subtypes.csvt')
 
     return 'success'
 
@@ -1523,6 +1600,7 @@ gdaltest_list = [
     ogr_csv_30,
     ogr_csv_31,
     ogr_csv_32,
+    ogr_csv_33,
     ogr_csv_cleanup ]
 
 if __name__ == '__main__':

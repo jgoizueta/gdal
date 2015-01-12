@@ -385,6 +385,7 @@ void CPL_STDCALL GDALAllRegister()
     GDALRegister_ACE2();
     GDALRegister_SNODAS();
     GDALRegister_KRO();
+    GDALRegister_ROIPAC();
 #endif
 
 #ifdef FRMT_arg
@@ -414,6 +415,11 @@ void CPL_STDCALL GDALAllRegister()
 
 #ifdef FRMT_dods
     GDALRegister_DODS();
+#endif
+
+/* Register KEA before HDF5 */
+#ifdef FRMT_kea
+    GDALRegister_KEA();
 #endif
 
 #ifdef FRMT_hdf5
@@ -511,7 +517,7 @@ void CPL_STDCALL GDALAllRegister()
 #ifdef FRMT_iris
     GDALRegister_IRIS();
 #endif
-    
+
     OGRRegisterAllInternal();
 
 #ifdef FRMT_wcs
@@ -519,7 +525,7 @@ void CPL_STDCALL GDALAllRegister()
 #endif
     
 /* -------------------------------------------------------------------- */
-/*      Deregister any drivers explicitly marked as supressed by the    */
+/*      Deregister any drivers explicitly marked as suppressed by the   */
 /*      GDAL_SKIP environment variable.                                 */
 /* -------------------------------------------------------------------- */
     GetGDALDriverManager()->AutoSkipDrivers();

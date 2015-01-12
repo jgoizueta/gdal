@@ -343,12 +343,12 @@ void FGdbLayer::WorkAroundExtentProblem()
 #endif // EXTENT_WORKAROUND
 
 /************************************************************************/
-/*                            CreateFeature()                           */
+/*                            ICreateFeature()                           */
 /* Create an FGDB Row and populate it from an OGRFeature.               */
 /*                                                                      */
 /************************************************************************/
 
-OGRErr FGdbLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr FGdbLayer::ICreateFeature( OGRFeature *poFeature )
 {
     Table *fgdb_table = m_pTable;
     Row fgdb_row;
@@ -682,10 +682,10 @@ OGRErr FGdbLayer::DeleteFeature( long nFID )
 }
 
 /************************************************************************/
-/*                            SetFeature()                              */
+/*                            ISetFeature()                              */
 /************************************************************************/
 
-OGRErr FGdbLayer::SetFeature( OGRFeature* poFeature )
+OGRErr FGdbLayer::ISetFeature( OGRFeature* poFeature )
 
 {
     long           hr;
@@ -735,7 +735,7 @@ char* FGdbLayer::CreateFieldDefn(OGRFieldDefn& oField,
 
     /* Try to map the OGR type to an ESRI type */
     OGRFieldType fldtype = oField.GetType();
-    if ( ! OGRToGDBFieldType(fldtype, &gdbFieldType) )
+    if ( ! OGRToGDBFieldType(fldtype, oField.GetSubType(), &gdbFieldType) )
     {
         GDBErr(-1, "Failed converting field type.");
         return NULL;
@@ -749,7 +749,8 @@ char* FGdbLayer::CreateFieldDefn(OGRFieldDefn& oField,
         if( pszFieldType != NULL )
         {
             OGRFieldType fldtypeCheck;
-            if( GDBToOGRFieldType(pszFieldType, &fldtypeCheck) )
+            OGRFieldSubType eSubType;
+            if( GDBToOGRFieldType(pszFieldType, &fldtypeCheck, &eSubType) )
             {
                 if( fldtypeCheck != fldtype )
                 {
@@ -1187,7 +1188,7 @@ CPLXMLNode* XMLSpatialReference(OGRSpatialReference* poSRS, char** papszOptions)
     long zscale = 1 / ztol * 10;
 
     char s_xyscale[50], s_xytol[50], s_zscale[50], s_ztol[50];
-    snprintf(s_ztol, 50, "%f", ztol);
+    CPLsnprintf(s_ztol, 50, "%f", ztol);
     snprintf(s_zscale, 50, "%ld", zscale);
     
     if ( poSRS == NULL || poSRS->IsProjected() )
@@ -1197,7 +1198,7 @@ CPLXMLNode* XMLSpatialReference(OGRSpatialReference* poSRS, char** papszOptions)
         // default scale is 10x the tolerance
         long xyscale = 1 / xytol * 10;
 
-        snprintf(s_xytol, 50, "%f", xytol);
+        CPLsnprintf(s_xytol, 50, "%f", xytol);
         snprintf(s_xyscale, 50, "%ld", xyscale);
 
         // Ideally we would use the same X/Y origins as ArcGIS, but we need the algorithm they use.
@@ -1992,8 +1993,9 @@ bool FGdbLayer::GDBToOGRFields(CPLXMLNode* psRoot)
             }
 
             OGRFieldType ogrType;
+            OGRFieldSubType eSubType;
             //CPLDebug("FGDB", "name = %s, type = %s", fieldName.c_str(), fieldType.c_str() );
-            if (!GDBToOGRFieldType(fieldType, &ogrType))
+            if (!GDBToOGRFieldType(fieldType, &ogrType, &eSubType))
             {
                 // field cannot be mapped, skipping further processing
                 CPLError( CE_Warning, CPLE_AppDefined, "Skipping field: [%s] type: [%s] ",
@@ -2005,6 +2007,7 @@ bool FGdbLayer::GDBToOGRFields(CPLXMLNode* psRoot)
             //TODO: Optimization - modify m_wstrSubFields so it only fetches fields that are mapped
 
             OGRFieldDefn fieldTemplate( fieldName.c_str(), ogrType);
+            fieldTemplate.SetSubType(eSubType);
             //fieldTemplate.SetWidth(nLength);
             //fieldTemplate.SetPrecision(nPrecision);
             m_pFeatureDefn->AddFieldDefn( &fieldTemplate );
@@ -2430,7 +2433,7 @@ OGRFeature *FGdbLayer::GetFeature( long oid )
 /*                          GetFeatureCount()                           */
 /************************************************************************/
 
-int FGdbLayer::GetFeatureCount( int bForce )
+int FGdbLayer::GetFeatureCount( CPL_UNUSED int bForce )
 {
     long           hr;
     int32          rowCount = 0;
@@ -2659,7 +2662,7 @@ int FGdbLayer::TestCapability( const char* pszCap )
     else if (EQUAL(pszCap,OLCCreateField)) /* CreateField() */
         return m_pDS->GetUpdate();
 
-    else if (EQUAL(pszCap,OLCSequentialWrite)) /* CreateFeature() */
+    else if (EQUAL(pszCap,OLCSequentialWrite)) /* ICreateFeature() */
         return m_pDS->GetUpdate();
 
     else if (EQUAL(pszCap,OLCStringsAsUTF8)) /* Native UTF16, converted to UTF8 */
@@ -2671,7 +2674,7 @@ int FGdbLayer::TestCapability( const char* pszCap )
     else if (EQUAL(pszCap,OLCDeleteFeature)) /* DeleteFeature() */
         return m_pDS->GetUpdate();
 
-    else if (EQUAL(pszCap,OLCRandomWrite)) /* SetFeature() */
+    else if (EQUAL(pszCap,OLCRandomWrite)) /* ISetFeature() */
         return m_pDS->GetUpdate();
 
     else if (EQUAL(pszCap,OLCDeleteField)) /* DeleteField() */

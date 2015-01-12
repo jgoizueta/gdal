@@ -1077,12 +1077,6 @@ static void OGRGeoRSSLayerWriteSimpleElement(VSILFILE* fp,
             {
                 char* pszValue =
                         OGRGetXML_UTF8_EscapedString(poFeature->GetFieldAsString( iIndex ));
-                if (poFeatureDefn->GetFieldDefn(iIndex)->GetType() == OFTReal)
-                {
-                    char* pszComma = strchr(pszValue, ',');
-                    if (pszComma)
-                        *pszComma = '.';
-                }
                 VSIFPrintfL(fp, " %s=\"%s\"", pszAttributeName, pszValue);
                 CPLFree(pszValue);
             }
@@ -1098,12 +1092,6 @@ static void OGRGeoRSSLayerWriteSimpleElement(VSILFILE* fp,
 
         char* pszValue =
                 OGRGetXML_UTF8_EscapedString(poFeature->GetFieldAsString( iIndex ));
-        if (poFeatureDefn->GetFieldDefn(iIndex)->GetType() == OFTReal)
-        {
-            char* pszComma = strchr(pszValue, ',');
-            if (pszComma)
-                *pszComma = '.';
-        }
         VSIFPrintfL(fp, "%s", pszValue);
         CPLFree(pszValue);
 
@@ -1117,10 +1105,10 @@ static void OGRGeoRSSLayerWriteSimpleElement(VSILFILE* fp,
 }
 
 /************************************************************************/
-/*                           CreateFeature()                            */
+/*                           ICreateFeature()                            */
 /************************************************************************/
 
-OGRErr OGRGeoRSSLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr OGRGeoRSSLayer::ICreateFeature( OGRFeature *poFeature )
 
 {
     VSILFILE* fp = poDS->GetOutputFP();
@@ -1220,12 +1208,6 @@ OGRErr OGRGeoRSSLayer::CreateFeature( OGRFeature *poFeature )
 
                             char* pszValue =
                                     OGRGetXML_UTF8_EscapedString(poFeature->GetFieldAsString( j ));
-                            if (poFeatureDefn->GetFieldDefn(j)->GetType() == OFTReal)
-                            {
-                                char* pszComma = strchr(pszValue, ',');
-                                if (pszComma)
-                                    *pszComma = '.';
-                            }
                             VSIFPrintfL(fp, "        <%s>%s</%s>\n", pszAttributeName2, pszValue, pszAttributeName2);
                             CPLFree(pszValue);
                         }
@@ -1427,12 +1409,6 @@ OGRErr OGRGeoRSSLayer::CreateFeature( OGRFeature *poFeature )
             }
             char* pszValue =
                         OGRGetXML_UTF8_EscapedString(poFeature->GetFieldAsString( i ));
-            if (poFeatureDefn->GetFieldDefn(i)->GetType() == OFTReal)
-            {
-                char* pszComma = strchr(pszValue, ',');
-                if (pszComma)
-                    *pszComma = '.';
-            }
             VSIFPrintfL(fp, "      <%s>%s</%s>\n", pszTagName, pszValue, pszTagName);
             CPLFree(pszValue);
             CPLFree(pszTagName);
@@ -2083,7 +2059,7 @@ void OGRGeoRSSLayer::startElementLoadSchemaCbk(const char *pszName, const char *
                 eGeomType = wkbUnknown;
 
             if (nDimension == 3)
-                eGeomType = (OGRwkbGeometryType) (eGeomType | wkb25DBit);
+                eGeomType = wkbSetZ(eGeomType);
         }
     }
 

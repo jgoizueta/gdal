@@ -451,8 +451,6 @@ CPLString OGRWFSLayer::MakeGetFeatureURL(int nRequestMaxFeatures, int bRequestHi
         else
             osGeomFilter += "</PropertyName>";
 
-        CPLLocaleC  oLocaleEnforcer;
-
         if ( atoi(poDS->GetVersion()) >= 2 )
         {
             osGeomFilter += "<gml:Envelope";
@@ -1094,7 +1092,7 @@ OGRFeature *OGRWFSLayer::GetNextFeature()
             poBaseLayer = poBaseDS->GetLayer(0);
             poBaseLayer->ResetReading();
 
-            /* Check that the layer field definition is consistant with the one */
+            /* Check that the layer field definition is consistent with the one */
             /* we got in BuildLayerDefn() */
             if (poFeatureDefn->GetFieldCount() != poBaseLayer->GetLayerDefn()->GetFieldCount())
                 bGotApproximateLayerDefn = TRUE;
@@ -1642,10 +1640,10 @@ CPLString OGRWFSLayer::GetPostHeader()
 }
 
 /************************************************************************/
-/*                          CreateFeature()                             */
+/*                          ICreateFeature()                             */
 /************************************************************************/
 
-OGRErr OGRWFSLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr OGRWFSLayer::ICreateFeature( OGRFeature *poFeature )
 {
     if (!TestCapability(OLCSequentialWrite))
     {
@@ -1690,8 +1688,6 @@ OGRErr OGRWFSLayer::CreateFeature( OGRFeature *poFeature )
     }
     osPost += "    <feature:"; osPost += pszShortName; osPost += " xmlns:feature=\"";
     osPost += osTargetNamespace; osPost += "\">\n";
-
-    CPLLocaleC  oLocaleEnforcer;
 
     int i;
     for(i=1; i <= poFeature->GetFieldCount(); i++)
@@ -1894,10 +1890,10 @@ OGRErr OGRWFSLayer::CreateFeature( OGRFeature *poFeature )
 
 
 /************************************************************************/
-/*                             SetFeature()                             */
+/*                             ISetFeature()                             */
 /************************************************************************/
 
-OGRErr OGRWFSLayer::SetFeature( OGRFeature *poFeature )
+OGRErr OGRWFSLayer::ISetFeature( OGRFeature *poFeature )
 {
     if (!TestCapability(OLCRandomWrite))
     {
@@ -1937,8 +1933,6 @@ OGRErr OGRWFSLayer::SetFeature( OGRFeature *poFeature )
 
     osPost += "  <wfs:Update typeName=\"feature:"; osPost += pszShortName; osPost +=  "\" xmlns:feature=\"";
     osPost += osTargetNamespace; osPost += "\">\n";
-
-    CPLLocaleC  oLocaleEnforcer;
 
     OGRGeometry* poGeom = poFeature->GetGeometryRef();
     if ( osGeometryColumnName.size() != 0 )
@@ -2460,7 +2454,7 @@ OGRErr OGRWFSLayer::CommitTransaction()
             if ((int)aosFIDList.size() != nGotInserted)
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
-                        "Inconsistant InsertResults: did not get expected FID count");
+                        "Inconsistent InsertResults: did not get expected FID count");
                 CPLDestroyXMLNode( psXML );
                 CPLHTTPDestroyResult(psResult);
                 return OGRERR_FAILURE;

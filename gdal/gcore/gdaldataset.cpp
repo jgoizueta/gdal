@@ -176,17 +176,8 @@ GDALDataset::GDALDataset()
     papoBands = NULL;
     nRefCount = 1;
     bShared = FALSE;
-
-/* -------------------------------------------------------------------- */
-/*      Add this dataset to the open dataset list.                      */
-/* -------------------------------------------------------------------- */
-    {
-        CPLMutexHolderD( &hDLMutex );
-
-        if (poAllDatasetMap == NULL)
-            poAllDatasetMap = new std::map<GDALDataset*, GIntBig>;
-        (*poAllDatasetMap)[this] = -1;
-    }
+    bIsInternal = TRUE;
+    papszOpenOptions = NULL;
 
 /* -------------------------------------------------------------------- */
 /*      Set forced caching flag.                                        */
@@ -224,8 +215,8 @@ GDALDataset::~GDALDataset()
     int         i;
 
     // we don't want to report destruction of datasets that 
-    // were never really open.
-    if( nBands != 0 || !EQUAL(GetDescription(),"") )
+    // were never really open or meant as internal
+    if( !bIsInternal && ( nBands != 0 || !EQUAL(GetDescription(),"") ) )
     {
         if( CPLGetPID() != GDALGetResponsiblePIDForCurrentThread() )
             CPLDebug( "GDAL", 
@@ -240,6 +231,7 @@ GDALDataset::~GDALDataset()
 /* -------------------------------------------------------------------- */
 /*      Remove dataset from the "open" dataset list.                    */
 /* -------------------------------------------------------------------- */
+    if( !bIsInternal )
     {
         CPLMutexHolderD( &hDLMutex );
         if( poAllDatasetMap )
@@ -301,6 +293,26 @@ GDALDataset::~GDALDataset()
 
     if( m_hMutex != NULL )
         CPLDestroyMutex( m_hMutex );
+
+    CSLDestroy( papszOpenOptions );
+}
+
+/************************************************************************/
+/*                      AddToDatasetOpenList()                          */
+/************************************************************************/
+
+void GDALDataset::AddToDatasetOpenList()
+{
+/* -------------------------------------------------------------------- */
+/*      Add this dataset to the open dataset list.                      */
+/* -------------------------------------------------------------------- */
+    bIsInternal = FALSE;
+
+    CPLMutexHolderD( &hDLMutex );
+
+    if (poAllDatasetMap == NULL)
+        poAllDatasetMap = new std::map<GDALDataset*, GIntBig>;
+    (*poAllDatasetMap)[this] = -1;
 }
 
 /************************************************************************/
@@ -1125,6 +1137,8 @@ void GDALDataset::MarkAsShared()
     CPLAssert( !bShared );
 
     bShared = TRUE;
+    if( bIsInternal )
+        return;
 
     GIntBig nPID = GDALGetResponsiblePIDForCurrentThread();
     SharedDatasetCtxt* psStruct;
@@ -1466,7 +1480,9 @@ CPLErr GDALDataset::IRasterIO( GDALRWFlag eRWFlag,
                                void * pData, int nBufXSize, int nBufYSize,
                                GDALDataType eBufType, 
                                int nBandCount, int *panBandMap,
-                               int nPixelSpace, int nLineSpace, int nBandSpace)
+                               GSpacing nPixelSpace, GSpacing nLineSpace,
+                               GSpacing nBandSpace,
+                               GDALRasterIOExtraArg* psExtraArg )
     
 {
     int iBandIndex; 
@@ -1482,8 +1498,12 @@ CPLErr GDALDataset::IRasterIO( GDALRWFlag eRWFlag,
         return BlockBasedRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize, 
                                    pData, nBufXSize, nBufYSize,
                                    eBufType, nBandCount, panBandMap,
-                                   nPixelSpace, nLineSpace, nBandSpace );
+                                   nPixelSpace, nLineSpace, nBandSpace,
+                                   psExtraArg );
     }
+
+    GDALProgressFunc  pfnProgressGlobal = psExtraArg->pfnProgress;
+    void             *pProgressDataGlobal = psExtraArg->pProgressData;
 
     for( iBandIndex = 0; 
          iBandIndex < nBandCount && eErr == CE_None; 
@@ -1499,11 +1519,24 @@ CPLErr GDALDataset::IRasterIO( GDALRWFlag eRWFlag,
         }
 
         pabyBandData = ((GByte *) pData) + iBandIndex * nBandSpace;
-        
+
+        psExtraArg->pfnProgress = GDALScaledProgress;
+        psExtraArg->pProgressData = 
+            GDALCreateScaledProgress( 1.0 * iBandIndex / nBandCount,
+                                      1.0 * (iBandIndex + 1) / nBandCount,
+                                      pfnProgressGlobal,
+                                      pProgressDataGlobal );
+
         eErr = poBand->IRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize, 
                                   (void *) pabyBandData, nBufXSize, nBufYSize,
-                                  eBufType, nPixelSpace, nLineSpace );
+                                  eBufType, nPixelSpace, nLineSpace,
+                                  psExtraArg );
+
+        GDALDestroyScaledProgress( psExtraArg->pProgressData );
     }
+    
+    psExtraArg->pfnProgress = pfnProgressGlobal;
+    psExtraArg->pProgressData = pProgressDataGlobal;
 
     return eErr;
 }
@@ -1582,7 +1615,6 @@ CPLErr GDALDataset::ValidateRasterIOOrAdviseReadParameters(
     return eErr;
 }
 
-
 /************************************************************************/
 /*                              RasterIO()                              */
 /************************************************************************/
@@ -1656,6 +1688,12 @@ CPLErr GDALDataset::ValidateRasterIOOrAdviseReadParameters(
  * nLineSpace * nBufYSize implying band sequential organization
  * of the data buffer. 
  *
+ * @param psExtraArg (new in GDAL 2.0) pointer to a GDALRasterIOExtraArg structure with additional
+ * arguments to specify resampling and progress callback, or NULL for default
+ * behaviour. The GDAL_RASTERIO_RESAMPLING configuration option can also be defined
+ * to override the default resampling to one of BILINEAR, CUBIC, CUBICSPLINE,
+ * LANCZOS, AVERAGE or MODE.
+ *
  * @return CE_Failure if the access fails, otherwise CE_None.
  */
 
@@ -1664,12 +1702,30 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
                               void * pData, int nBufXSize, int nBufYSize,
                               GDALDataType eBufType, 
                               int nBandCount, int *panBandMap,
-                              int nPixelSpace, int nLineSpace, int nBandSpace )
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg )
 
 {
     int i = 0;
     int bNeedToFreeBandMap = FALSE;
     CPLErr eErr = CE_None;
+    
+    GDALRasterIOExtraArg sExtraArg;
+    if( psExtraArg == NULL )
+    {
+        INIT_RASTERIO_EXTRA_ARG(sExtraArg);
+        psExtraArg = &sExtraArg;
+    }
+    else if( psExtraArg->nVersion != RASTERIO_EXTRA_ARG_CURRENT_VERSION )
+    {
+        ReportError( CE_Failure, CPLE_AppDefined,
+                     "Unhandled version of GDALRasterIOExtraArg" );
+        return CE_Failure;
+    }
+
+    GDALRasterIOExtraArgSetResampleAlg(psExtraArg, nXSize, nYSize,
+                                       nBufXSize, nBufYSize);
 
     if( NULL == pData )
     {
@@ -1707,26 +1763,11 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
     
     if( nLineSpace == 0 )
     {
-        if (nPixelSpace > INT_MAX / nBufXSize)
-        {
-            ReportError( CE_Failure, CPLE_AppDefined,
-                      "Int overflow : %d x %d", nPixelSpace, nBufXSize );
-            return CE_Failure;
-        }
         nLineSpace = nPixelSpace * nBufXSize;
     }
-    
-    /* The nBandCount > 1 test is necessary to allow reading only */
-    /* one band, even if the nLineSpace would overflow, but as it */
-    /* is not used in that case, it can be left to 0 (#3481) */
+
     if( nBandSpace == 0 && nBandCount > 1 )
     {
-        if (nLineSpace > INT_MAX / nBufYSize)
-        {
-            ReportError( CE_Failure, CPLE_AppDefined,
-                      "Int overflow : %d x %d", nLineSpace, nBufYSize );
-            return CE_Failure;
-        }
         nBandSpace = nLineSpace * nBufYSize;
     }
 
@@ -1756,7 +1797,8 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
             BlockBasedRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                                 pData, nBufXSize, nBufYSize, eBufType,
                                 nBandCount, panBandMap,
-                                nPixelSpace, nLineSpace, nBandSpace );
+                                nPixelSpace, nLineSpace, nBandSpace,
+                                psExtraArg );
     }
 
 /* -------------------------------------------------------------------- */
@@ -1768,7 +1810,8 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
             IRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                        pData, nBufXSize, nBufYSize, eBufType,
                        nBandCount, panBandMap,
-                       nPixelSpace, nLineSpace, nBandSpace );
+                       nPixelSpace, nLineSpace, nBandSpace,
+                       psExtraArg );
     }
 
 /* -------------------------------------------------------------------- */
@@ -1802,13 +1845,44 @@ GDALDatasetRasterIO( GDALDatasetH hDS, GDALRWFlag eRWFlag,
     VALIDATE_POINTER1( hDS, "GDALDatasetRasterIO", CE_Failure );
 
     GDALDataset    *poDS = (GDALDataset *) hDS;
-    
+
     return( poDS->RasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
                             pData, nBufXSize, nBufYSize, eBufType,
                             nBandCount, panBandMap, 
-                            nPixelSpace, nLineSpace, nBandSpace ) );
+                            nPixelSpace, nLineSpace, nBandSpace, NULL ) );
 }
-                     
+
+/************************************************************************/
+/*                       GDALDatasetRasterIOEx()                        */
+/************************************************************************/
+
+/**
+ * \brief Read/write a region of image data from multiple bands.
+ *
+ * @see GDALDataset::RasterIO()
+ * @since GDAL 2.0
+ */
+
+CPLErr CPL_STDCALL
+GDALDatasetRasterIOEx( GDALDatasetH hDS, GDALRWFlag eRWFlag,
+                       int nXOff, int nYOff, int nXSize, int nYSize,
+                       void * pData, int nBufXSize, int nBufYSize,
+                       GDALDataType eBufType,
+                       int nBandCount, int *panBandMap,
+                       GSpacing nPixelSpace, GSpacing nLineSpace,
+                       GSpacing nBandSpace,
+                       GDALRasterIOExtraArg* psExtraArg )
+    
+{
+    VALIDATE_POINTER1( hDS, "GDALDatasetRasterIOEx", CE_Failure );
+
+    GDALDataset    *poDS = (GDALDataset *) hDS;
+
+    return( poDS->RasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
+                            pData, nBufXSize, nBufYSize, eBufType,
+                            nBandCount, panBandMap, 
+                            nPixelSpace, nLineSpace, nBandSpace, psExtraArg ) );
+}
 /************************************************************************/
 /*                          GetOpenDatasets()                           */
 /************************************************************************/
@@ -1873,7 +1947,7 @@ void CPL_STDCALL GDALGetOpenDatasets( GDALDatasetH **ppahDSList, int *pnCount )
 /*                        GDALCleanOpenDatasetsList()                   */
 /************************************************************************/
 
-/* Usefull when called from the child of a fork(), to avoid closing */
+/* Useful when called from the child of a fork(), to avoid closing */
 /* the datasets of the parent at the child termination */
 void GDALNullifyOpenDatasetsList()
 {
@@ -2327,8 +2401,11 @@ GDALOpen( const char * pszFilename, GDALAccess eAccess )
  * terminated list of strings with the driver short names that must be considered.
  *
  * @param papszOpenOptions NULL, or a NULL terminated list of strings with open
- * options passed to candidate drivers.
-  *
+ * options passed to candidate drivers. An option exists for all drivers,
+ * OVERVIEW_LEVEL=level, to select a particular overview level of a dataset.
+ * The level index starts at 0. The level number can be suffixed by "only" to specify that
+ * only this overview level must be visible, and not sub-levels.
+ *
  * @param papszSiblingFiles  NULL, or a NULL terminated list of strings that are
  * filenames that are auxiliary to the main filename. If NULL is passed, a probing
  * of the file system will be done.
@@ -2353,6 +2430,12 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
 /* -------------------------------------------------------------------- */
     if( nOpenFlags & GDAL_OF_SHARED )
     {
+        if( nOpenFlags & GDAL_OF_INTERNAL )
+        {
+            CPLError(CE_Failure, CPLE_IllegalArg, "GDAL_OF_SHARED and GDAL_OF_INTERNAL are exclusive");
+            return NULL;
+        }
+        
         CPLMutexHolderD( &hDLMutex );
 
         if (phSharedDatasetSet != NULL)
@@ -2401,7 +2484,7 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
 
     int         iDriver;
     GDALDriverManager *poDM = GetGDALDriverManager();
-    CPLLocaleC  oLocaleForcer;
+    //CPLLocaleC  oLocaleForcer;
 
     CPLErrorReset();
     CPLAssert( NULL != poDM );
@@ -2437,8 +2520,20 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
             poDriver->GetMetadataItem(GDAL_DCAP_VECTOR) == NULL )
             continue;
 
+        /* Remove general OVERVIEW_LEVEL open options from list before */
+        /* passing it to the driver, if it isn't a driver specific option already */
+        char** papszTmpOpenOptions = NULL;
+        if( CSLFetchNameValue((char**)papszOpenOptions, "OVERVIEW_LEVEL") != NULL &&
+            (poDriver->GetMetadataItem(GDAL_DMD_OPENOPTIONLIST) == NULL ||
+             CPLString(poDriver->GetMetadataItem(GDAL_DMD_OPENOPTIONLIST)).ifind("OVERVIEW_LEVEL") == std::string::npos) )
+        {
+            papszTmpOpenOptions = CSLDuplicate((char**)papszOpenOptions);
+            papszTmpOpenOptions = CSLSetNameValue(papszTmpOpenOptions, "OVERVIEW_LEVEL", NULL);
+            oOpenInfo.papszOpenOptions = papszTmpOpenOptions;
+        }
+
         if( poDriver->pfnIdentify && poDriver->pfnIdentify(&oOpenInfo) > 0 )
-            GDALValidateOpenOptions( poDriver, papszOpenOptions );
+            GDALValidateOpenOptions( poDriver, oOpenInfo.papszOpenOptions );
 
         if ( poDriver->pfnOpen != NULL )
         {
@@ -2449,7 +2544,14 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
             poDS = poDriver->pfnOpenWithDriverArg( poDriver, &oOpenInfo );
         }
         else
+        {
+            CSLDestroy(papszTmpOpenOptions);
+            oOpenInfo.papszOpenOptions = (char**) papszOpenOptions;
             continue;
+        }
+
+        CSLDestroy(papszTmpOpenOptions);
+        oOpenInfo.papszOpenOptions = (char**) papszOpenOptions;
 
         if( poDS != NULL )
         {
@@ -2459,14 +2561,21 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
             if( poDS->poDriver == NULL )
                 poDS->poDriver = poDriver;
 
+            if( poDS->papszOpenOptions == NULL )
+                poDS->papszOpenOptions = CSLDuplicate((char**)papszOpenOptions);
 
-            if( CPLGetPID() != GDALGetResponsiblePIDForCurrentThread() )
-                CPLDebug( "GDAL", "GDALOpen(%s, this=%p) succeeds as %s (pid=%d, responsiblePID=%d).",
-                          pszFilename, poDS, poDriver->GetDescription(),
-                          (int)CPLGetPID(), (int)GDALGetResponsiblePIDForCurrentThread() );
-            else
-                CPLDebug( "GDAL", "GDALOpen(%s, this=%p) succeeds as %s.",
-                          pszFilename, poDS, poDriver->GetDescription() );
+            if( !(nOpenFlags & GDAL_OF_INTERNAL) )
+            {
+                if( CPLGetPID() != GDALGetResponsiblePIDForCurrentThread() )
+                    CPLDebug( "GDAL", "GDALOpen(%s, this=%p) succeeds as %s (pid=%d, responsiblePID=%d).",
+                              pszFilename, poDS, poDriver->GetDescription(),
+                              (int)CPLGetPID(), (int)GDALGetResponsiblePIDForCurrentThread() );
+                else
+                    CPLDebug( "GDAL", "GDALOpen(%s, this=%p) succeeds as %s.",
+                              pszFilename, poDS, poDriver->GetDescription() );
+
+                poDS->AddToDatasetOpenList();
+            }
 
             int* pnRecCount = (int*)CPLGetTLS( CTLS_GDALDATASET_REC_PROTECT_MAP );
             if( pnRecCount )
@@ -2484,6 +2593,33 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
                 else
                 {
                     poDS->MarkAsShared();
+                }
+            }
+
+            /* Deal with generic OVERVIEW_LEVEL open option, unless it is */
+            /* driver specific */
+            if( CSLFetchNameValue((char**) papszOpenOptions, "OVERVIEW_LEVEL") != NULL &&
+                (poDriver->GetMetadataItem(GDAL_DMD_OPENOPTIONLIST) == NULL ||
+                CPLString(poDriver->GetMetadataItem(GDAL_DMD_OPENOPTIONLIST)).ifind("OVERVIEW_LEVEL") == std::string::npos) )
+            {
+                CPLString osVal(CSLFetchNameValue((char**) papszOpenOptions, "OVERVIEW_LEVEL"));
+                int nOvrLevel = atoi(osVal);
+                int bThisLevelOnly = osVal.ifind("only") != std::string::npos;
+                GDALDataset* poOvrDS = GDALCreateOverviewDataset(poDS, nOvrLevel, bThisLevelOnly, TRUE);
+                if( poOvrDS == NULL )
+                {
+                    if( nOpenFlags & GDAL_OF_VERBOSE_ERROR )
+                    {
+                        CPLError( CE_Failure, CPLE_OpenFailed,
+                                  "Cannot open overview level %d of %s",
+                                  nOvrLevel, pszFilename );
+                    }
+                    GDALClose( poDS );
+                    poDS = NULL;
+                }
+                else
+                {
+                    poDS = poOvrDS;
                 }
             }
 
@@ -2538,7 +2674,7 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
  * Starting with GDAL 1.6.0, if GDALOpenShared() is called on the same pszFilename
  * from two different threads, a different GDALDataset object will be returned as
  * it is not safe to use the same dataset from different threads, unless the user
- * does explicitely use mutexes in its code.
+ * does explicitly use mutexes in its code.
  *
  * For drivers supporting the VSI virtual file API, it is possible to open
  * a file in a .zip archive (see VSIInstallZipFileHandler()), in a .tar/.tar.gz/.tgz archive
@@ -2596,8 +2732,19 @@ void CPL_STDCALL GDALClose( GDALDatasetH hDS )
         return;
 
     GDALDataset *poDS = (GDALDataset *) hDS;
+    if( poDS->bIsInternal )
+    {
+        if (poDS->GetShared())
+        {
+            if( poDS->Dereference() > 0 )
+                return;
+        }
+        delete poDS;
+        return;
+    }
+        
     CPLMutexHolderD( &hDLMutex );
-    CPLLocaleC  oLocaleForcer;
+    //CPLLocaleC  oLocaleForcer;
 
     if (poDS->GetShared())
     {
@@ -3200,7 +3347,24 @@ OGRLayer *GDALDataset::CreateLayer( const char * pszName,
 
 {
     ValidateLayerCreationOptions( papszOptions );
-    return ICreateLayer(pszName, poSpatialRef, eGType, papszOptions);
+
+    if( OGR_GT_IsNonLinear(eGType) && !TestCapability(ODsCCurveGeometries) )
+    {
+        eGType = OGR_GT_GetLinear(eGType);
+    }
+
+    OGRLayer* poLayer = ICreateLayer(pszName, poSpatialRef, eGType, papszOptions);
+#ifdef DEBUG
+    if( poLayer != NULL && OGR_GT_IsNonLinear(poLayer->GetGeomType()) &&
+        !poLayer->TestCapability(OLCCurveGeometries) )
+    {
+        CPLError( CE_Warning, CPLE_AppDefined,
+                  "Inconsistant driver: Layer geometry type is non-linear, but "
+                  "TestCapability(OLCCurveGeometries) returns FALSE." );
+    }
+#endif
+
+    return poLayer;
 }
 
 /************************************************************************/
@@ -4976,7 +5140,12 @@ OGRLayer* GDALDataset::BuildLayerFromSelectInfo(void* psSelectInfoIn,
             int iOutField = sFieldList.count++;
             sFieldList.names[iOutField] = (char *) poFDefn->GetNameRef();
             if( poFDefn->GetType() == OFTInteger )
-                sFieldList.types[iOutField] = SWQ_INTEGER;
+            {
+                if( poFDefn->GetSubType() == OFSTBoolean )
+                    sFieldList.types[iOutField] = SWQ_BOOLEAN;
+                else
+                    sFieldList.types[iOutField] = SWQ_INTEGER;
+            }
             else if( poFDefn->GetType() == OFTReal )
                 sFieldList.types[iOutField] = SWQ_FLOAT;
             else if( poFDefn->GetType() == OFTString )

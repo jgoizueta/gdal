@@ -198,7 +198,46 @@ void GDALJP2Metadata::CollectGMLData( GDALJP2Box *poGMLData )
                 if( EQUAL(oSubChildBox.GetType(),"lbl ") )
                     pszLabel = (char *)oSubChildBox.ReadBoxData();
                 else if( EQUAL(oSubChildBox.GetType(),"xml ") )
+                {
                     pszXML = (char *) oSubChildBox.ReadBoxData();
+
+                    // Some GML data contains \0 instead of \n !
+                    // See http://trac.osgeo.org/gdal/ticket/5760
+                    if( pszXML )
+                    {
+                        int nXMLLength = (int)oSubChildBox.GetDataLength();
+                        int i;
+                        for(i=nXMLLength-1; i >= 0; i--)
+                        {
+                            if( pszXML[i] == '\0' )
+                                nXMLLength --;
+                            else
+                                break;
+                        }
+                        for(i=0;i<nXMLLength;i++)
+                        {
+                            if( pszXML[i] == '\0' )
+                                break;
+                        }
+                        if( i < nXMLLength )
+                        {
+                            CPLPushErrorHandler(CPLQuietErrorHandler);
+                            CPLXMLNode* psNode = CPLParseXMLString(pszXML);
+                            CPLPopErrorHandler();
+                            if( psNode == NULL )
+                            {
+                                CPLDebug("GMLJP2", "GMLJP2 data contains nul characters inside content. Replacing them by \\n");
+                                for(int i=0;i<nXMLLength;i++)
+                                {
+                                    if( pszXML[i] == '\0' )
+                                        pszXML[i] = '\n';
+                                }
+                            }
+                            else
+                                CPLDestroyXMLNode(psNode);
+                        }
+                    }
+                }
 
                 oSubChildBox.ReadNextChild( &oChildBox );
             }
@@ -810,11 +849,11 @@ int GDALJP2Metadata::ParseGMLCoverageDesc()
         && poOriginGeometry != NULL )
     {
         adfGeoTransform[0] = poOriginGeometry->getX();
-        adfGeoTransform[1] = atof(papszOffset1Tokens[0]);
-        adfGeoTransform[2] = atof(papszOffset2Tokens[0]);
+        adfGeoTransform[1] = CPLAtof(papszOffset1Tokens[0]);
+        adfGeoTransform[2] = CPLAtof(papszOffset2Tokens[0]);
         adfGeoTransform[3] = poOriginGeometry->getY();
-        adfGeoTransform[4] = atof(papszOffset1Tokens[1]);
-        adfGeoTransform[5] = atof(papszOffset2Tokens[1]);
+        adfGeoTransform[4] = CPLAtof(papszOffset1Tokens[1]);
+        adfGeoTransform[5] = CPLAtof(papszOffset2Tokens[1]);
 
         // offset from center of pixel.
         adfGeoTransform[0] -= adfGeoTransform[1]*0.5;
@@ -900,7 +939,7 @@ int GDALJP2Metadata::ParseGMLCoverageDesc()
                                                "FALSE" ) ) )
     {
         bNeedAxisFlip = FALSE;
-        CPLDebug( "GMLJP2", "Supressed axis flipping based on GDAL_IGNORE_AXIS_ORIENTATION." );
+        CPLDebug( "GMLJP2", "Suppressed axis flipping based on GDAL_IGNORE_AXIS_ORIENTATION." );
     }
 
     if( bNeedAxisFlip )
@@ -1128,7 +1167,7 @@ GDALJP2Box *GDALJP2Metadata::CreateGMLJP2( int nXSize, int nYSize )
                                                "FALSE" ) ) )
     {
         bNeedAxisFlip = FALSE;
-        CPLDebug( "GMLJP2", "Supressed axis flipping on write based on GDAL_IGNORE_AXIS_ORIENTATION." );
+        CPLDebug( "GMLJP2", "Suppressed axis flipping on write based on GDAL_IGNORE_AXIS_ORIENTATION." );
     }
 
     if( bNeedAxisFlip )

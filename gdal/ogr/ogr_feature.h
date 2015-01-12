@@ -60,6 +60,7 @@ class CPL_DLL OGRFieldDefn
     OGRField            uDefault;
     
     int                 bIgnore;
+    OGRFieldSubType     eSubType;
 
     void                Initialize( const char *, OGRFieldType );
     
@@ -72,8 +73,12 @@ class CPL_DLL OGRFieldDefn
     const char         *GetNameRef() { return pszName; }
 
     OGRFieldType        GetType() { return eType; }
-    void                SetType( OGRFieldType eTypeIn ) { eType = eTypeIn;}
+    void                SetType( OGRFieldType eTypeIn );
     static const char  *GetFieldTypeName( OGRFieldType );
+
+    OGRFieldSubType     GetSubType() { return eSubType; }
+    void                SetSubType( OGRFieldSubType eSubTypeIn );
+    static const char  *GetFieldSubTypeName( OGRFieldSubType );
 
     OGRJustification    GetJustify() { return eJustify; }
     void                SetJustify( OGRJustification eJustifyIn )
@@ -93,7 +98,7 @@ class CPL_DLL OGRFieldDefn
     const OGRField     *GetDefaultRef() { return &uDefault; }
     
     int                 IsIgnored() { return bIgnore; }
-    void                SetIgnored( int bIgnore ) { this->bIgnore = bIgnore; }
+    void                SetIgnored( int bIgnoreIn ) { bIgnore = bIgnoreIn; }
 
     int                 IsSame( const OGRFieldDefn * ) const;
 };
@@ -133,10 +138,10 @@ public:
         void                SetType( OGRwkbGeometryType eTypeIn );
 
         virtual OGRSpatialReference* GetSpatialRef();
-        void                 SetSpatialRef(OGRSpatialReference* poSRS);
+        void                 SetSpatialRef(OGRSpatialReference* poSRSIn);
 
         int                 IsIgnored() { return bIgnore; }
-        void                SetIgnored( int bIgnore ) { this->bIgnore = bIgnore; }
+        void                SetIgnored( int bIgnoreIn ) { bIgnore = bIgnoreIn; }
 
         int                 IsSame( OGRGeomFieldDefn * );
 };
@@ -348,7 +353,7 @@ class CPL_DLL OGRFeature
                                        nHour, nMinute, nSecond, nTZFlag ); }
 
     long                GetFID() { return nFID; }
-    virtual OGRErr      SetFID( long nFID );
+    virtual OGRErr      SetFID( long nFIDIn );
 
     void                DumpReadable( FILE *, char** papszOptions = NULL );
 

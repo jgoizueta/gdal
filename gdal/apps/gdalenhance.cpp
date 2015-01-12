@@ -32,7 +32,7 @@
 #include "cpl_string.h"
 #include "cpl_conv.h"
 #include "cpl_multiproc.h"
-#include "vrt/vrtdataset.h"
+#include "vrtdataset.h"
 #include "commonutils.h"
 
 CPL_CVSID("$Id$");
@@ -89,7 +89,7 @@ int main( int argc, char ** argv )
     GDALDatasetH	hDataset, hOutDS;
     int			i;
     const char		*pszSource=NULL, *pszDest=NULL, *pszFormat = "GTiff";
-    int bFormatExplicitelySet = FALSE;
+    int bFormatExplicitlySet = FALSE;
     GDALDriverH		hDriver;
     GDALDataType	eOutputType = GDT_Unknown;
     char                **papszCreateOptions = NULL;
@@ -130,7 +130,7 @@ int main( int argc, char ** argv )
         else if( EQUAL(argv[i],"-of") && i < argc-1 )
         {
             pszFormat = argv[++i];
-            bFormatExplicitelySet = TRUE;
+            bFormatExplicitlySet = TRUE;
         }
 
         else if( EQUAL(argv[i],"-ot") && i < argc-1 )
@@ -265,7 +265,7 @@ int main( int argc, char ** argv )
         Usage();
     }
 
-    if (!bQuiet && pszDest != NULL && !bFormatExplicitelySet)
+    if (!bQuiet && pszDest != NULL && !bFormatExplicitlySet)
         CheckExtensionConsistency(pszDest, pszFormat);
 
 /* -------------------------------------------------------------------- */
@@ -311,8 +311,8 @@ int main( int argc, char ** argv )
 
             // Process scale min/max
 
-            padfScaleMin[iBand] = atof(papszTokens[1]);
-            padfScaleMax[iBand] = atof(papszTokens[2]);
+            padfScaleMin[iBand] = CPLAtof(papszTokens[1]);
+            padfScaleMax[iBand] = CPLAtof(papszTokens[2]);
 
             if( CSLCount(papszTokens) == 3 )
                 continue;
@@ -593,7 +593,7 @@ static CPLErr EnhancerCallback( void *hCBData,
 
     eErr = psEInfo->poSrcBand->
         RasterIO( GF_Read, nXOff, nYOff, nXSize, nYSize,
-                  pafSrcImage, nXSize, nYSize, GDT_Float32, 0, 0 );
+                  pafSrcImage, nXSize, nYSize, GDT_Float32, 0, 0, NULL );
 
     if( eErr != CE_None )
     {

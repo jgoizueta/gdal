@@ -139,7 +139,7 @@ json_object * GetJsonObject(CPLString pszFilename)
     CPLString osJSONFilename = GetJsonFilename(pszFilename);
 
     pJSONObject = json_object_from_file((char *)osJSONFilename.c_str());
-    if (pJSONObject == (struct json_object*)error_ptr(-1) || pJSONObject == NULL) {
+    if (pJSONObject == NULL) {
         CPLDebug("ARGDataset", "GetJsonObject(): "
             "Could not parse JSON file.");
         return NULL;
@@ -785,7 +785,7 @@ GDALDataset * ARGDataset::CreateCopy( const char * pszFilename,
 
                 eErr = poSrcBand->RasterIO(GF_Read, nXBlock * nXBlockSize, 
                     nYBlock * nYBlockSize + nYScanline, nXValid, 1, pabyData, nXBlockSize, 
-                    1, eType, 0, 0);
+                    1, eType, 0, 0, NULL);
 
                 if (eErr != CE_None) {
                     CPLError(CE_Failure, CPLE_AppDefined, "Error reading.");
@@ -799,7 +799,7 @@ GDALDataset * ARGDataset::CreateCopy( const char * pszFilename,
 
                 eErr = poDstBand->RasterIO(GF_Write, nXBlock * nXBlockSize, 
                     nYBlock * nYBlockSize + nYScanline, nXValid, 1, pabyData, nXBlockSize, 
-                    1, eType, 0, 0);
+                    1, eType, 0, 0, NULL);
 
                 if (eErr != CE_None) {
                     CPLError(CE_Failure, CPLE_AppDefined, "Error writing.");

@@ -72,6 +72,7 @@ OGRPGDumpLayer::OGRPGDumpLayer(OGRPGDumpDataSource* poDS,
     nUnknownSRSId = -1;
     nForcedSRSId = -2;
     bCreateSpatialIndexFlag = TRUE;
+    bPostGIS2 = FALSE;
 }
 
 /************************************************************************/
@@ -107,7 +108,8 @@ int OGRPGDumpLayer::TestCapability( const char * pszCap )
 {
     if( EQUAL(pszCap,OLCSequentialWrite) ||
         EQUAL(pszCap,OLCCreateField) ||
-        EQUAL(pszCap,OLCCreateGeomField) )
+        EQUAL(pszCap,OLCCreateGeomField) ||
+        EQUAL(pszCap,OLCCurveGeometries) )
         return TRUE;
     else
         return FALSE;
@@ -117,7 +119,7 @@ int OGRPGDumpLayer::TestCapability( const char * pszCap )
 /*                           GetNextFeature()                           */
 /************************************************************************/
 
-OGRErr OGRPGDumpLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr OGRPGDumpLayer::ICreateFeature( OGRFeature *poFeature )
 {
     if( NULL == poFeature )
     {
@@ -238,7 +240,8 @@ OGRErr OGRPGDumpLayer::CreateFeatureViaInsert( OGRFeature *poFeature )
 
             if( bWriteAsHex )
             {
-                char* pszHex = OGRGeometryToHexEWKB( poGeom, poGFldDefn->nSRSId );
+                char* pszHex = OGRGeometryToHexEWKB( poGeom, poGFldDefn->nSRSId,
+                                                     bPostGIS2 );
                 osCommand += "'";
                 if (pszHex)
                     osCommand += pszHex;
@@ -328,7 +331,8 @@ OGRErr OGRPGDumpLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
             /*if (bHasWkb)
                 pszGeom = GeometryToBYTEA( poGeometry );
             else*/
-                pszGeom = OGRGeometryToHexEWKB( poGeometry, poGFldDefn->nSRSId );
+                pszGeom = OGRGeometryToHexEWKB( poGeometry, poGFldDefn->nSRSId,
+                                                bPostGIS2 );
         }
     
         if (osCommand.size() > 0)
@@ -431,7 +435,7 @@ OGRErr OGRPGDumpLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
                 else if( CPLIsInf(padfItems[j]) )
                     sprintf( pszNeedToFree+nOff, (padfItems[j] > 0) ? "Infinity" : "-Infinity" );
                 else
-                    sprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
+                    CPLsprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
 
             }
             strcat( pszNeedToFree+nOff, "}" );
@@ -460,9 +464,6 @@ OGRErr OGRPGDumpLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
 
         else if( nOGRFieldType == OFTReal )
         {
-            char* pszComma = strchr((char*)pszStrValue, ',');
-            if (pszComma)
-                *pszComma = '.';
             //Check for special values. They need to be quoted.
             double dfVal = poFeature->GetFieldAsDouble(i);
             if( CPLIsNan(dfVal) )
@@ -794,7 +795,8 @@ static CPLString OGRPGDumpEscapeStringList(
 void OGRPGDumpLayer::AppendFieldValue(CPLString& osCommand,
                                        OGRFeature* poFeature, int i)
 {
-    int nOGRFieldType = poFeatureDefn->GetFieldDefn(i)->GetType();
+    OGRFieldType nOGRFieldType = poFeatureDefn->GetFieldDefn(i)->GetType();
+    OGRFieldSubType eSubType = poFeatureDefn->GetFieldDefn(i)->GetSubType();
 
     // We need special formatting for integer list values.
     if(  nOGRFieldType == OFTIntegerList )
@@ -842,7 +844,7 @@ void OGRPGDumpLayer::AppendFieldValue(CPLString& osCommand,
             else if( CPLIsInf(padfItems[j]) )
                 sprintf( pszNeedToFree+nOff, (padfItems[j] > 0) ? "Infinity" : "-Infinity" );
             else
-                sprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
+                CPLsprintf( pszNeedToFree+nOff, "%.16g", padfItems[j] );
 
         }
         strcat( pszNeedToFree+nOff, "}'" );
@@ -897,9 +899,6 @@ void OGRPGDumpLayer::AppendFieldValue(CPLString& osCommand,
     }
     else if ( nOGRFieldType == OFTReal )
     {
-        char* pszComma = strchr((char*)pszStrValue, ',');
-        if (pszComma)
-            *pszComma = '.';
         //Check for special values. They need to be quoted.
         double dfVal = poFeature->GetFieldAsDouble(i);
         if( CPLIsNan(dfVal) )
@@ -907,6 +906,8 @@ void OGRPGDumpLayer::AppendFieldValue(CPLString& osCommand,
         else if( CPLIsInf(dfVal) )
             pszStrValue = (dfVal > 0) ? "'Infinity'" : "'-Infinity'";
     }
+    else if ( nOGRFieldType == OFTInteger && eSubType == OFSTBoolean )
+        pszStrValue = poFeature->GetFieldAsInteger(i) ? "'t'" : "'f'";
 
     if( nOGRFieldType != OFTInteger && nOGRFieldType != OFTReal
         && !bIsDateNull )
@@ -951,12 +952,12 @@ char* OGRPGDumpLayer::GByteArrayToBYTEA( const GByte* pabyData, int nLen)
 }
 
 /************************************************************************/
-/*                        OGRPGTableLayerGetType()                      */
+/*                       OGRPGCommonLayerGetType()                      */
 /************************************************************************/
 
-static CPLString OGRPGTableLayerGetType(OGRFieldDefn& oField,
-                                        int bPreservePrecision,
-                                        int bApproxOK)
+CPLString OGRPGCommonLayerGetType(OGRFieldDefn& oField,
+                                  int bPreservePrecision,
+                                  int bApproxOK)
 {
     char                szFieldType[256];
 
@@ -965,14 +966,20 @@ static CPLString OGRPGTableLayerGetType(OGRFieldDefn& oField,
 /* -------------------------------------------------------------------- */
     if( oField.GetType() == OFTInteger )
     {
-        if( oField.GetWidth() > 0 && bPreservePrecision )
+        if( oField.GetSubType() == OFSTBoolean )
+            strcpy( szFieldType, "BOOLEAN" );
+        else if( oField.GetSubType() == OFSTInt16 )
+            strcpy( szFieldType, "SMALLINT" );
+        else if( oField.GetWidth() > 0 && bPreservePrecision )
             sprintf( szFieldType, "NUMERIC(%d,0)", oField.GetWidth() );
         else
             strcpy( szFieldType, "INTEGER" );
     }
     else if( oField.GetType() == OFTReal )
     {
-        if( oField.GetWidth() > 0 && oField.GetPrecision() > 0
+        if( oField.GetSubType() == OFSTFloat32 )
+            strcpy( szFieldType, "REAL" );
+        else if( oField.GetWidth() > 0 && oField.GetPrecision() > 0
             && bPreservePrecision )
             sprintf( szFieldType, "NUMERIC(%d,%d)",
                      oField.GetWidth(), oField.GetPrecision() );
@@ -988,7 +995,10 @@ static CPLString OGRPGTableLayerGetType(OGRFieldDefn& oField,
     }
     else if( oField.GetType() == OFTIntegerList )
     {
-        strcpy( szFieldType, "INTEGER[]" );
+        if( oField.GetSubType() == OFSTBoolean )
+            strcpy( szFieldType, "BOOLEAN[]" );
+        else
+            strcpy( szFieldType, "INTEGER[]" );
     }
     else if( oField.GetType() == OFTRealList )
     {
@@ -1069,7 +1079,7 @@ OGRErr OGRPGDumpLayer::CreateField( OGRFieldDefn *poFieldIn,
         osFieldType = pszOverrideType;
     else
     {
-        osFieldType = OGRPGTableLayerGetType(oField, bPreservePrecision, bApproxOK);
+        osFieldType = OGRPGCommonLayerGetType(oField, bPreservePrecision, bApproxOK);
         if (osFieldType.size() == 0)
             return OGRERR_FAILURE;
     }

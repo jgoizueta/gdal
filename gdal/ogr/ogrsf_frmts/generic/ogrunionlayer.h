@@ -102,7 +102,7 @@ class OGRUnionLayer : public OGRLayer
   public:
                         OGRUnionLayer( const char* pszName,
                                        int nSrcLayers, /* must be >= 1 */
-                                       OGRLayer** papoSrcLayers, /* array itself ownership always transfered, layer ownership depending on bTakeLayerOwnership */
+                                       OGRLayer** papoSrcLayers, /* array itself ownership always transferred, layer ownership depending on bTakeLayerOwnership */
                                        int bTakeLayerOwnership);
 
     virtual             ~OGRUnionLayer();
@@ -125,9 +125,9 @@ class OGRUnionLayer : public OGRLayer
 
     virtual OGRFeature *GetFeature( long nFeatureId );
 
-    virtual OGRErr      CreateFeature( OGRFeature* poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature* poFeature );
 
-    virtual OGRErr      SetFeature( OGRFeature* poFeature );
+    virtual OGRErr      ISetFeature( OGRFeature* poFeature );
 
     virtual OGRFeatureDefn *GetLayerDefn();
 

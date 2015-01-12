@@ -10,7 +10,8 @@ OBJ	=	gdalopeninfo.o gdaldrivermanager.o gdaldriver.o gdaldataset.o \
 		gdalallvalidmaskband.o gdalnodatamaskband.o gdal_rpcimdio.o \
  		gdalproxydataset.o gdalproxypool.o gdaldefaultasync.o \
 		gdalnodatavaluesmaskband.o gdaldllmain.o gdalexif.o gdalclientserver.o \
-		gdalgeorefpamdataset.o gdaljp2abstractdataset.o gdalvirtualmem.o
+		gdalgeorefpamdataset.o gdaljp2abstractdataset.o gdalvirtualmem.o \
+		gdaloverviewdataset.o gdalrescaledalphaband.o
 
 # Enable the following if you want to use MITAB's code to convert
 # .tab coordinate systems into well known text.  But beware that linking
@@ -23,7 +24,7 @@ XTRA_OPT 	:=	$(XTRA_OPT) -DRENAME_INTERNAL_LIBTIFF_SYMBOLS
 endif
 endif
 
-CPPFLAGS	:=	$(GDAL_INCLUDE) $(CPPFLAGS) $(PAM_SETTING) $(XTRA_OPT) -I../frmts/gtiff -I../ogr -I../ogr/ogrsf_frmts/generic
+CPPFLAGS	:=	 -I../frmts/gtiff -I../frmts/mem -I../frmts/vrt -I../ogr -I../ogr/ogrsf_frmts/generic $(CPPFLAGS) $(PAM_SETTING) $(XTRA_OPT)
 
 ifeq ($(HAVE_SQLITE),yes)
 CXXFLAGS :=	$(CXXFLAGS) -DSQLITE_ENABLED

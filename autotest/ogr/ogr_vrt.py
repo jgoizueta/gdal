@@ -847,13 +847,14 @@ def ogr_vrt_17():
         <Field name="pm_code" src="PRIME_MERIDIAN_CODE" type="integer" width="4" />
         <Field name="prime_meridian_name" width="24" />
         <Field name="new_col" type="Real" width="12" precision="3" />
+        <Field name="DEPRECATED" type="Integer" subtype="Boolean" />
     </OGRVRTLayer>
 </OGRVRTDataSource>"""
         
     vrt_ds = ogr.Open( vrt_xml )
     vrt_lyr = vrt_ds.GetLayerByName( 'test' )
 
-    if vrt_lyr.GetLayerDefn().GetFieldCount() != 3:
+    if vrt_lyr.GetLayerDefn().GetFieldCount() != 4:
         gdaltest.post_reason( 'unexpected field count.' )
         return 'fail'
 
@@ -879,6 +880,13 @@ def ogr_vrt_17():
        or flddef.GetWidth() != 12 \
        or flddef.GetPrecision() != 3:
         gdaltest.post_reason( 'new_col field definition wrong.' )
+        return 'fail'
+
+    flddef = vrt_lyr.GetLayerDefn().GetFieldDefn(3)
+    if flddef.GetName() != 'DEPRECATED' \
+       or flddef.GetType() != ogr.OFTInteger \
+       or flddef.GetSubType() != ogr.OFSTBoolean:
+        gdaltest.post_reason( 'DEPRECATED field definition wrong.' )
         return 'fail'
 
     feat = vrt_lyr.GetNextFeature()
@@ -3312,6 +3320,47 @@ def ogr_vrt_33():
     return 'success'
 
 ###############################################################################
+# Test SetIgnoredFields() with with PointFromColumns geometries
+
+def ogr_vrt_34():
+    if gdaltest.vrt_ds is None:
+        return 'skip'
+
+    f = open('tmp/test.csv', 'wb')
+    f.write('x,y\n'.encode('ascii'))
+    f.write('2,49\n'.encode('ascii'))
+    f.close()
+
+    try:
+        os.remove('tmp/test.csvt')
+    except:
+        pass
+
+    vrt_xml = """
+<OGRVRTDataSource>
+    <OGRVRTLayer name="test">
+        <SrcDataSource relativeToVRT="0">tmp/test.csv</SrcDataSource>
+        <SrcLayer>test</SrcLayer>
+        <GeometryField encoding="PointFromColumns" x="x" y="y"/>
+        <Field name="x" type="Real"/>
+        <Field name="y" type="Real"/>
+    </OGRVRTLayer>
+</OGRVRTDataSource>"""
+
+    ds = ogr.Open( vrt_xml )
+    lyr = ds.GetLayerByName( 'test' )
+    lyr.SetIgnoredFields(['x', 'y'])
+    f = lyr.GetNextFeature()
+    if f.GetGeometryRef().ExportToWkt() != 'POINT (2 49)':
+        f.DumpReadable()
+        return 'fail'
+    ds = None
+
+    os.unlink('tmp/test.csv')
+
+    return 'success'
+
+###############################################################################
 # 
 
 def ogr_vrt_cleanup():
@@ -3373,6 +3422,7 @@ gdaltest_list = [
     ogr_vrt_31,
     ogr_vrt_32,
     ogr_vrt_33,
+    ogr_vrt_34,
     ogr_vrt_cleanup ]
 
 if __name__ == '__main__':

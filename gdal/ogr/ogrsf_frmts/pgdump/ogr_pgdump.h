@@ -36,7 +36,9 @@
 CPLString OGRPGDumpEscapeColumnName(const char* pszColumnName);
 CPLString OGRPGDumpEscapeString(   const char* pszStrValue, int nMaxLength = -1,
                                    const char* pszFieldName = "");
-
+CPLString CPL_DLL OGRPGCommonLayerGetType(OGRFieldDefn& oField,
+                                          int bPreservePrecision,
+                                          int bApproxOK);
 
 /************************************************************************/
 /*                        OGRPGDumpGeomFieldDefn                        */
@@ -79,6 +81,7 @@ class OGRPGDumpLayer : public OGRLayer
     int                 nUnknownSRSId;
     int                 nForcedSRSId;
     int                 bCreateSpatialIndexFlag;
+    int                 bPostGIS2;
 
     char              **papszOverrideColumnTypes;
 
@@ -103,7 +106,7 @@ class OGRPGDumpLayer : public OGRLayer
     virtual void        ResetReading()  { }
     virtual int         TestCapability( const char * );
     
-    virtual OGRErr      CreateFeature( OGRFeature *poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
     virtual OGRErr      CreateFeatureViaInsert( OGRFeature *poFeature );
     virtual OGRErr      CreateFeatureViaCopy( OGRFeature *poFeature );
 
@@ -127,6 +130,8 @@ class OGRPGDumpLayer : public OGRLayer
                                 { nForcedSRSId = nForcedSRSIdIn; }
     void                SetCreateSpatialIndexFlag( int bFlag )
                                 { bCreateSpatialIndexFlag = bFlag; }
+    void                SetPostGIS2( int bFlag )
+                                { bPostGIS2 = bFlag; }
     OGRErr              EndCopy();
 };
 
@@ -150,7 +155,7 @@ class OGRPGDumpDataSource : public OGRDataSource
                         ~OGRPGDumpDataSource();
                         
     char               *LaunderName( const char *pszSrcName );
-    void                Log(const char* pszStr, int bAddSemiColumn = TRUE);
+    int                 Log(const char* pszStr, int bAddSemiColumn = TRUE);
 
     virtual const char  *GetName() { return pszName; }
     virtual int         GetLayerCount() { return nLayers; }

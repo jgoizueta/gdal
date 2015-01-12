@@ -2,7 +2,8 @@
 include ../../../GDALmake.opt
 
 OBJ	= ogrgeopackagedriver.o ogrgeopackagedatasource.o ogrgeopackagelayer.o \
-	ogrgeopackagetablelayer.o ogrgeopackageselectlayer.o ogrgeopackageutility.o
+	ogrgeopackagetablelayer.o ogrgeopackageselectlayer.o ogrgeopackageutility.o \
+	gdalgeopackagerasterband.o
 
 ifeq ($(SPATIALITE_412_OR_LATER),yes)
 CPPFLAGS +=  -DSPATIALITE_412_OR_LATER
@@ -12,7 +13,7 @@ ifeq ($(SQLITE_HAS_COLUMN_METADATA),yes)
 CPPFLAGS +=  -DSQLITE_HAS_COLUMN_METADATA
 endif
 
-CPPFLAGS := -I.. $(GDAL_INCLUDE) $(SQLITE_INC) $(CPPFLAGS) -I../sqlite
+CPPFLAGS := -I..  $(SQLITE_INC) $(CPPFLAGS) -I../sqlite -I../../../frmts/mem
 
 default: $(O_OBJ:.o=.$(OBJ_EXT))
 

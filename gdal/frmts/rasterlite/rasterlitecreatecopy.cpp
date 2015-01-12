@@ -407,7 +407,7 @@ RasterliteCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         pszFilenameWithoutPrefix += 11;
     
     char** papszTokens = CSLTokenizeStringComplex( 
-                pszFilenameWithoutPrefix, ", ", FALSE, FALSE );
+                pszFilenameWithoutPrefix, ",", FALSE, FALSE );
     int nTokens = CSLCount(papszTokens);
     if (nTokens == 0)
     {
@@ -602,7 +602,7 @@ RasterliteCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                                      nReqXSize, nReqYSize,
                                      pabyMEMDSBuffer, nReqXSize, nReqYSize,
                                      eDataType, nBands, NULL,
-                                     0, 0, 0);
+                                     0, 0, 0, NULL);
             if (eErr != CE_None)
             {
                 break;

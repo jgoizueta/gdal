@@ -32,6 +32,8 @@
 #ifndef PCIDSKDATASET2_H_INCLUDED
 #define PCIDSKDATASET2_H_INCLUDED
 
+#define GDAL_PCIDSK_DRIVER
+
 #include "pcidsk.h"
 #include "pcidsk_pct.h"
 #include "ogrsf_frmts.h"
@@ -182,14 +184,14 @@ class OGRPCIDSKLayer : public OGRLayer
     void                ResetReading();
     OGRFeature *        GetNextFeature();
     OGRFeature         *GetFeature( long nFeatureId );
-    OGRErr              SetFeature( OGRFeature *poFeature );
+    virtual OGRErr      ISetFeature( OGRFeature *poFeature );
 
     OGRFeatureDefn *    GetLayerDefn() { return poFeatureDefn; }
 
     int                 TestCapability( const char * );
 
     OGRErr              DeleteFeature( long nFID );
-    OGRErr              CreateFeature( OGRFeature *poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
     virtual OGRErr      CreateField( OGRFieldDefn *poField,
                                      int bApproxOK = TRUE );
 

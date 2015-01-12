@@ -59,6 +59,9 @@ class OGRSFDriver;
 
 class CPL_DLL OGRLayer : public GDALMajorObject
 {
+  private:
+    void         ConvertNonLinearGeomsIfNecessary( OGRFeature *poFeature );
+
   protected:
     int          m_bFilterIsEnvelope;
     OGRGeometry *m_poFilterGeom;
@@ -72,6 +75,9 @@ class CPL_DLL OGRLayer : public GDALMajorObject
     int          InstallFilter( OGRGeometry * );
     
     OGRErr       GetExtentInternal(int iGeomField, OGREnvelope *psExtent, int bForce );
+
+    virtual OGRErr      ISetFeature( OGRFeature *poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
 
   public:
     OGRLayer();
@@ -93,8 +99,10 @@ class CPL_DLL OGRLayer : public GDALMajorObject
     virtual OGRFeature *GetNextFeature() = 0;
     virtual OGRErr      SetNextByIndex( long nIndex );
     virtual OGRFeature *GetFeature( long nFID );
-    virtual OGRErr      SetFeature( OGRFeature *poFeature );
-    virtual OGRErr      CreateFeature( OGRFeature *poFeature );
+
+    OGRErr      SetFeature( OGRFeature *poFeature );
+    OGRErr      CreateFeature( OGRFeature *poFeature );
+
     virtual OGRErr      DeleteFeature( long nFID );
 
     virtual const char *GetName();
@@ -115,7 +123,7 @@ class CPL_DLL OGRLayer : public GDALMajorObject
                                      int bApproxOK = TRUE );
     virtual OGRErr      DeleteField( int iField );
     virtual OGRErr      ReorderFields( int* panMap );
-    virtual OGRErr      AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn, int nFlags );
+    virtual OGRErr      AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn, int nFlagsIn );
 
     virtual OGRErr      CreateGeomField( OGRGeomFieldDefn *poField,
                                      int bApproxOK = TRUE );
@@ -391,6 +399,7 @@ void CPL_DLL RegisterOGRCartoDB();
 void CPL_DLL RegisterOGRSXF();
 void CPL_DLL RegisterOGROpenFileGDB();
 void CPL_DLL RegisterOGRSelafin();
+void CPL_DLL RegisterOGRJML();
 CPL_C_END
 
 

@@ -32,6 +32,7 @@
 #define _OGR_SQLITE_H_INCLUDED
 
 #include "ogrsf_frmts.h"
+#include "gdal_pam.h"
 #include "cpl_error.h"
 #include <map>
 #include <set>
@@ -335,11 +336,15 @@ class OGRSQLiteTableLayer : public OGRSQLiteLayer
 
     sqlite3_stmt       *hInsertStmt;
     CPLString           osLastInsertStmt;
+    int                 bHasDefaultValue;
 
     OGRSQLiteGeomFormat eGeomFormat;
     char                *pszGeomCol;
     int                 nSRSId;
     OGRSpatialReference *poSRS;
+
+    std::vector< std::pair<CPLString,CPLString> > aosDisabledTriggers;
+    int                 bHasCheckedTriggers;
 
     void                ClearInsertStmt();
 
@@ -401,9 +406,9 @@ class OGRSQLiteTableLayer : public OGRSQLiteLayer
 
     virtual void        SetSpatialFilter( OGRGeometry * );
     virtual OGRErr      SetAttributeFilter( const char * );
-    virtual OGRErr      SetFeature( OGRFeature *poFeature );
+    virtual OGRErr      ISetFeature( OGRFeature *poFeature );
     virtual OGRErr      DeleteFeature( long nFID );
-    virtual OGRErr      CreateFeature( OGRFeature *poFeature );
+    virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
 
     virtual OGRErr      CreateField( OGRFieldDefn *poField,
                                      int bApproxOK = TRUE );
@@ -648,10 +653,10 @@ class OGRSQLiteSingleFeatureLayer : public OGRLayer
 /************************************************************************/
 
 /* Used by both OGRSQLiteDataSource and OGRGeoPackageDataSource */
-class OGRSQLiteBaseDataSource : public OGRDataSource
+class OGRSQLiteBaseDataSource : public GDALPamDataset
 {
   protected:
-    char               *pszName;
+    char               *m_pszFilename;
 
     sqlite3             *hDB;
     int                 bUpdate;
@@ -680,8 +685,6 @@ class OGRSQLiteBaseDataSource : public OGRDataSource
   public:
                         OGRSQLiteBaseDataSource();
                         ~OGRSQLiteBaseDataSource();
-
-    virtual const char *GetName() { return pszName; }
 
     sqlite3            *GetDB() { return hDB; }
     int                 GetUpdate() const { return bUpdate; }
@@ -813,7 +816,8 @@ CPLString OGRSQLiteEscapeName( const char* pszName );
 
 CPLString OGRSQLiteParamsUnquote(const char* pszVal);
 
-CPLString OGRSQLiteFieldDefnToSQliteFieldDefn( OGRFieldDefn* poFieldDefn );
+CPLString OGRSQLiteFieldDefnToSQliteFieldDefn( OGRFieldDefn* poFieldDefn,
+                                               int bSQLiteDialectInternalUse );
 
 int OGRSQLITEStringToDateTimeField( OGRFeature* poFeature, int iField,
                                     const char* pszValue );

@@ -67,14 +67,16 @@
 
 CPL_CVSID("$Id$");
 
-// Generally Kakadu does not advertise its version well, so we look for a
-// clue to V6 vs V7, the main difference in api.
-#ifndef KAKADU_VERSION
-#  ifdef KDU_TARGET_CAP_SEQUENTIAL
-#    define KAKADU_VERSION 700
-#  else
-#    define KAKADU_VERSION 600
-#  endif
+// Before v7.5 Kakadu does not advertise its version well
+// After v7.5 Kakadu has KDU_{MAJOR,MINOR,PATCH}_VERSION defines so it's easier
+// For older releases compile with them manually specified
+#ifndef KDU_MAJOR_VERSION
+#  error Compile with eg. -DKDU_MAJOR_VERSION=7 -DKDU_MINOR_VERSION=3 -DKDU_PATCH_VERSION=2 to specify Kakadu library version
+#endif
+
+#if KDU_MAJOR_VERSION > 7 || (KDU_MAJOR_VERSION == 7 && KDU_MINOR_VERSION >= 5)
+    using namespace kdu_core;
+    using namespace kdu_supp;
 #endif
 
 // #define KAKADU_JPX	1
@@ -122,11 +124,17 @@ class JP2KAKDataset : public GDALJP2AbstractDataset
                                 GDALDataType, int, int * );
     CPLErr      DirectRasterIO( GDALRWFlag, int, int, int, int,
                                 void *, int, int, GDALDataType,
-                                int, int *, int, int, int );
+                                int, int *,
+                                GSpacing nPixelSpace, GSpacing nLineSpace,
+                                GSpacing nBandSpace,
+                                GDALRasterIOExtraArg* psExtraArg);
 
     virtual CPLErr IRasterIO( GDALRWFlag, int, int, int, int,
                               void *, int, int, GDALDataType,
-                              int, int *, int, int, int );
+                              int, int *,
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg);
 
 
   public:
@@ -172,7 +180,8 @@ class JP2KAKRasterBand : public GDALPamRasterBand
 
     virtual CPLErr IRasterIO( GDALRWFlag, int, int, int, int,
                               void *, int, int, GDALDataType,
-                              int, int );
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GDALRasterIOExtraArg* psExtraArg);
 
     int            HasExternalOverviews() 
                    { return GDALPamRasterBand::GetOverviewCount() != 0; }
@@ -538,12 +547,17 @@ CPLErr JP2KAKRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
 /*      By default we invoke just for the requested band, directly      */
 /*      into the target buffer.                                         */
 /* -------------------------------------------------------------------- */
+    GDALRasterIOExtraArg sExtraArg;
+    INIT_RASTERIO_EXTRA_ARG(sExtraArg);
+
     if( !poBaseDS->bUseYCC )
+    {
         return poBaseDS->DirectRasterIO( GF_Read, 
                                          nWXOff, nWYOff, nWXSize, nWYSize,
                                          pImage, nXSize, nYSize,
                                          eDataType, 1, &nBand, 
-                                         nWordSize, nWordSize*nBlockXSize, 0 );
+                                         nWordSize, nWordSize*nBlockXSize, 0, &sExtraArg );
+    }
 
 /* -------------------------------------------------------------------- */
 /*      But for YCC or possible other effectively pixel interleaved     */
@@ -572,7 +586,8 @@ CPLErr JP2KAKRasterBand::IReadBlock( int nBlockXOff, int nBlockYOff,
                                      pabyWrkBuffer, nXSize, nYSize,
                                      eDataType, anBands.size(), &anBands[0],
                                      nWordSize, nWordSize*nBlockXSize, 
-                                     nWordSize*nBlockXSize*nBlockYSize );
+                                     nWordSize*nBlockXSize*nBlockYSize,
+                                     &sExtraArg );
 
     if( eErr == CE_None )
     {
@@ -641,7 +656,8 @@ JP2KAKRasterBand::IRasterIO( GDALRWFlag eRWFlag,
                              int nXOff, int nYOff, int nXSize, int nYSize,
                              void * pData, int nBufXSize, int nBufYSize,
                              GDALDataType eBufType, 
-                             int nPixelSpace,int nLineSpace )
+                             GSpacing nPixelSpace, GSpacing nLineSpace,
+                             GDALRasterIOExtraArg* psExtraArg)
 
 {
 /* -------------------------------------------------------------------- */
@@ -653,7 +669,7 @@ JP2KAKRasterBand::IRasterIO( GDALRWFlag eRWFlag,
         return GDALPamRasterBand::IRasterIO( 
             eRWFlag, nXOff, nYOff, nXSize, nYSize,
             pData, nBufXSize, nBufYSize, eBufType, 
-            nPixelSpace, nLineSpace );
+            nPixelSpace, nLineSpace, psExtraArg );
     else
     {
         int nOverviewDiscard = nDiscardLevels;
@@ -671,7 +687,7 @@ JP2KAKRasterBand::IRasterIO( GDALRWFlag eRWFlag,
         return poBaseDS->DirectRasterIO( 
             eRWFlag, nXOff, nYOff, nXSize, nYSize,
             pData, nBufXSize, nBufYSize, eBufType, 
-            1, &nBand, nPixelSpace, nLineSpace, 0 );
+            1, &nBand, nPixelSpace, nLineSpace, 0, psExtraArg );
     }
 }
 
@@ -1420,12 +1436,14 @@ GDALDataset *JP2KAKDataset::Open( GDALOpenInfo * poOpenInfo )
 /************************************************************************/
 
 CPLErr 
-JP2KAKDataset::DirectRasterIO( GDALRWFlag eRWFlag,
+JP2KAKDataset::DirectRasterIO( CPL_UNUSED GDALRWFlag eRWFlag,
                                int nXOff, int nYOff, int nXSize, int nYSize,
                                void * pData, int nBufXSize, int nBufYSize,
                                GDALDataType eBufType, 
                                int nBandCount, int *panBandMap,
-                               int nPixelSpace,int nLineSpace,int nBandSpace)
+                               GSpacing nPixelSpace, GSpacing nLineSpace,
+                               GSpacing nBandSpace,
+                               GDALRasterIOExtraArg* psExtraArg)
     
 {
     kdu_codestream *poCodeStream = &oCodeStream;
@@ -1796,7 +1814,9 @@ CPLErr JP2KAKDataset::IRasterIO( GDALRWFlag eRWFlag,
                                  void * pData, int nBufXSize, int nBufYSize,
                                  GDALDataType eBufType, 
                                  int nBandCount, int *panBandMap,
-                                 int nPixelSpace,int nLineSpace,int nBandSpace)
+                                 GSpacing nPixelSpace, GSpacing nLineSpace,
+                                 GSpacing nBandSpace,
+                                 GDALRasterIOExtraArg* psExtraArg)
 
 {
 /* -------------------------------------------------------------------- */
@@ -1807,12 +1827,12 @@ CPLErr JP2KAKDataset::IRasterIO( GDALRWFlag eRWFlag,
         return GDALPamDataset::IRasterIO( 
             eRWFlag, nXOff, nYOff, nXSize, nYSize,
             pData, nBufXSize, nBufYSize, eBufType, 
-            nBandCount, panBandMap, nPixelSpace, nLineSpace, nBandSpace );
+            nBandCount, panBandMap, nPixelSpace, nLineSpace, nBandSpace, psExtraArg );
     else
         return DirectRasterIO( 
             eRWFlag, nXOff, nYOff, nXSize, nYSize,
             pData, nBufXSize, nBufYSize, eBufType, 
-            nBandCount, panBandMap, nPixelSpace, nLineSpace, nBandSpace );
+            nBandCount, panBandMap, nPixelSpace, nLineSpace, nBandSpace, psExtraArg );
 }
 
 /************************************************************************/
@@ -1887,7 +1907,7 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
             res.get_dims(dims);
             roi_node = poROIImage->acquire_node(c,dims);
         }
-#if KAKADU_VERSION >= 700
+#if KDU_MAJOR_VERSION >= 7
         lines[c].pre_create(&allocator,nXSize,bReversible,bUseShorts,0,0);
 #else
         lines[c].pre_create(&allocator,nXSize,bReversible,bUseShorts);
@@ -1897,12 +1917,11 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
 
     try
     {
-        // Does not compile without the change on >= v7_3_2.
-// #if KAKADU_VERSION >= 732
-        // allocator.finalize(oCodeStream);
-// #else
+#if KDU_MAJOR_VERSION > 7 || (KDU_MAJOR_VERSION == 7 && (KDU_MINOR_VERSION > 3 || KDU_MINOR_VERSION == 3 && KDU_PATCH_VERSION >= 1))
+        allocator.finalize(oCodeStream);
+#else
         allocator.finalize();
-// #endif
+#endif
 
         for (c=0; c < num_components; c++)
             lines[c].create();
@@ -1940,7 +1959,7 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
                 if( poBand->RasterIO( GF_Read, 
                                       nXOff, nYOff+iSubline, nXSize, 1, 
                                       (void *) pabyBuffer, nXSize, 1, eType,
-                                      0, 0 ) == CE_Failure )
+                                      0, 0, NULL ) == CE_Failure )
                     return FALSE;
 
                 if( bReversible && eType == GDT_Byte )
@@ -2009,7 +2028,7 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
                         dest->fval = *sp;  /* scale it? */
                 }
 
-#if KAKADU_VERSION >= 700
+#if KDU_MAJOR_VERSION >= 7
                 engines[c].push(lines[c]);
 #else
                 engines[c].push(lines[c],true);
@@ -2152,7 +2171,7 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
     if( CSLFetchNameValue(papszOptions,"QUALITY") != NULL )
     {
-        dfQuality = atof(CSLFetchNameValue(papszOptions,"QUALITY"));
+        dfQuality = CPLAtof(CSLFetchNameValue(papszOptions,"QUALITY"));
     }
 
     if( dfQuality < 0.01 || dfQuality > 100.0 )

@@ -538,7 +538,7 @@ int OGR2SQLITEDealWithSpatialColumn(OGRLayer* poLayer,
                     pszLayerNameEscaped,
                     pszGeomColEscaped,
                         (int) wkbFlatten(poLayer->GetGeomType()),
-                    ( poLayer->GetGeomType() & wkb25DBit ) ? 3 : 2,
+                    wkbHasZ( poLayer->GetGeomType() ) ? 3 : 2,
                     nSRSId);
     }
 #ifdef HAVE_SPATIALITE
@@ -580,7 +580,7 @@ int OGR2SQLITEDealWithSpatialColumn(OGRLayer* poLayer,
         {
             int nGeomType = poLayer->GetGeomType();
             int nCoordDimension = 2;
-            if( nGeomType & wkb25DBit )
+            if( wkbHasZ((OGRwkbGeometryType)nGeomType) )
             {
                 nGeomType += 1000;
                 nCoordDimension = 3;
@@ -607,7 +607,7 @@ int OGR2SQLITEDealWithSpatialColumn(OGRLayer* poLayer,
                         "VALUES ('%s','%s','%s','%s',%d, %d)",
                         pszLayerNameEscaped,
                         pszGeomColEscaped, pszGeometryType,
-                        ( poLayer->GetGeomType() & wkb25DBit ) ? "XYZ" : "XY",
+                        wkbHasZ( poLayer->GetGeomType() ) ? "XYZ" : "XY",
                         nSRSId, bCreateSpatialIndex );
         }
     }
@@ -764,7 +764,7 @@ OGRLayer * OGRSQLiteExecuteSQL( GDALDataset* poDS,
         }
     }
 
-    /* The following configuration option is usefull mostly for debugging/testing */
+    /* The following configuration option is useful mostly for debugging/testing */
     if( pabyEmptyDB != NULL && CSLTestBoolean(CPLGetConfigOption("OGR_SQLITE_DIALECT_USE_SPATIALITE", "YES")) )
     {
         GByte* pabyEmptyDBClone = (GByte*)VSIMalloc(nEmptyDBSize);

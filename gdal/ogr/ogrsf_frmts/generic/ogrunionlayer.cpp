@@ -634,14 +634,14 @@ void OGRUnionLayer::AutoWarpLayerIfNecessary(int iLayer)
                     (poSRS != NULL && poSRS2 == NULL) )
                 {
                     CPLError(CE_Warning, CPLE_AppDefined,
-                            "SRS of geometry field '%s' layer %s not consistant with UnionLayer SRS",
+                            "SRS of geometry field '%s' layer %s not consistent with UnionLayer SRS",
                             GetLayerDefn()->GetGeomFieldDefn(i)->GetNameRef(),
                             papoSrcLayers[iLayer]->GetName());
                 }
                 else if (poSRS != NULL && poSRS2 != NULL &&
                         poSRS != poSRS2 && !poSRS->IsSame(poSRS2))
                 {
-                    CPLDebug("VRT", "SRS of geometry field '%s' layer %s not consistant with UnionLayer SRS. "
+                    CPLDebug("VRT", "SRS of geometry field '%s' layer %s not consistent with UnionLayer SRS. "
                             "Trying auto warping",
                             GetLayerDefn()->GetGeomFieldDefn(i)->GetNameRef(),
                             papoSrcLayers[iLayer]->GetName());
@@ -749,10 +749,10 @@ OGRFeature *OGRUnionLayer::GetFeature( long nFeatureId )
 }
 
 /************************************************************************/
-/*                          CreateFeature()                             */
+/*                          ICreateFeature()                             */
 /************************************************************************/
 
-OGRErr OGRUnionLayer::CreateFeature( OGRFeature* poFeature )
+OGRErr OGRUnionLayer::ICreateFeature( OGRFeature* poFeature )
 {
     if( osSourceLayerFieldName.size() == 0 )
     {
@@ -801,10 +801,10 @@ OGRErr OGRUnionLayer::CreateFeature( OGRFeature* poFeature )
 }
 
 /************************************************************************/
-/*                             SetFeature()                             */
+/*                             ISetFeature()                             */
 /************************************************************************/
 
-OGRErr OGRUnionLayer::SetFeature( OGRFeature* poFeature )
+OGRErr OGRUnionLayer::ISetFeature( OGRFeature* poFeature )
 {
     if( !bPreserveSrcFID )
     {
@@ -1101,6 +1101,9 @@ int  OGRUnionLayer::TestCapability( const char * pszCap )
     }
 
     if( EQUAL(pszCap, OLCIgnoreFields) )
+        return TRUE;
+
+    if( EQUAL(pszCap,OLCCurveGeometries) )
         return TRUE;
 
     return FALSE;

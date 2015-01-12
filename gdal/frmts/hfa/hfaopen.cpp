@@ -208,7 +208,12 @@ HFAHandle HFAOpen( const char * pszFilename, const char * pszAccess )
 /* -------------------------------------------------------------------- */
 /*      Instantiate the root entry.                                     */
 /* -------------------------------------------------------------------- */
-    psInfo->poRoot = new HFAEntry( psInfo, psInfo->nRootPos, NULL, NULL );
+    psInfo->poRoot = HFAEntry::New( psInfo, psInfo->nRootPos, NULL, NULL );
+    if( psInfo->poRoot == NULL )
+    {
+        CPLFree(psInfo);
+        return NULL;
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Read the dictionary                                             */
@@ -2313,7 +2318,8 @@ HFAHandle HFACreate( const char * pszFilename,
     {
         nBlockSize = atoi( pszValue );
         // check for sane values
-        if ( ( nBlockSize < 32 ) || (nBlockSize > 2048) )
+        if ( (( nBlockSize < 32 ) || (nBlockSize > 2048))
+            && !CSLTestBoolean(CPLGetConfigOption("FORCE_BLOCKSIZE", "NO")) )
         {
             nBlockSize = 64;
         }
@@ -2758,7 +2764,7 @@ CPLErr HFASetMetadata( HFAHandle hHFA, int nBand, char **papszMD )
             {
               case 'd':
               {
-                  double dfValue = atof( pszValue );
+                  double dfValue = CPLAtof( pszValue );
                   poEntry->SetDoubleField( pszFieldName, dfValue );
               }
               break;
@@ -2847,7 +2853,7 @@ CPLErr HFASetMetadata( HFAHandle hHFA, int nBand, char **papszMD )
                 {
                     *pszEnd = 0;
                     VSIFSeekL( hHFA->fp, nOffset + 8*nBin, SEEK_SET );
-                    double nValue = atof( pszWork );
+                    double nValue = CPLAtof( pszWork );
                     HFAStandard( 8, &nValue );
 
                     VSIFWriteL( (void *)&nValue, 1, 8, hHFA->fp );
@@ -2898,7 +2904,7 @@ CPLErr HFASetMetadata( HFAHandle hHFA, int nBand, char **papszMD )
                         } else {
                             // Histogram were written as doubles, as is now the default behaviour
                             VSIFSeekL( hHFA->fp, nOffset + 8*nBin, SEEK_SET );
-                            double nValue = atof( pszWork );
+                            double nValue = CPLAtof( pszWork );
                             HFAStandard( 8, &nValue );
                             VSIFWriteL( (void *)&nValue, 1, 8, hHFA->fp );
                         }

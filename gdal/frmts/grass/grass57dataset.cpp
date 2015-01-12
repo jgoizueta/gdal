@@ -92,6 +92,7 @@ CPL_C_END
 #define G_get_d_raster_row       Rast_get_d_row
 #define G_allocate_f_raster_buf  Rast_allocate_f_buf
 #define G_allocate_d_raster_buf  Rast_allocate_d_buf
+#define G__setenv                G_setenv_nogisrc
 #endif
 
 /************************************************************************/
@@ -181,7 +182,10 @@ class GRASSRasterBand : public GDALRasterBand
     virtual        ~GRASSRasterBand();
 
     virtual CPLErr IReadBlock( int, int, void * );
-    virtual CPLErr IRasterIO ( GDALRWFlag, int, int, int, int, void *, int, int, GDALDataType, int, int );
+    virtual CPLErr IRasterIO ( GDALRWFlag, int, int, int, int, void *, int, int, GDALDataType,
+                               GSpacing nPixelSpace,
+                               GSpacing nLineSpace,
+                               GDALRasterIOExtraArg* psExtraArg);
     virtual GDALColorInterp GetColorInterpretation();
     virtual GDALColorTable *GetColorTable();
     virtual double GetMinimum( int *pbSuccess = NULL );
@@ -527,7 +531,9 @@ CPLErr GRASSRasterBand::IRasterIO ( GDALRWFlag eRWFlag,
 	                           int nXOff, int nYOff, int nXSize, int nYSize,
 				   void * pData, int nBufXSize, int nBufYSize,
 				   GDALDataType eBufType,
-				   int nPixelSpace, int nLineSpace )
+				   GSpacing nPixelSpace,
+                   GSpacing nLineSpace,
+                   GDALRasterIOExtraArg* psExtraArg )
 {
     /* GRASS library does that, we have only calculate and reset the region in map units
      * and if the region has changed, reopen the raster */
@@ -1043,7 +1049,7 @@ void GDALRegister_GRASS()
         poDriver->SetDescription( "GRASS" );
         poDriver->SetMetadataItem( GDAL_DCAP_RASTER, "YES" );
         poDriver->SetMetadataItem( GDAL_DMD_LONGNAME, 
-                                   "GRASS Database Rasters (5.7+)" );
+                                   "GRASS Rasters (5.7+)" );
         poDriver->SetMetadataItem( GDAL_DMD_HELPTOPIC, 
                                    "frmt_grass.html" );
         

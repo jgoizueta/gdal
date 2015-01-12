@@ -424,7 +424,7 @@ XYZDataset::XYZDataset()
     nDataLineNum = INT_MAX;
     nLineNum = 0;
     nCommentLineCount = 0;
-    chDecimalSep = 0;
+    chDecimalSep = '.';
     bHasHeaderLine = FALSE;
     nXIndex = -1;
     nYIndex = -1;
@@ -482,7 +482,7 @@ int XYZDataset::IdentifyEx( GDALOpenInfo * poOpenInfo,
 
     GDALOpenInfo* poOpenInfoToDelete = NULL;
     /*  GZipped .xyz files are common, so automagically open them */
-    /*  if the /vsigzip/ has not been explicitely passed */
+    /*  if the /vsigzip/ has not been explicitly passed */
     if (strlen(poOpenInfo->pszFilename) > 6 &&
         EQUAL(poOpenInfo->pszFilename + strlen(poOpenInfo->pszFilename) - 6, "xyz.gz") &&
         !EQUALN(poOpenInfo->pszFilename, "/vsigzip/", 9))
@@ -614,7 +614,7 @@ GDALDataset *XYZDataset::Open( GDALOpenInfo * poOpenInfo )
     CPLString osFilename(poOpenInfo->pszFilename);
 
     /*  GZipped .xyz files are common, so automagically open them */
-    /*  if the /vsigzip/ has not been explicitely passed */
+    /*  if the /vsigzip/ has not been explicitly passed */
     if (strlen(poOpenInfo->pszFilename) > 6 &&
         EQUAL(poOpenInfo->pszFilename + strlen(poOpenInfo->pszFilename) - 6, "xyz.gz") &&
         !EQUALN(poOpenInfo->pszFilename, "/vsigzip/", 9))
@@ -1109,7 +1109,7 @@ GDALDataset* XYZDataset::CreateCopy( const char * pszFilename,
         eErr = poSrcDS->GetRasterBand(1)->RasterIO(
                                             GF_Read, 0, j, nXSize, 1,
                                             pLineBuffer, nXSize, 1,
-                                            eReqDT, 0, 0);
+                                            eReqDT, 0, 0, NULL);
         if (eErr != CE_None)
             break;
         double dfY = adfGeoTransform[3] + (j + 0.5) * adfGeoTransform[5];
@@ -1119,9 +1119,9 @@ GDALDataset* XYZDataset::CreateCopy( const char * pszFilename,
             char szBuf[256];
             double dfX = adfGeoTransform[0] + (i + 0.5) * adfGeoTransform[1];
             if (eReqDT == GDT_Int32)
-                sprintf(szBuf, "%.18g%c%.18g%c%d\n", dfX, pszColSep[0], dfY, pszColSep[0], ((int*)pLineBuffer)[i]);
+                CPLsprintf(szBuf, "%.18g%c%.18g%c%d\n", dfX, pszColSep[0], dfY, pszColSep[0], ((int*)pLineBuffer)[i]);
             else
-                sprintf(szBuf, "%.18g%c%.18g%c%.18g\n", dfX, pszColSep[0], dfY, pszColSep[0], ((float*)pLineBuffer)[i]);
+                CPLsprintf(szBuf, "%.18g%c%.18g%c%.18g\n", dfX, pszColSep[0], dfY, pszColSep[0], ((float*)pLineBuffer)[i]);
             osBuf += szBuf;
             if( (i & 1023) == 0 || i == nXSize - 1 )
             {

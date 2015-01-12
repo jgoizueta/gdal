@@ -882,7 +882,8 @@ const char* PDFDataset::GetOption(char** papszOpenOptions,
 
 CPLErr PDFDataset::ReadPixels( int nReqXOff, int nReqYOff,
                                int nReqXSize, int nReqYSize,
-                               int nPixelSpace, int nLineSpace, int nBandSpace,
+                               GSpacing nPixelSpace, GSpacing nLineSpace,
+                               GSpacing nBandSpace,
                                GByte* pabyData )
 {
     CPLErr eErr = CE_None;
@@ -1102,7 +1103,7 @@ CPLErr PDFDataset::ReadPixels( int nReqXOff, int nReqYOff,
                                           pabyData,
                                           nReqXSize, nReqYSize,
                                           GDT_Byte, 3, NULL,
-                                          nPixelSpace, nLineSpace, nBandSpace);
+                                          nPixelSpace, nLineSpace, nBandSpace, NULL);
                 }
                 delete poDS;
             }
@@ -1439,7 +1440,9 @@ CPLErr PDFDataset::IRasterIO( GDALRWFlag eRWFlag,
                               void * pData, int nBufXSize, int nBufYSize,
                               GDALDataType eBufType, 
                               int nBandCount, int *panBandMap,
-                              int nPixelSpace, int nLineSpace, int nBandSpace )
+                              GSpacing nPixelSpace, GSpacing nLineSpace,
+                              GSpacing nBandSpace,
+                              GDALRasterIOExtraArg* psExtraArg)
 {
     int nBandBlockXSize, nBandBlockYSize;
     GetRasterBand(1)->GetBlockSize(&nBandBlockXSize, &nBandBlockYSize);
@@ -1467,7 +1470,7 @@ CPLErr PDFDataset::IRasterIO( GDALRWFlag eRWFlag,
                                         pData, nBufXSize, nBufYSize,
                                         eBufType, 
                                         nBandCount, panBandMap,
-                                        nPixelSpace, nLineSpace, nBandSpace );
+                                        nPixelSpace, nLineSpace, nBandSpace, psExtraArg );
 }
 
 /************************************************************************/
@@ -1904,7 +1907,7 @@ void PDFDataset::GuessDPI(GDALPDFDictionary* poPageDict, int* pnBands)
     const char* pszDPI = GetOption(papszOpenOptions, "DPI", NULL);
     if (pszDPI != NULL)
     {
-        dfDPI = atof(pszDPI);
+        dfDPI = CPLAtof(pszDPI);
     }
     else
     {
@@ -2404,7 +2407,7 @@ void PDFDataset::TurnLayersOnOff()
                     oIter->second->setState(OptionalContentGroup::On);
                 }
 
-                // Turn child layers on, unless there's one of them explicitely listed
+                // Turn child layers on, unless there's one of them explicitly listed
                 // in the list.
                 size_t nLen = strlen(papszLayers[i]);
                 int bFoundChildLayer = FALSE;
@@ -3002,7 +3005,7 @@ GDALDataset *PDFDataset::Open( GDALOpenInfo * poOpenInfo )
         const char* pszDPI = GetOption(poOpenInfo->papszOpenOptions, "DPI", NULL);
         if (pszDPI != NULL)
         {
-            poDS->dfDPI = atof(pszDPI);
+            poDS->dfDPI = CPLAtof(pszDPI);
         }
     }
 
@@ -3454,26 +3457,26 @@ static double Get(GDALPDFObject* poObj, int nIndice)
         char chLast = pszStr[nLen-1];
         if (chLast == 'W' || chLast == 'E' || chLast == 'N' || chLast == 'S')
         {
-            double dfDeg = atof(pszStr);
+            double dfDeg = CPLAtof(pszStr);
             double dfMin = 0, dfSec = 0;
             const char* pszNext = strchr(pszStr, ' ');
             if (pszNext)
                 pszNext ++;
             if (pszNext)
-                dfMin = atof(pszNext);
+                dfMin = CPLAtof(pszNext);
             if (pszNext)
                 pszNext = strchr(pszNext, ' ');
             if (pszNext)
                 pszNext ++;
             if (pszNext)
-                dfSec = atof(pszNext);
+                dfSec = CPLAtof(pszNext);
             double dfVal = dfDeg + dfMin / 60 + dfSec / 3600;
             if (chLast == 'W' || chLast == 'S')
                 return -dfVal;
             else
                 return dfVal;
         }
-        return atof(pszStr);
+        return CPLAtof(pszStr);
     }
     else
     {
@@ -4883,7 +4886,7 @@ CPLErr PDFDataset::SetGeoTransform(double* padfGeoTransform)
     bGeoTransformValid = TRUE;
     bProjDirty = TRUE;
 
-    /* Reset NEATLINE if not explicitely set by the user */
+    /* Reset NEATLINE if not explicitly set by the user */
     if (!bNeatLineDirty)
         SetMetadataItem("NEATLINE", NULL);
     return CE_None;
@@ -5053,7 +5056,7 @@ CPLErr PDFDataset::SetGCPs( int nGCPCountIn, const GDAL_GCP *pasGCPListIn,
     
     bProjDirty = TRUE;
 
-    /* Reset NEATLINE if not explicitely set by the user */
+    /* Reset NEATLINE if not explicitly set by the user */
     if (!bNeatLineDirty)
         SetMetadataItem("NEATLINE", NULL);
 

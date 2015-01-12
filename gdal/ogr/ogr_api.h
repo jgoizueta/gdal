@@ -92,6 +92,9 @@ OGRGeometryH CPL_DLL OGR_G_ForceToLineString( OGRGeometryH );
 OGRGeometryH CPL_DLL OGR_G_ForceToMultiPolygon( OGRGeometryH );
 OGRGeometryH CPL_DLL OGR_G_ForceToMultiPoint( OGRGeometryH );
 OGRGeometryH CPL_DLL OGR_G_ForceToMultiLineString( OGRGeometryH );
+OGRGeometryH CPL_DLL OGR_G_ForceTo( OGRGeometryH hGeom,
+                                    OGRwkbGeometryType eTargetType,
+                                    char** papszOptions );
 
 int    CPL_DLL OGR_G_GetDimension( OGRGeometryH );
 int    CPL_DLL OGR_G_GetCoordinateDimension( OGRGeometryH );
@@ -101,9 +104,11 @@ void   CPL_DLL OGR_G_GetEnvelope( OGRGeometryH, OGREnvelope * );
 void   CPL_DLL OGR_G_GetEnvelope3D( OGRGeometryH, OGREnvelope3D * );
 OGRErr CPL_DLL OGR_G_ImportFromWkb( OGRGeometryH, unsigned char *, int );
 OGRErr CPL_DLL OGR_G_ExportToWkb( OGRGeometryH, OGRwkbByteOrder, unsigned char*);
+OGRErr CPL_DLL OGR_G_ExportToIsoWkb( OGRGeometryH, OGRwkbByteOrder, unsigned char*);
 int    CPL_DLL OGR_G_WkbSize( OGRGeometryH hGeom );
 OGRErr CPL_DLL OGR_G_ImportFromWkt( OGRGeometryH, char ** );
 OGRErr CPL_DLL OGR_G_ExportToWkt( OGRGeometryH, char ** );
+OGRErr CPL_DLL OGR_G_ExportToIsoWkt( OGRGeometryH, char ** );
 OGRwkbGeometryType CPL_DLL OGR_G_GetGeometryType( OGRGeometryH );
 const char CPL_DLL *OGR_G_GetGeometryName( OGRGeometryH );
 void   CPL_DLL OGR_G_DumpReadable( OGRGeometryH, FILE *, const char * );
@@ -161,6 +166,7 @@ double CPL_DLL OGR_G_Distance( OGRGeometryH, OGRGeometryH );
 double CPL_DLL OGR_G_Length( OGRGeometryH );
 double CPL_DLL OGR_G_Area( OGRGeometryH );
 int    CPL_DLL OGR_G_Centroid( OGRGeometryH, OGRGeometryH );
+OGRGeometryH CPL_DLL OGR_G_Value( OGRGeometryH, double dfDistance );
 
 void   CPL_DLL OGR_G_Empty( OGRGeometryH );
 int    CPL_DLL OGR_G_IsEmpty( OGRGeometryH );
@@ -209,6 +215,13 @@ OGRErr CPL_DLL OGR_G_AddGeometry( OGRGeometryH, OGRGeometryH );
 OGRErr CPL_DLL OGR_G_AddGeometryDirectly( OGRGeometryH, OGRGeometryH );
 OGRErr CPL_DLL OGR_G_RemoveGeometry( OGRGeometryH, int, int );
 
+int CPL_DLL OGR_G_HasCurveGeometry( OGRGeometryH, int bLookForNonLinear );
+OGRGeometryH CPL_DLL OGR_G_GetLinearGeometry( OGRGeometryH hGeom,
+                                              double dfMaxAngleStepSizeDegrees,
+                                              char** papszOptions);
+OGRGeometryH CPL_DLL OGR_G_GetCurveGeometry( OGRGeometryH hGeom,
+                                             char** papszOptions );
+
 OGRGeometryH CPL_DLL OGRBuildPolygonFromEdges( OGRGeometryH hLinesAsCollection,
                                        int bBestEffort, 
                                        int bAutoClose, 
@@ -219,6 +232,9 @@ OGRErr CPL_DLL OGRSetGenerate_DB2_V72_BYTE_ORDER(
     int bGenerate_DB2_V72_BYTE_ORDER );
 
 int CPL_DLL OGRGetGenerate_DB2_V72_BYTE_ORDER(void);
+
+void CPL_DLL OGRSetNonLinearGeometriesEnabledFlag(int bFlag);
+int CPL_DLL OGRGetNonLinearGeometriesEnabledFlag(void);
 
 /* -------------------------------------------------------------------- */
 /*      Feature related (ogr_feature.h)                                 */
@@ -246,6 +262,8 @@ void   CPL_DLL OGR_Fld_SetName( OGRFieldDefnH, const char * );
 const char CPL_DLL *OGR_Fld_GetNameRef( OGRFieldDefnH );
 OGRFieldType CPL_DLL OGR_Fld_GetType( OGRFieldDefnH );
 void   CPL_DLL OGR_Fld_SetType( OGRFieldDefnH, OGRFieldType );
+OGRFieldSubType CPL_DLL OGR_Fld_GetSubType( OGRFieldDefnH );
+void   CPL_DLL OGR_Fld_SetSubType( OGRFieldDefnH, OGRFieldSubType );
 OGRJustification CPL_DLL OGR_Fld_GetJustify( OGRFieldDefnH );
 void   CPL_DLL OGR_Fld_SetJustify( OGRFieldDefnH, OGRJustification );
 int    CPL_DLL OGR_Fld_GetWidth( OGRFieldDefnH );
@@ -258,6 +276,9 @@ int    CPL_DLL OGR_Fld_IsIgnored( OGRFieldDefnH hDefn );
 void   CPL_DLL OGR_Fld_SetIgnored( OGRFieldDefnH hDefn, int );
 
 const char CPL_DLL *OGR_GetFieldTypeName( OGRFieldType );
+const char CPL_DLL *OGR_GetFieldSubTypeName( OGRFieldSubType );
+int CPL_DLL OGR_AreTypeSubTypeCompatible( OGRFieldType eType,
+                                          OGRFieldSubType eSubType );
 
 /* OGRGeomFieldDefnH */
 

@@ -11,7 +11,7 @@ OBJ	=	gdalopeninfo.obj gdaldrivermanager.obj gdaldriver.obj \
 		gdalnodatavaluesmaskband.obj gdaldefaultasync.obj \
 		gdaldllmain.obj gdalexif.obj gdalclientserver.obj \
 		gdalgeorefpamdataset.obj  gdaljp2abstractdataset.obj \
-		gdalvirtualmem.obj
+		gdalvirtualmem.obj gdaloverviewdataset.obj gdalrescaledalphaband.obj
 
 RES	=	Version.res
 
@@ -19,7 +19,7 @@ GDAL_ROOT	=	..
 
 !INCLUDE ..\nmake.opt
 
-EXTRAFLAGS =	$(PAM_SETTING) -I..\frmts\gtiff -I..\ogr\ogrsf_frmts\generic $(SQLITEDEF)
+EXTRAFLAGS =	$(PAM_SETTING) -I..\frmts\gtiff -I..\frmts\mem -I..\frmts\vrt -I..\ogr\ogrsf_frmts\generic $(SQLITEDEF)
 
 !IFDEF SQLITE_LIB
 SQLITEDEF	=	-DSQLITE_ENABLED

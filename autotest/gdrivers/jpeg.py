@@ -868,7 +868,8 @@ def jpeg_22():
         return 'fail'
     ds = None
 
-    src_ds = gdal.GetDriverByName('Mem').Create('', 2048, 4096)
+    # With 3 bands
+    src_ds = gdal.GetDriverByName('Mem').Create('', 2048, 4096, 3)
     src_ds.GetRasterBand(1).Fill(255)
     ds = gdal.GetDriverByName('JPEG').CreateCopy('/vsimem/jpeg_22.jpg', src_ds, options = ['EXIF_THUMBNAIL=YES'])
     src_ds = None
@@ -880,11 +881,15 @@ def jpeg_22():
         return 'fail'
     ds = None
 
+    # With comment
     src_ds = gdal.GetDriverByName('Mem').Create('', 2048, 4096)
     src_ds.GetRasterBand(1).Fill(255)
-    ds = gdal.GetDriverByName('JPEG').CreateCopy('/vsimem/jpeg_22.jpg', src_ds, options = ['EXIF_THUMBNAIL=YES', 'THUMBNAIL_WIDTH=40'])
+    ds = gdal.GetDriverByName('JPEG').CreateCopy('/vsimem/jpeg_22.jpg', src_ds, options = ['COMMENT=foo','EXIF_THUMBNAIL=YES', 'THUMBNAIL_WIDTH=40'])
     src_ds = None
     ovr = ds.GetRasterBand(1).GetOverview(3)
+    if ds.GetMetadataItem('COMMENT') != 'foo':
+        gdaltest.post_reason('failure')
+        return 'fail'
     if ovr.XSize != 40 or ovr.YSize != 80:
         gdaltest.post_reason('failure')
         print(ovr.XSize)
@@ -919,6 +924,94 @@ def jpeg_22():
     gdal.Unlink('/vsimem/jpeg_22.jpg')
 
     return 'success'
+
+###############################################################################
+# Test optimized JPEG IRasterIO
+
+def jpeg_23():
+    ds = gdal.Open( 'data/albania.jpg' )
+    cs = [ ds.GetRasterBand(i+1).Checksum() for i in range(3)]
+    
+    # Band interleaved
+    data = ds.ReadRaster(0,0,ds.RasterXSize, ds.RasterYSize)
+    tmp_ds = gdal.GetDriverByName('Mem').Create('', ds.RasterXSize, ds.RasterYSize, 3)
+    tmp_ds.WriteRaster(0,0,ds.RasterXSize, ds.RasterYSize,data)
+    got_cs = [ tmp_ds.GetRasterBand(i+1).Checksum() for i in range(3)]
+    if cs != got_cs:
+        gdaltest.post_reason('failure')
+        return 'fail'    
+        
+    # Pixel interleaved
+    data = ds.ReadRaster(0,0,ds.RasterXSize, ds.RasterYSize, buf_pixel_space = 3, buf_band_space = 1)
+    tmp_ds = gdal.GetDriverByName('Mem').Create('', ds.RasterXSize, ds.RasterYSize, 3)
+    tmp_ds.WriteRaster(0,0,ds.RasterXSize, ds.RasterYSize,data, buf_pixel_space = 3, buf_band_space = 1)
+    got_cs = [ tmp_ds.GetRasterBand(i+1).Checksum() for i in range(3)]
+    if cs != got_cs:
+        gdaltest.post_reason('failure')
+        return 'fail'    
+
+    # Pixel interleaved with padding
+    data = ds.ReadRaster(0,0,ds.RasterXSize, ds.RasterYSize, buf_pixel_space = 4, buf_band_space = 1)
+    tmp_ds = gdal.GetDriverByName('Mem').Create('', ds.RasterXSize, ds.RasterYSize, 3)
+    tmp_ds.WriteRaster(0,0,ds.RasterXSize, ds.RasterYSize,data, buf_pixel_space = 4, buf_band_space = 1)
+    got_cs = [ tmp_ds.GetRasterBand(i+1).Checksum() for i in range(3)]
+    if cs != got_cs:
+        gdaltest.post_reason('failure')
+        return 'fail'    
+    
+    return 'success'
+
+###############################################################################
+# Test Arithmetic coding (and if not enabled, will trigger error code handling
+# in CreateCopy())
+
+def jpeg_24():
+
+    if gdal.GetDriverByName('JPEG').GetMetadataItem('DMD_CREATIONOPTIONLIST').find('ARITHMETIC') >= 0:
+        has_arithmetic = True
+    else:
+        has_arithmetic = False
+
+    src_ds = gdal.Open('data/byte.tif')
+    if not has_arithmetic:
+        gdal.PushErrorHandler()
+    ds = gdal.GetDriverByName('JPEG').CreateCopy( '/vsimem/byte.jpg', src_ds,
+                                                  options = ['ARITHMETIC=YES'] )
+    if not has_arithmetic:
+        gdal.PopErrorHandler()
+    else:
+        expected_cs = 4743
+
+        if ds.GetRasterBand(1).Checksum() != expected_cs:
+            gdaltest.post_reason( 'Wrong checksum on copied image.')
+            print(ds.GetRasterBand(1).Checksum())
+            return 'fail'
+
+        ds = None
+        gdal.GetDriverByName('JPEG').Delete( '/vsimem/byte.jpg' )
+
+    return 'success'
+
+###############################################################################
+# Test COMMENT
+
+def jpeg_25():
+
+    src_ds = gdal.Open('data/byte.tif')
+    ds = gdal.GetDriverByName('JPEG').CreateCopy( '/vsimem/byte.jpg', src_ds,
+                                                  options = ['COMMENT=my comment'] )
+    ds = None
+    ds = gdal.Open( '/vsimem/byte.jpg' )
+    if ds.GetMetadataItem('COMMENT') != 'my comment':
+        gdaltest.post_reason( 'Wrong comment.')
+        print(ds.GetMetadata())
+        return 'fail'
+
+    ds = None
+    gdal.GetDriverByName('JPEG').Delete( '/vsimem/byte.jpg' )
+
+    return 'success'
+
 ###############################################################################
 # Cleanup
 
@@ -958,6 +1051,9 @@ gdaltest_list = [
     jpeg_20,
     jpeg_21,
     jpeg_22,
+    jpeg_23,
+    jpeg_24,
+    jpeg_25,
     jpeg_cleanup ]
 
 if __name__ == '__main__':

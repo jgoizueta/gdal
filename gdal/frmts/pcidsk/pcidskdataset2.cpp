@@ -1492,12 +1492,15 @@ CPLErr PCIDSK2Dataset::IBuildOverviews( const char *pszResampling,
             int    nOvFactor;
             GDALRasterBand * poOverview = poBand->GetOverview( j );
  
-            nOvFactor = (int) 
-                (0.5 + poBand->GetXSize() / (double) poOverview->GetXSize());
+            nOvFactor = GDALComputeOvFactor(poOverview->GetXSize(),
+                                            poBand->GetXSize(),
+                                            poOverview->GetYSize(),
+                                            poBand->GetYSize());
 
             if( nOvFactor == panOverviewList[i] 
-                || nOvFactor == GDALOvLevelAdjust( panOverviewList[i], 
-                                                   poBand->GetXSize() ) )
+                || nOvFactor == GDALOvLevelAdjust2( panOverviewList[i], 
+                                                    poBand->GetXSize(), 
+                                                    poBand->GetYSize() ) )
                 panOverviewList[i] *= -1;
         }
 
@@ -1562,12 +1565,15 @@ CPLErr PCIDSK2Dataset::IBuildOverviews( const char *pszResampling,
                 int    nOvFactor;
                 GDALRasterBand * poOverview = poBand->GetOverview( j );
 
-                nOvFactor = (int) 
-                    (0.5 + poBand->GetXSize() / (double) poOverview->GetXSize());
+                nOvFactor = GDALComputeOvFactor(poOverview->GetXSize(),
+                                            poBand->GetXSize(),
+                                            poOverview->GetYSize(),
+                                            poBand->GetYSize());
 
                 if( nOvFactor == panOverviewList[i] 
-                    || nOvFactor == GDALOvLevelAdjust( panOverviewList[i], 
-                                                       poBand->GetXSize() ) )
+                    || nOvFactor == GDALOvLevelAdjust2( panOverviewList[i], 
+                                                       poBand->GetXSize(), 
+                                                       poBand->GetYSize() ) )
                 {
                     papoOverviewBands[nNewOverviews++] = poOverview;
                     anRegenLevels.push_back( j );
@@ -1730,11 +1736,11 @@ GDALDataset *PCIDSK2Dataset::LLOpen( const char *pszFilename,
                                      char** papszSiblingFiles )
 
 {
+    PCIDSK2Dataset   *poDS = NULL;
     try {
 /* -------------------------------------------------------------------- */
 /*      Create a corresponding GDALDataset.                             */
 /* -------------------------------------------------------------------- */
-        PCIDSK2Dataset   *poDS = NULL;
 
         poDS = new PCIDSK2Dataset();
 
@@ -1842,6 +1848,11 @@ GDALDataset *PCIDSK2Dataset::LLOpen( const char *pszFilename,
         CPLError( CE_Failure, CPLE_AppDefined, 
                   "PCIDSK SDK Failure in Open(), unexpected exception." );
     }
+
+/* -------------------------------------------------------------------- */
+/*      In case of exception, close dataset                             */
+/* -------------------------------------------------------------------- */
+    delete poDS;
 
     return NULL;
 }

@@ -1,14 +1,14 @@
 <html>
 <head>
-<title>GeoPackage</title>
+<title>GeoPackage vector</title>
 </head>
 
 <body bgcolor="#ffffff">
 
-<h1>GeoPackage</h1>
+<h1>GeoPackage vector</h1>
 
 <p>This driver implements support for access to spatial tables in the 
-<a href="http://opengis.github.io/geopackage/">OGC GeoPackage format standard</a>.
+<a href="http://www.geopackage.org/spec/">OGC GeoPackage format standard</a>.
 The GeoPackage standard uses a SQLite database file as a generic container, and the standard defines:
 </p>
 <ul>
@@ -17,6 +17,11 @@ The GeoPackage standard uses a SQLite database file as a generic container, and 
   <li>Naming and conventions for extensions (extended feature types) and indexes (how to use SQLite r-tree in an interoperable manner)</li>
 </ul>
 <p>This driver reads and writes SQLite files from the file system, so it must be run by a user with read/write access to the files it is working with.</p>
+<p>Starting with GDAL 2.0, the driver also supports reading and writing the
+following non-linear geometry types :CIRCULARSTRING, COMPOUNDCURVE, CURVEPOLYGON, MULTICURVE and MULTISURFACE</p>
+
+<p>Starting with GDAL 2.0, GeoPackage raster/tiles are supported. See
+<a href="drv_geopackage_raster.html">GeoPackage raster</a> documentation page</p>
 
 <h2>Limitations</h2>
 
@@ -34,7 +39,11 @@ The GeoPackage standard uses a SQLite database file as a generic container, and 
 </p>
 <p>
   Starting with GDAL 2.0, SQL SELECT statements passed to ExecuteSQL() are
-  also executed directly against the database.
+  also executed directly against the database. If Spatialite is used, a recent
+  version (4.2.0) is needed and use of explicit cast operators AsGPB(), GeomFromGPB()
+  are required. It is also possible to use with any Spatialite version, but in
+  a slower way, by specifying the "INDIRECT_SQLITE" dialect. In which case,
+  GeoPackage geometries appear as Spatialite geometries after translation by OGR.
 </p>
 
 <h3>SQL functions</h3>
@@ -78,7 +87,7 @@ ogrinfo poly.gpkg -sql "SELECT AsGPB(ST_Buffer(CastAutomagic(geom),5)) FROM poly
 
 <h3>Dataset Creation Options</h3>
 
-<p>None</p>
+<p>None related to vector</p>
 
 <h3>Layer Creation Options</h3>
 
@@ -122,19 +131,11 @@ The file <code>filename.gpkg</code> must <strong>not</strong> already exist, as 
 
 </ul>
 
-<h3>FAQs</h3>
-
-<ul>
-  <li> <b>...</b><br>
-...
-</li>
-</ul>
-
-
 <h3>See Also</h3>
 
 <ul>
 <li> <a href="http://sqlite.org/">SQLite</a><p>
+<li> <a href="drv_geopackage_raster.html">GeoPackage raster</a> documentation page</li>
 </ul>
 
 </body>

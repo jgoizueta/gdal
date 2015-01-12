@@ -44,6 +44,10 @@ CPL_CVSID("$Id$");
 
 SHPHandle OGRShapeDataSource::DS_SHPOpen( const char * pszShapeFile, const char * pszAccess )
 {
+    /* Do lazy shx loading for /vsicurl/ */
+    if( strncmp(pszShapeFile, "/vsicurl/", strlen("/vsicurl/")) == 0 &&
+        strcmp(pszAccess, "r") == 0 )
+        pszAccess = "rl";
     SHPHandle hSHP = SHPOpenLL( pszShapeFile, pszAccess, (SAHooks*) VSI_SHP_GetHook(b2GBLimit) );
     if( hSHP != NULL )
         SHPSetFastModeReadObject( hSHP, TRUE );
@@ -696,6 +700,7 @@ OGRShapeDataSource::ICreateLayer( const char * pszLayerName,
     CPLFree( pszFilename );
 
     poLayer->SetResizeAtClose( CSLFetchBoolean( papszOptions, "RESIZE", FALSE ) );
+    poLayer->CreateSpatialIndexAtClose( CSLFetchBoolean( papszOptions, "SPATIAL_INDEX", FALSE ) );
 
 /* -------------------------------------------------------------------- */
 /*      Add layer to data source layer list.                            */

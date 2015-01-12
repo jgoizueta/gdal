@@ -100,6 +100,7 @@ DECLARE_SYMBOL(fgetpos, int, (FILE *stream, fpos_t *pos));
 DECLARE_SYMBOL(fsetpos, int, (FILE *stream, fpos_t *pos));
 DECLARE_SYMBOL(fileno, int, (FILE *stream));
 DECLARE_SYMBOL(ferror, int, (FILE *stream));
+DECLARE_SYMBOL(clearerr, void, (FILE *stream));
 
 DECLARE_SYMBOL(fdopen, FILE*, (int fd, const char *mode));
 DECLARE_SYMBOL(freopen, FILE*, (const char *path, const char *mode, FILE *stream));
@@ -126,6 +127,7 @@ DECLARE_SYMBOL(ftruncate, int, (int fd, off_t length));
 
 DECLARE_SYMBOL(opendir, DIR* , (const char *name));
 DECLARE_SYMBOL(readdir, struct dirent*, (DIR *dirp));
+DECLARE_SYMBOL(readdir64, struct dirent64*, (DIR *dirp));
 DECLARE_SYMBOL(closedir, int, (DIR *dirp));
 DECLARE_SYMBOL(dirfd, int, (DIR *dirp));
 DECLARE_SYMBOL(fchdir, int, (int fd));
@@ -138,6 +140,7 @@ typedef struct
     char** papszDir;
     int    nIter;
     struct dirent ent;
+    struct dirent64 ent64;
     int    fd;
 } VSIDIR;
 
@@ -182,6 +185,7 @@ static void myinit(void)
     LOAD_SYMBOL(fsetpos);
     LOAD_SYMBOL(fileno);
     LOAD_SYMBOL(ferror);
+    LOAD_SYMBOL(clearerr);
 
     LOAD_SYMBOL(fdopen);
     LOAD_SYMBOL(freopen);
@@ -207,6 +211,7 @@ static void myinit(void)
 
     LOAD_SYMBOL(opendir);
     LOAD_SYMBOL(readdir);
+    LOAD_SYMBOL(readdir64);
     LOAD_SYMBOL(closedir);
     LOAD_SYMBOL(dirfd);
     LOAD_SYMBOL(fchdir);
@@ -853,6 +858,24 @@ int ferror(FILE *stream)
 }
 
 /************************************************************************/
+/*                             clearerr()                               */
+/************************************************************************/
+
+void clearerr(FILE *stream)
+{
+    myinit();
+    VSILFILE* fpVSIL = getVSILFILE(stream);
+    int DEBUG_VSIPRELOAD_COND = GET_DEBUG_VSIPRELOAD_COND(fpVSIL);
+    if (DEBUG_VSIPRELOAD_COND) fprintf(stderr, "clearerr(stream=%p)\n", stream);
+    if( fpVSIL != NULL )
+    {
+        fprintf(stderr, "clearerr() unimplemented for VSILFILE\n");
+    }
+    else
+        pfnclearerr(stream);
+}
+
+/************************************************************************/
 /*                             fdopen()                                 */
 /************************************************************************/
 
@@ -1395,6 +1418,39 @@ DIR *opendir(const char *name)
 }
 
 /************************************************************************/
+/*                             filldir()                                */
+/************************************************************************/
+
+static int filldir(VSIDIR* mydir)
+{
+    int DEBUG_VSIPRELOAD_COND = GET_DEBUG_VSIPRELOAD_COND(mydir);
+    char* pszName = mydir->papszDir[mydir->nIter++];
+    if( pszName == NULL )
+        return FALSE;
+    mydir->ent.d_ino = 0;
+    mydir->ent.d_off = 0;
+    mydir->ent.d_reclen = sizeof(mydir->ent);
+    VSIStatBufL sStatBufL;
+    VSIStatL(CPLFormFilename(mydir->pszDirname, pszName, NULL), &sStatBufL);
+    if( DEBUG_VSIPRELOAD_COND && S_ISDIR(sStatBufL.st_mode) )
+        fprintf(stderr, "%s is dir\n", pszName);
+    mydir->ent.d_type = S_ISDIR(sStatBufL.st_mode) ? DT_DIR :
+                        S_ISREG(sStatBufL.st_mode) ? DT_REG :
+                        S_ISLNK(sStatBufL.st_mode) ? DT_LNK :
+                        DT_UNKNOWN;
+    strncpy(mydir->ent.d_name, pszName, 256);
+    mydir->ent.d_name[255] = '\0';
+
+    mydir->ent64.d_ino = 0;
+    mydir->ent64.d_off = 0;
+    mydir->ent64.d_reclen = sizeof(mydir->ent64);
+    mydir->ent64.d_type = mydir->ent.d_type;
+    strcpy(mydir->ent64.d_name, mydir->ent.d_name);
+
+    return TRUE;
+}
+
+/************************************************************************/
 /*                             readdir()                                */
 /************************************************************************/
 
@@ -1406,26 +1462,34 @@ struct dirent *readdir(DIR *dirp)
     if( oSetVSIDIR.find((VSIDIR*)dirp) != oSetVSIDIR.end() )
     {
         VSIDIR* mydir = (VSIDIR*)dirp;
-        char* pszName = mydir->papszDir[mydir->nIter++];
-        if( pszName == NULL )
-            return NULL;
-        mydir->ent.d_ino = 0;
-        mydir->ent.d_off = 0;
-        mydir->ent.d_reclen = sizeof(mydir->ent);
-        VSIStatBufL sStatBufL;
-        VSIStatL(CPLFormFilename(mydir->pszDirname, pszName, NULL), &sStatBufL);
-        if( DEBUG_VSIPRELOAD_COND && S_ISDIR(sStatBufL.st_mode) )
-            fprintf(stderr, "%s is dir\n", pszName);
-        mydir->ent.d_type = S_ISDIR(sStatBufL.st_mode) ? DT_DIR :
-                            S_ISREG(sStatBufL.st_mode) ? DT_REG :
-                            S_ISLNK(sStatBufL.st_mode) ? DT_LNK :
-                            DT_UNKNOWN;
-        strncpy(mydir->ent.d_name, pszName, 256);
-        mydir->ent.d_name[255] = '\0';
+        if( !filldir(mydir) )
+            return FALSE;
+
         return &(mydir->ent);
     }
     else
         return pfnreaddir(dirp);
+}
+
+/************************************************************************/
+/*                             readdir64()                              */
+/************************************************************************/
+
+struct dirent64 *readdir64(DIR *dirp)
+{
+    myinit();
+    int DEBUG_VSIPRELOAD_COND = GET_DEBUG_VSIPRELOAD_COND((VSIDIR*)dirp);
+    if (DEBUG_VSIPRELOAD_COND) fprintf(stderr, "readdir64(%p)\n", dirp);
+    if( oSetVSIDIR.find((VSIDIR*)dirp) != oSetVSIDIR.end() )
+    {
+        VSIDIR* mydir = (VSIDIR*)dirp;
+        if( !filldir(mydir) )
+            return FALSE;
+
+        return &(mydir->ent64);
+    }
+    else
+        return pfnreaddir64(dirp);
 }
 
 /************************************************************************/

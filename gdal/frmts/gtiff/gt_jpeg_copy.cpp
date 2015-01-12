@@ -31,7 +31,7 @@
 #include "gt_jpeg_copy.h"
 
 /* Note: JPEG_DIRECT_COPY is not defined by default, because it is mainly */
-/* usefull for debugging purposes */
+/* useful for debugging purposes */
 
 CPL_CVSID("$Id$");
 
@@ -265,9 +265,6 @@ int GTIFF_CanCopyFromJPEG(GDALDataset* poSrcDS, char** &papszCreateOptions)
         poSrcDS->GetMetadataItem("SOURCE_COLOR_SPACE", "IMAGE_STRUCTURE");
     if (pszSrcColorSpace != NULL && EQUAL(pszSrcColorSpace, "YCbCr"))
         nMCUSize = 16;
-    else if (pszSrcColorSpace != NULL &&
-        (EQUAL(pszSrcColorSpace, "CMYK") || EQUAL(pszSrcColorSpace, "YCbCrK")))
-        return FALSE;
 
     int     nXSize = poSrcDS->GetRasterXSize();
     int     nYSize = poSrcDS->GetRasterYSize();
@@ -277,14 +274,28 @@ int GTIFF_CanCopyFromJPEG(GDALDataset* poSrcDS, char** &papszCreateOptions)
     int bCompatiblePhotometric = (
             pszPhotometric == NULL ||
             (nMCUSize == 16 && EQUAL(pszPhotometric, "YCbCr")) ||
+            (nMCUSize == 8 && nBands == 4 &&
+             poSrcDS->GetRasterBand(1)->GetColorInterpretation() == GCI_CyanBand &&
+             poSrcDS->GetRasterBand(2)->GetColorInterpretation() == GCI_MagentaBand &&
+             poSrcDS->GetRasterBand(3)->GetColorInterpretation() == GCI_YellowBand &&
+             poSrcDS->GetRasterBand(4)->GetColorInterpretation() == GCI_BlackBand) ||
             (nMCUSize == 8 && EQUAL(pszPhotometric, "RGB") && nBands == 3) ||
             (nMCUSize == 8 && EQUAL(pszPhotometric, "MINISBLACK") && nBands == 1) );
     if (!bCompatiblePhotometric)
         return FALSE;
 
+    if ( nBands == 4 && pszPhotometric == NULL &&
+         poSrcDS->GetRasterBand(1)->GetColorInterpretation() == GCI_CyanBand &&
+         poSrcDS->GetRasterBand(2)->GetColorInterpretation() == GCI_MagentaBand &&
+         poSrcDS->GetRasterBand(3)->GetColorInterpretation() == GCI_YellowBand &&
+         poSrcDS->GetRasterBand(4)->GetColorInterpretation() == GCI_BlackBand )
+    {
+        papszCreateOptions = CSLSetNameValue(papszCreateOptions, "PHOTOMETRIC", "CMYK");
+    }
+
     const char* pszInterleave = CSLFetchNameValue(papszCreateOptions, "INTERLEAVE");
     int bCompatibleInterleave = ( pszInterleave == NULL ||
-                                  (nBands == 3 && EQUAL(pszInterleave, "PIXEL")) ||
+                                  (nBands > 1 && EQUAL(pszInterleave, "PIXEL")) ||
                                   nBands == 1 );
     if( !bCompatibleInterleave )
         return FALSE;
@@ -328,6 +339,7 @@ static void GTIFF_ErrorExitJPEG(j_common_ptr cinfo)
 /*                      GTIFF_Set_TIFFTAG_JPEGTABLES()                  */
 /************************************************************************/
 
+static
 void GTIFF_Set_TIFFTAG_JPEGTABLES(TIFF* hTIFF,
                                   jpeg_decompress_struct& sDInfo,
                                   jpeg_compress_struct& sCInfo)
@@ -335,8 +347,27 @@ void GTIFF_Set_TIFFTAG_JPEGTABLES(TIFF* hTIFF,
     char szTmpFilename[128];
     sprintf(szTmpFilename, "/vsimem/tables_%p", &sDInfo);
     VSILFILE* fpTABLES = VSIFOpenL(szTmpFilename, "wb+");
+    
+    uint16  nPhotometric;
+    TIFFGetField( hTIFF, TIFFTAG_PHOTOMETRIC, &nPhotometric );
 
     jpeg_vsiio_dest( &sCInfo, fpTABLES );
+
+    // Avoid unnecessary tables to be emitted
+    if( nPhotometric != PHOTOMETRIC_YCBCR )
+    {
+        JQUANT_TBL* qtbl;
+        JHUFF_TBL* htbl;
+        qtbl = sCInfo.quant_tbl_ptrs[1];
+        if (qtbl != NULL)
+            qtbl->sent_table = TRUE;
+        htbl = sCInfo.dc_huff_tbl_ptrs[1];
+        if (htbl != NULL)
+            htbl->sent_table = TRUE;
+        htbl = sCInfo.ac_huff_tbl_ptrs[1];
+        if (htbl != NULL)
+            htbl->sent_table = TRUE;
+    }
     jpeg_write_tables( &sCInfo );
 
     VSIFCloseL(fpTABLES);
@@ -714,10 +745,12 @@ CPLErr GTIFF_CopyFromJPEG(GDALDataset* poDS, GDALDataset* poSrcDS,
 /* -------------------------------------------------------------------- */
     struct jpeg_error_mgr sJErr;
     struct jpeg_decompress_struct sDInfo;
+    memset(&sDInfo, 0, sizeof(sDInfo));
     jmp_buf setjmp_buffer;
     if (setjmp(setjmp_buffer))
     {
         VSIFCloseL(fpJPEG);
+        jpeg_destroy_decompress(&sDInfo);
         return CE_Failure;
     }
 

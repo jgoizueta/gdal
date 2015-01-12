@@ -107,16 +107,16 @@ OGRFeature *OGRMutexedLayer::GetFeature( long nFID )
     return OGRLayerDecorator::GetFeature(nFID);
 }
 
-OGRErr      OGRMutexedLayer::SetFeature( OGRFeature *poFeature )
+OGRErr      OGRMutexedLayer::ISetFeature( OGRFeature *poFeature )
 {
     CPLMutexHolderOptionalLockD(m_hMutex);
-    return OGRLayerDecorator::SetFeature(poFeature);
+    return OGRLayerDecorator::ISetFeature(poFeature);
 }
 
-OGRErr      OGRMutexedLayer::CreateFeature( OGRFeature *poFeature )
+OGRErr      OGRMutexedLayer::ICreateFeature( OGRFeature *poFeature )
 {
     CPLMutexHolderOptionalLockD(m_hMutex);
-    return OGRLayerDecorator::CreateFeature(poFeature);
+    return OGRLayerDecorator::ICreateFeature(poFeature);
 }
 
 OGRErr      OGRMutexedLayer::DeleteFeature( long nFID )
@@ -257,3 +257,14 @@ OGRErr      OGRMutexedLayer::SetIgnoredFields( const char **papszFields )
     CPLMutexHolderOptionalLockD(m_hMutex);
     return OGRLayerDecorator::SetIgnoredFields(papszFields);
 }
+
+#if defined(WIN32) && defined(_MSC_VER)
+// Horrible hack: for some reason MSVC doesn't export the class
+// if it is not referenced from the DLL itself
+void OGRRegisterMutexedLayer();
+void OGRRegisterMutexedLayer()
+{
+    CPLAssert(FALSE); // Never call this function: it will segfault
+    delete new OGRMutexedLayer(NULL, FALSE, NULL);
+}
+#endif

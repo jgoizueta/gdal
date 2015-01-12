@@ -227,7 +227,7 @@ OGRLayer *OGRDGNDataSource::ICreateLayer( const char *pszLayerName,
     papszOptions = CSLInsertStrings( papszOptions, 0, papszExtraOptions );
 
     b3DRequested = CSLFetchBoolean( papszOptions, "3D", 
-                                    (((int) eGeomType) & wkb25DBit) );
+                                    wkbHasZ(eGeomType) );
 
     pszSeed = CSLFetchNameValue( papszOptions, "SEED" );
     if( pszSeed )
@@ -287,14 +287,14 @@ OGRLayer *OGRDGNDataSource::ICreateLayer( const char *pszLayerName,
         nCreationFlags &= ~DGNCF_USE_SEED_ORIGIN;
         if( CSLCount(papszTuple) == 3 )
         {
-            dfOriginX = atof(papszTuple[0]);
-            dfOriginY = atof(papszTuple[1]);
-            dfOriginZ = atof(papszTuple[2]);
+            dfOriginX = CPLAtof(papszTuple[0]);
+            dfOriginY = CPLAtof(papszTuple[1]);
+            dfOriginZ = CPLAtof(papszTuple[2]);
         }
         else if( CSLCount(papszTuple) == 2 )
         {
-            dfOriginX = atof(papszTuple[0]);
-            dfOriginY = atof(papszTuple[1]);
+            dfOriginX = CPLAtof(papszTuple[0]);
+            dfOriginY = CPLAtof(papszTuple[1]);
             dfOriginZ = 0.0;
         }
         else

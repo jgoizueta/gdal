@@ -44,15 +44,15 @@ class OGRILI1DataSource;
 class OGRILI1Layer : public OGRLayer
 {
 private:
+#ifdef notused
     OGRSpatialReference *poSRS;
+#endif
     OGRFeatureDefn      *poFeatureDefn;
     GeomFieldInfos      oGeomFieldInfos;
 
     int                 nFeatures;
     OGRFeature          **papoFeatures;
     int                 nFeatureIdx;
-
-    int                 bWriter;
 
     int                 bGeomsJoined;
 
@@ -74,7 +74,7 @@ private:
 
     int                 GetFeatureCount( int bForce = TRUE );
 
-    OGRErr              CreateFeature( OGRFeature *poFeature );
+    OGRErr              ICreateFeature( OGRFeature *poFeature );
     int                 GeometryAppend( OGRGeometry *poGeometry );
 
     OGRFeatureDefn *    GetLayerDefn() { return poFeatureDefn; }

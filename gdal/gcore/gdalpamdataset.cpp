@@ -204,15 +204,18 @@ CPLXMLNode *GDALPamDataset::SerializeToXML( const char *pszUnused )
 /* -------------------------------------------------------------------- */
 /*      Metadata.                                                       */
 /* -------------------------------------------------------------------- */
-    CPLXMLNode *psMD;
-
-    psMD = oMDMD.Serialize();
-    if( psMD != NULL )
+    if( psPam->bHasMetadata )
     {
-        if( psMD->psChild == NULL && psMD->psNext == NULL )
-            CPLDestroyXMLNode( psMD );
-        else
-            CPLAddXMLChild( psDSTree, psMD );
+        CPLXMLNode *psMD;
+
+        psMD = oMDMD.Serialize();
+        if( psMD != NULL )
+        {
+            if( psMD->psChild == NULL && psMD->psNext == NULL )
+                CPLDestroyXMLNode( psMD );
+            else
+                CPLAddXMLChild( psDSTree, psMD );
+        }
     }
 
 /* -------------------------------------------------------------------- */
@@ -294,6 +297,7 @@ void GDALPamDataset::PamInitialize()
     psPam->nGCPCount = 0;
     psPam->pasGCPList = NULL;
     psPam->pszGCPProjection = NULL;
+    psPam->bHasMetadata = FALSE;
 
     int iBand;
     
@@ -371,7 +375,7 @@ CPLErr GDALPamDataset::XMLInit( CPLXMLNode *psTree, const char *pszUnused )
         else
         {
             for( int iTA = 0; iTA < 6; iTA++ )
-                psPam->adfGeoTransform[iTA] = atof(papszTokens[iTA]);
+                psPam->adfGeoTransform[iTA] = CPLAtof(papszTokens[iTA]);
             psPam->bHaveGeoTransform = TRUE;
         }
 
@@ -859,7 +863,7 @@ CPLErr GDALPamDataset::CloneInfo( GDALDataset *poSrcDS, int nCloneFlags )
     PamInitialize();
 
 /* -------------------------------------------------------------------- */
-/*      Supress NotImplemented error messages - mainly needed if PAM    */
+/*      Suppress NotImplemented error messages - mainly needed if PAM   */
 /*      disabled.                                                       */
 /* -------------------------------------------------------------------- */
     SetMOFlags( nSavedMOFlags | GMO_IGNORE_UNIMPLEMENTED );
@@ -1218,7 +1222,10 @@ CPLErr GDALPamDataset::SetMetadata( char **papszMetadata,
     PamInitialize();
 
     if( psPam )
+    {
+        psPam->bHasMetadata = TRUE;
         MarkPamDirty();
+    }
 
     return GDALDataset::SetMetadata( papszMetadata, pszDomain );
 }
@@ -1235,7 +1242,10 @@ CPLErr GDALPamDataset::SetMetadataItem( const char *pszName,
     PamInitialize();
 
     if( psPam )
+    {
+        psPam->bHasMetadata = TRUE;
         MarkPamDirty();
+    }
 
     return GDALDataset::SetMetadataItem( pszName, pszValue, pszDomain );
 }
