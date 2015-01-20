@@ -1,0 +1,7 @@
+*.deb
+*.debian.tar.gz
+*.dsc
+*.build
+*.changes
+*.ppa.upload
+*.swp
