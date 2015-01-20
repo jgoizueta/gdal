@@ -1,9 +1,15 @@
+ogr2ogr2 (2.0.0+svn.28306-precise1ubuntu2) precise; urgency=medium
+
+  * Install data files in /usr/share/gdal/2.0
+
+ --  Rafa de la Torre <rtorre@cartodb.com>  Tue, 20 Jan 2015 16:03:07 +0000
+
 ogr2ogr2 (2.0.0+svn.28306-precise1ubuntu1) precise; urgency=medium
 
   * Fix for buffer overflow in csv type guessing
   * New feature: Type guessing on import for GEOJSON
 
- --  Rafa de la Torre <rtorre@cartodb.com> Mon, 12 Jan 2015 17:22:36 +0000
+ --  Rafa de la Torre <rtorre@cartodb.com>  Mon, 12 Jan 2015 17:22:36 +0000
 
 ogr2ogr2 (2.0.0+svn.27782-precise1) precise; urgency=medium
 

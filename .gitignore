@@ -5,3 +5,9 @@
 *.changes
 *.ppa.upload
 *.swp
+gdal/.pc/
+gdal/debian/files
+gdal/debian/ogr2ogr2-static-bin.debhelper.log
+gdal/debian/ogr2ogr2-static-bin.substvars
+gdal/debian/ogr2ogr2-static-bin/
+gdal/debian/tmp/

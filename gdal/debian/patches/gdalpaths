@@ -1,0 +1,33 @@
+--- a/port/cpl_findfile.cpp
++++ b/port/cpl_findfile.cpp
+@@ -105,7 +105,7 @@
+   #ifdef MACOSX_FRAMEWORK
+             CPLPushFinderLocation( GDAL_PREFIX "/Resources/gdal" );
+   #else
+-            CPLPushFinderLocation( GDAL_PREFIX "/share/gdal" );
++            CPLPushFinderLocation( GDAL_PREFIX "/share/gdal/2.0" );
+   #endif
+ #else
+             CPLPushFinderLocation( "/usr/local/share/gdal" );
+--- a/gcore/gdaldrivermanager.cpp
++++ b/gcore/gdaldrivermanager.cpp
+@@ -705,7 +705,7 @@
+     #ifdef MACOSX_FRAMEWORK
+                                         GDAL_PREFIX "/PlugIns");
+     #else
+-                                        GDAL_PREFIX "/lib/gdalplugins" );
++                                        GDAL_PREFIX "/lib/gdalplugins/2.0" );
+     #endif
+ #else
+         char szExecPath[1024];
+--- a/port/cpl_csv.cpp
++++ b/port/cpl_csv.cpp
+@@ -1096,7 +1096,7 @@
+     strcpy( pTLSData->szPath, GDAL_PREFIX "/Resources/epsg_csv/" );
+     CPLStrlcat( pTLSData->szPath, pszBasename, sizeof(pTLSData->szPath) );
+   #else
+-    strcpy( pTLSData->szPath, GDAL_PREFIX "/share/epsg_csv/" );
++    strcpy( pTLSData->szPath, GDAL_PREFIX "/share/gdal/2.0/" );
+     CPLStrlcat( pTLSData->szPath, pszBasename, sizeof(pTLSData->szPath) );
+   #endif
+ #else
