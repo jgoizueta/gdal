@@ -1,3 +1,10 @@
+ogr2ogr2 (2.0.0+svn.28335-precise1ubuntu1) precise; urgency=medium
+
+  * ogr2ogr: fix regression when using -nlt PROMOTE_TO_MULTI on wkbUnknown
+    layers, or layers that are already a multi* type
+
+ -- Rafa de la Torre <rtorre@cartodb.com>  Wed, 21 Jan 2015 21:05:43 +0100
+
 ogr2ogr2 (2.0.0+svn.28306-precise1ubuntu2) precise; urgency=medium
 
   * Install data files in /usr/share/gdal/2.0
