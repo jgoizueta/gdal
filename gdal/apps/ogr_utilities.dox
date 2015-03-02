@@ -194,8 +194,10 @@ Advanced options :
                [-clipdstwhere expression]
                [-wrapdateline] [-datelineoffset val]
                [[-simplify tolerance] | [-segmentize max_dist]]
-               [-addfields]
+               [-addfields] [-unsetFid]
+               [-relaxedFieldNameMatch] [-forceNullable] [-unsetDefault]
                [-fieldTypeToString All|(type1[,type2]*)] [-unsetFieldWidth]
+               [-mapFieldType type1|All=type2[,type3=type4]*]
                [-fieldmap identity | index1[,index2]*]
                [-splitlistfields] [-maxsubfields val]
                [-explodecollections] [-zfield field_name]
@@ -264,7 +266,11 @@ to the coordinate dimension declared by the layer.
 <dt> <b>-a_srs</b><em> srs_def</em>:</dt><dd> Assign an output SRS</dd>
 <dt> <b>-t_srs</b><em> srs_def</em>:</dt><dd> Reproject/transform to this SRS on output</dd>
 <dt> <b>-s_srs</b><em> srs_def</em>:</dt><dd> Override source SRS</dd>
-<dt> <b>-preserve_fid</b>:</dt><dd>Use the FID of the source features instead of letting the output driver to automatically assign a new one.</dd>
+<dt> <b>-preserve_fid</b>:</dt><dd>Use the FID of the source features instead of letting the output driver to automatically assign a new one.
+Note: starting with GDAL 2.0, if not in append mode, this behaviour becomes the default if the output driver
+has a FID layer creation option. In which case the name of the source FID column will
+be used and source feature IDs will be attempted to be preserved. This behaviour
+can be disabled by setting -unsetFid</dd>
 <dt> <b>-fid</b> <i>fid</i>:</dt><dd> If provided, only the feature with this feature
 id will be reported.  Operates exclusive of the spatial or attribute 
 queries.  Note: if you want to select several features based on their feature id, you can
@@ -305,9 +311,17 @@ Note: the algorithm used preserves topology per feature, in particular for polyg
 <dt> <b>-segmentize</b><em> max_dist</em>:</dt><dd> (starting with GDAL 1.6.0) maximum distance between 2 nodes.
 Used to create intermediate points</dd>
 <dt> <b>-fieldTypeToString</b><em> type1, ...</em>:</dt><dd> (starting with GDAL 1.7.0) converts any field of the
-specified type to a field of type string in the destination layer. Valid types are : Integer, Real, String, Date, Time,
-DateTime, Binary, IntegerList, RealList, StringList. Special value <b>All</b> can be used to convert all fields to strings.
-This is an alternate way to using the CAST operator of OGR SQL, that may avoid typing a long SQL query.</dd>
+specified type to a field of type string in the destination layer. Valid types are : Integer, Integer64, Real, String, Date, Time,
+DateTime, Binary, IntegerList, Integer64List, RealList, StringList. Special value <b>All</b> can be used to convert all fields to strings.
+This is an alternate way to using the CAST operator of OGR SQL, that may avoid typing a long SQL query.
+Note that this does not influence the field types used by the source driver, and is only an afterwards conversion.</dd>
+<dt> <b>-mapFieldType</b><em> srctype|All=dsttype, ...</em>:</dt><dd> (starting with GDAL 2.0) converts any field of the
+specified type to another type. Valid types are : Integer, Integer64, Real, String, Date, Time,
+DateTime, Binary, IntegerList, Integer64List, RealList, StringList.
+Special value <b>All</b> can be used to convert all fields to another type.
+This is an alternate way to using the CAST operator of OGR SQL, that may avoid typing a long SQL query. This is
+a generalization of -fieldTypeToString.
+Note that this does not influence the field types used by the source driver, and is only an afterwards conversion.</dd>
 <dt> <b>-unsetFieldWidth</b>:</dt><dd> (starting with GDAL 1.11) set field width and precision to 0.</dd>
 <dt> <b>-splitlistfields</b>:</dt><dd>(starting with GDAL 1.8.0) split fields of type StringList, RealList or IntegerList into as many fields of type String, Real or Integer as necessary.</dd>
 <dt> <b>-maxsubfields</b> <em>val</em>:</dt><dd>To be combined with -splitlistfields to limit the number of subfields created for each split field.</dd>
@@ -332,6 +346,17 @@ This setting should be used along with the -append setting.</dd>
 the new fields found in source layers. This option is useful when merging files that have non-strictly
 identical structures.
 This might not work for output formats that don't support adding fields to existing non-empty layers.</dd>
+<dt> <b>-relaxedFieldNameMatch</b>:</dt><dd>(starting with GDAL 1.11) Do field name matching between
+source and existing target layer in a more relaxed way if the target driver has an implementation for it.</dd>
+[-relaxedFieldNameMatch] [-forceNullable]
+<dt> <b>-forceNullable</b>:</dt><dd>(starting with GDAL 2.0) Do not propagate not-nullable constraints
+to target layer if they exist in source layer..</dd>
+<dt> <b>-unsetDefault</b>:</dt><dd>(starting with GDAL 2.0) Do not propagate default field values
+to target layer if they exist in source layer..</dd>
+<dt> <b>-unsetFid</b>:</dt><dd>(starting with GDAL 2.0) Can be specify to prevent
+the new default behaviour that consists in, if the output driver
+has a FID layer creation option and we are not in append mode, to preserve the
+name of the source FID column and source feature IDs</dd>
 </dl>
 
 \section ogr2ogr_performance PERFORMANCE HINTS

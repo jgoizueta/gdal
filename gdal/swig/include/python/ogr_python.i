@@ -296,18 +296,26 @@ layer[0:4] would return a list of the first four features."""
         fld_type = self.GetFieldType(fld_index)
         if fld_type == OFTInteger:
             return self.GetFieldAsInteger(fld_index)
+        if fld_type == OFTInteger64:
+            return self.GetFieldAsInteger64(fld_index)
         if fld_type == OFTReal:
             return self.GetFieldAsDouble(fld_index)
         if fld_type == OFTStringList:
             return self.GetFieldAsStringList(fld_index)
         if fld_type == OFTIntegerList:
             return self.GetFieldAsIntegerList(fld_index)
+        if fld_type == OFTInteger64List:
+            return self.GetFieldAsInteger64List(fld_index)
         if fld_type == OFTRealList:
             return self.GetFieldAsDoubleList(fld_index)
         ## if fld_type == OFTDateTime or fld_type == OFTDate or fld_type == OFTTime:
         #     return self.GetFieldAsDate(fld_index)
         # default to returning as a string.  Should we add more types?
-        return self.GetFieldAsString(fld_index)
+        try:
+            return self.GetFieldAsString(fld_index)
+        except:
+            # For Python3 on non-UTF8 strings
+            return self.GetFieldAsBinary(fld_index)
 
     # With several override, SWIG cannot dispatch automatically unicode strings
     # to the right implementation, so we have to do it at hand
@@ -324,6 +332,13 @@ layer[0:4] would return a list of the first four features."""
         SetField(self, char name, int year, int month, int day, int hour, 
             int minute, int second, int tzflag)
         """
+
+        if len(args) == 2 and (type(args[1]) == type(1) or type(args[1]) == type(12345678901234)):
+            fld_index = args[0]
+            if isinstance(fld_index, str):
+                fld_index = self.GetFieldIndex(fld_index)
+            return _ogr.Feature_SetFieldInteger64(self, fld_index, args[1])
+
 
         if len(args) == 2 and str(type(args[1])) == "<type 'unicode'>":
             fld_index = args[0]
@@ -347,8 +362,8 @@ layer[0:4] would return a list of the first four features."""
             if len(value) == 0:
                 self.UnsetField( fld_index )
                 return
-            if isinstance(value[0],int):
-                self.SetFieldIntegerList(fld_index,value)
+            if isinstance(value[0],type(1)) or isinstance(value[0],type(12345678901234)):
+                self.SetFieldInteger64List(fld_index,value)
                 return
             elif isinstance(value[0],float):
                 self.SetFieldDoubleList(fld_index,value)
@@ -357,7 +372,7 @@ layer[0:4] would return a list of the first four features."""
                 self.SetFieldStringList(fld_index,value)
                 return
             else:
-                raise TypeError( 'Unsupported type of list in SetField2()' )
+                raise TypeError( 'Unsupported type of list in SetField2(). Type of element is %s' % str(type(value[0])) )
 
         try:
             self.SetField( fld_index, value )
@@ -500,6 +515,16 @@ layer[0:4] would return a list of the first four features."""
 
 #ifndef FROM_GDAL_I
 %include "callback.i"
+
+
+%extend GDALMajorObjectShadow {
+%pythoncode %{
+  def GetMetadata( self, domain = '' ):
+    if domain[:4] == 'xml:':
+      return self.GetMetadata_List( domain )
+    return self.GetMetadata_Dict( domain )
+%}
+}
 #endif
 
 

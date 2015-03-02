@@ -74,7 +74,10 @@ the default dialect of the datasource will be used.</li>
 
 <li> <b>FID</b> (optional): Name of the attribute column from which the 
 FID of features should be derived.  If not provided, the FID of the source
-features will be used directly.</li>
+features will be used directly. The layer will report the FID column name only
+if it is also reported as a regular field. Starting with GDAL 2.0, a "name"
+attribute can be specified on the FID element so that the FID column name is
+always reported.</li>
 
 <br>
 
@@ -127,6 +130,10 @@ are specified, it is assumed that the name of source geometry field is the value
 of the <b>name</b> attribute.
 </p>
 <p>
+Starting with GDAL 2.0, the optional <b>nullable</b> attribute can be used to specify
+whether the geometry field is nullable. It defaults to "true".</li>
+</p>
+<p>
 When several geometry fields are used, the following child elements of <b>GeometryField</b>
 can be defined to explicitely set the geometry type, SRS, source region, or extent.
 <ul>
@@ -169,6 +176,8 @@ or "DateTime". Defaults to "String".
 <li> <b>precision</b>: the field width. Defaults to zero.
 <li> <b>src</b>: the name of the source field to be copied to this one.
 Defaults to the value of "name".
+<li> <b>nullable</b> (GDAL &gt;= 2.0) can be used to specify
+whether the field is nullable. It defaults to "true".</li>
 </ul>
 </li>
 

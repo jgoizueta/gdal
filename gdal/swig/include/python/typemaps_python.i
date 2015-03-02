@@ -24,7 +24,7 @@
 
 %apply (double *OUTPUT) { double *argout };
 
-%typemap(in) GIntBig bigint
+%typemap(in) GIntBig
 {
     PY_LONG_LONG val;
     if ( !PyArg_Parse($input,"L",&val) ) {
@@ -34,7 +34,7 @@
     $1 = (GIntBig)val;
 }
 
-%typemap(out) GIntBig bigint
+%typemap(out) GIntBig
 {
     char szTmp[32];
     sprintf(szTmp, CPL_FRMT_GIB, $1);
@@ -270,6 +270,74 @@ CreateTupleFromDoubleArray( double *first, unsigned int size ) {
 %typemap(freearg) (int nList, int* pList)
 {
   /* %typemap(freearg) (int nList, int* pList) */
+  if ($2) {
+    free((void*) $2);
+  }
+}
+
+/*
+ *  Typemap for counted arrays of GIntBig <- PySequence
+ */
+%typemap(in,numinputs=1) (int nList, GIntBig* pList)
+{
+  /* %typemap(in,numinputs=1) (int nList, GIntBig* pList)*/
+  /* check if is List */
+  if ( !PySequence_Check($input) ) {
+    PyErr_SetString(PyExc_TypeError, "not a sequence");
+    SWIG_fail;
+  }
+  $1 = PySequence_Size($input);
+  $2 = (GIntBig*) malloc($1*sizeof(GIntBig));
+  for( int i = 0; i<$1; i++ ) {
+    PyObject *o = PySequence_GetItem($input,i);
+    PY_LONG_LONG val;
+    if ( !PyArg_Parse(o,"L",&val) ) {
+      PyErr_SetString(PyExc_TypeError, "not an integer");
+      Py_DECREF(o);
+      SWIG_fail;
+    }
+    $2[i] = (GIntBig)val;
+    Py_DECREF(o);
+  }
+}
+
+%typemap(freearg) (int nList, GIntBig* pList)
+{
+  /* %typemap(freearg) (int nList, GIntBig* pList) */
+  if ($2) {
+    free((void*) $2);
+  }
+}
+
+/*
+ *  Typemap for counted arrays of GIntBig <- PySequence
+ */
+%typemap(in,numinputs=1) (int nList, GIntBig* pList)
+{
+  /* %typemap(in,numinputs=1) (int nList, GIntBig* pList)*/
+  /* check if is List */
+  if ( !PySequence_Check($input) ) {
+    PyErr_SetString(PyExc_TypeError, "not a sequence");
+    SWIG_fail;
+  }
+  $1 = PySequence_Size($input);
+  $2 = (GIntBig*) malloc($1*sizeof(GIntBig));
+  for( int i = 0; i<$1; i++ ) {
+    PyObject *o = PySequence_GetItem($input,i);
+    PY_LONG_LONG val;
+    if ( !PyArg_Parse(o,"L",&val) ) {
+      PyErr_SetString(PyExc_TypeError, "not an integer");
+      Py_DECREF(o);
+      SWIG_fail;
+    }
+    $2[i] = (GIntBig)val;
+    Py_DECREF(o);
+  }
+}
+
+%typemap(freearg) (int nList, GIntBig* pList)
+{
+  /* %typemap(freearg) (int nList, GIntBig* pList) */
   if ($2) {
     free((void*) $2);
   }
@@ -532,6 +600,64 @@ CreateTupleFromDoubleArray( int *first, unsigned int size ) {
 }
 
 /*
+ * Typemap argout used in Feature::GetFieldAsInteger64List()
+ */
+%typemap(in,numinputs=0) (int *nLen, const GIntBig **pList) (int nLen, GIntBig *pList)
+{
+  /* %typemap(in,numinputs=0) (int *nLen, const GIntBig **pList) (int nLen, GIntBig *pList) */
+  $1 = &nLen;
+  $2 = &pList;
+}
+
+%typemap(argout) (int *nLen, const GIntBig **pList )
+{
+  /* %typemap(argout) (int *nLen, const GIntBig **pList ) */
+  Py_DECREF($result);
+  PyObject *out = PyList_New( *$1 );
+  for( int i=0; i<*$1; i++ ) {
+    char szTmp[32];
+    sprintf(szTmp, CPL_FRMT_GIB, (*$2)[i]);
+    PyObject* val;
+%#if PY_VERSION_HEX>=0x03000000
+    val = PyLong_FromString(szTmp, NULL, 10);
+%#else
+    val = PyInt_FromString(szTmp, NULL, 10);
+%#endif
+    PyList_SetItem( out, i, val );
+  }
+  $result = out;
+}
+
+/*
+ * Typemap argout used in Feature::GetFieldAsInteger64List()
+ */
+%typemap(in,numinputs=0) (int *nLen, const GIntBig **pList) (int nLen, GIntBig *pList)
+{
+  /* %typemap(in,numinputs=0) (int *nLen, const GIntBig **pList) (int nLen, GIntBig *pList) */
+  $1 = &nLen;
+  $2 = &pList;
+}
+
+%typemap(argout) (int *nLen, const GIntBig **pList )
+{
+  /* %typemap(argout) (int *nLen, const GIntBig **pList ) */
+  Py_DECREF($result);
+  PyObject *out = PyList_New( *$1 );
+  for( int i=0; i<*$1; i++ ) {
+    char szTmp[32];
+    sprintf(szTmp, CPL_FRMT_GIB, (*$2)[i]);
+    PyObject* val;
+%#if PY_VERSION_HEX>=0x03000000
+    val = PyLong_FromString(szTmp, NULL, 10);
+%#else
+    val = PyInt_FromString(szTmp, NULL, 10);
+%#endif
+    PyList_SetItem( out, i, val );
+  }
+  $result = out;
+}
+
+/*
  * Typemap argout used in Feature::GetFieldAsDoubleList()
  */
 %typemap(in,numinputs=0) (int *nLen, const double **pList) (int nLen, double *pList)
@@ -697,14 +823,16 @@ CreateTupleFromDoubleArray( int *first, unsigned int size ) {
   if ( PySequence_Check( $input ) ) {
     int size = PySequence_Size($input);
     for (int i = 0; i < size; i++) {
-      char *pszItem = NULL;
       PyObject* pyObj = PySequence_GetItem($input,i);
-      if ( ! PyArg_Parse( pyObj, "s", &pszItem ) ) {
+      int bFreeStr;
+      char* pszStr = GDALPythonObjectToCStr(pyObj, &bFreeStr);
+      if ( pszStr == NULL ) {
           Py_DECREF(pyObj);
           PyErr_SetString(PyExc_TypeError,"sequence must contain strings");
           SWIG_fail;
       }
-      $1 = CSLAddString( $1, pszItem );
+      $1 = CSLAddString( $1, pszStr );
+      GDALPythonFreeCStr(pszStr, bFreeStr);
       Py_DECREF(pyObj);
     }
   }
@@ -715,14 +843,29 @@ CreateTupleFromDoubleArray( int *first, unsigned int size ) {
       PyObject *item_list = PyMapping_Items( $input );
       for( int i=0; i<size; i++ ) {
         PyObject *it = PySequence_GetItem( item_list, i );
-        char *nm;
-        char *val;
-        if ( ! PyArg_ParseTuple( it, "ss", &nm, &val ) ) {
+
+        PyObject *k, *v;
+        if ( ! PyArg_ParseTuple( it, "OO", &k, &v ) ) {
           Py_DECREF(it);
           PyErr_SetString(PyExc_TypeError,"dictionnaire must contain tuples of strings");
           SWIG_fail;
         }
-        $1 = CSLAddNameValue( $1, nm, val );
+
+        int bFreeK, bFreeV;
+        char* pszK = GDALPythonObjectToCStr(k, &bFreeK);
+        char* pszV = GDALPythonObjectToCStr(v, &bFreeV);
+        if( pszK == NULL || pszV == NULL )
+        {
+            GDALPythonFreeCStr(pszK, bFreeK);
+            GDALPythonFreeCStr(pszV, bFreeV);
+            Py_DECREF(it);
+            PyErr_SetString(PyExc_TypeError,"dictionnaire must contain tuples of strings");
+            SWIG_fail;
+        }
+         $1 = CSLAddNameValue( $1, pszK, pszV );
+
+        GDALPythonFreeCStr(pszK, bFreeK);
+        GDALPythonFreeCStr(pszV, bFreeV);
         Py_DECREF(it);
       }
       Py_DECREF(item_list);

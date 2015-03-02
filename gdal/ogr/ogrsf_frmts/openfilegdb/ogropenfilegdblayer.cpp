@@ -211,6 +211,24 @@ int OGROpenFileGDBLayer::BuildGeometryColumnGDBv10()
         OGROpenFileGDBGeomFieldDefn* poGeomFieldDefn =
             new OGROpenFileGDBGeomFieldDefn(NULL, pszShapeFieldName, m_eGeomType);
 
+        CPLXMLNode* psGPFieldInfoExs = CPLGetXMLNode(psInfo, "GPFieldInfoExs");
+        if( psGPFieldInfoExs )
+        {
+            for(CPLXMLNode* psChild = psGPFieldInfoExs->psChild;
+                            psChild != NULL;
+                            psChild = psChild->psNext )
+            {
+                if( psChild->eType != CXT_Element )
+                    continue;
+                if( EQUAL(psChild->pszValue, "GPFieldInfoEx") &&
+                    EQUAL(CPLGetXMLValue(psChild, "Name", ""), pszShapeFieldName) )
+                {
+                    poGeomFieldDefn->SetNullable( CSLTestBoolean(CPLGetXMLValue( psChild, "IsNullable", "TRUE" )) );
+                    break;
+                }
+            }
+        }
+
         OGRSpatialReference* poSRS = NULL;
         if( nWKID > 0 || nLatestWKID > 0 )
         {
@@ -282,7 +300,7 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
         return m_bValidLayerDefn;
 
     m_poLyrTable = new FileGDBTable();
-    if( !(m_poLyrTable->Open(m_osGDBFilename)) )
+    if( !(m_poLyrTable->Open(m_osGDBFilename, GetDescription())) )
     {
         delete m_poLyrTable;
         m_poLyrTable = NULL;
@@ -355,6 +373,7 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
                                         m_poFeatureDefn->GetGeomFieldDefn(0);
             poGeomFieldDefn->SetType(m_eGeomType);
         }
+        poGeomFieldDefn->SetNullable(poGDBGeomField->IsNullable());
 
         OGRSpatialReference* poSRS = NULL;
         if( poGDBGeomField->GetWKT().size() && 
@@ -374,6 +393,9 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
         }
     }
 
+    CPLXMLNode* psTree = NULL;
+    CPLXMLNode* psGPFieldInfoExs = NULL;
+
     for(int i=0;i<m_poLyrTable->GetFieldCount();i++)
     {
         if( i == m_iGeomFieldIdx )
@@ -382,7 +404,7 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
         const FileGDBField* poGDBField = m_poLyrTable->GetField(i);
         OGRFieldType eType = OFTString;
         OGRFieldSubType eSubType = OFSTNone;
-        /* int nWidth = 0; */
+        int nWidth = poGDBField->GetMaxWidth();
         switch( poGDBField->GetType() )
         {
             case FGFT_INT16:
@@ -434,9 +456,110 @@ int OGROpenFileGDBLayer::BuildLayerDefinition()
         }
         OGRFieldDefn oFieldDefn(poGDBField->GetName().c_str(), eType);
         oFieldDefn.SetSubType(eSubType);
-        /* oFieldDefn.SetWidth(nWidth); */
+        /* On creation in the FileGDB driver (GDBFieldTypeToWidthPrecision) if string width is 0, we pick up */
+        /* 65535 by default to mean unlimited string length, but we don't want */
+        /* to advertize such a big number */
+        if( eType == OFTString && nWidth < 65535 )
+            oFieldDefn.SetWidth(nWidth);
+        oFieldDefn.SetNullable(poGDBField->IsNullable());
+        const OGRField* psDefault = poGDBField->GetDefault();
+        if( !(psDefault->Set.nMarker1 == OGRUnsetMarker &&
+              psDefault->Set.nMarker2 == OGRUnsetMarker) )
+        {
+            if( eType == OFTString )
+            {
+                CPLString osDefault("'");
+                char* pszTmp = CPLEscapeString(psDefault->String, -1, CPLES_SQL);
+                osDefault += pszTmp;
+                CPLFree(pszTmp);
+                osDefault += "'";
+                oFieldDefn.SetDefault(osDefault);
+            }
+            else if( eType == OFTInteger || eType == OFTReal )
+            {
+                /* GDBs and the FileGDB SDK aren't always reliable for numeric values */
+                /* It often occurs that the XML definition in a00000004.gdbtable doesn't */
+                /* match the default values (in binary) found in the field definition */
+                /* section of the .gdbtable of the layers themselves */
+                /* So check consistency */
+                if( m_osDefinition.size() && psTree == NULL )
+                {
+                    psTree = CPLParseXMLString(m_osDefinition.c_str());
+                    if( psTree != NULL )
+                    {
+                        CPLStripXMLNamespace( psTree, NULL, TRUE );
+                        CPLXMLNode* psInfo = CPLSearchXMLNode( psTree, "=DEFeatureClassInfo" );
+                        if( psInfo == NULL )
+                            psInfo = CPLSearchXMLNode( psTree, "=DETableInfo" );
+                        if( psInfo != NULL )
+                            psGPFieldInfoExs = CPLGetXMLNode(psInfo, "GPFieldInfoExs");
+                    }
+                }
+                const char* pszDefaultValue = NULL;
+                if( psGPFieldInfoExs != NULL )
+                {
+                    for(CPLXMLNode* psChild = psGPFieldInfoExs->psChild;
+                                    psChild != NULL;
+                                    psChild = psChild->psNext )
+                    {
+                        if( psChild->eType != CXT_Element )
+                            continue;
+                        if( EQUAL(psChild->pszValue, "GPFieldInfoEx") &&
+                            EQUAL(CPLGetXMLValue(psChild, "Name", ""), poGDBField->GetName().c_str()) )
+                        {
+                            /* From ArcGIS this is called DefaultValueNumeric for integer and real */
+                            /* From FileGDB API this is called DefaultValue xsi:type=xs:int for integer and DefaultValueNumeric for real ... */
+                            pszDefaultValue = CPLGetXMLValue( psChild, "DefaultValueNumeric", NULL );
+                            if( pszDefaultValue == NULL )
+                                pszDefaultValue = CPLGetXMLValue( psChild, "DefaultValue", NULL );
+                            break;
+                        }
+                    }
+                }
+                if( pszDefaultValue != NULL )
+                {
+                    if( eType == OFTInteger )
+                    {
+                        if ( atoi(pszDefaultValue) != psDefault->Integer)
+                        {
+                            CPLDebug("OpenFileGDB", "For field %s, XML definition mentions %s "
+                                     "as default value whereas .gdbtable header mentions %d. Using %s",
+                                     poGDBField->GetName().c_str(),
+                                     pszDefaultValue,
+                                     psDefault->Integer,
+                                     pszDefaultValue);
+                        }
+                        oFieldDefn.SetDefault(pszDefaultValue);
+                    }
+                    else if( eType == OFTReal )
+                    {
+                        if( fabs(CPLAtof(pszDefaultValue) -  psDefault->Real) > 1e-15 )
+                        {
+                            CPLDebug("OpenFileGDB", "For field %s, XML definition mentions %s "
+                                     "as default value whereas .gdbtable header mentions %.18g. Using %s",
+                                     poGDBField->GetName().c_str(),
+                                     pszDefaultValue,
+                                     psDefault->Real,
+                                     pszDefaultValue);
+                        }
+                        oFieldDefn.SetDefault(pszDefaultValue);
+                    }
+                }
+            }
+            else if( eType == OFTDateTime )
+                oFieldDefn.SetDefault(CPLSPrintf("'%04d/%02d/%02d %02d:%02d:%02d'",
+                                                 psDefault->Date.Year,
+                                                 psDefault->Date.Month,
+                                                 psDefault->Date.Day,
+                                                 psDefault->Date.Hour,
+                                                 psDefault->Date.Minute,
+                                                 psDefault->Date.Second));
+        }
         m_poFeatureDefn->AddFieldDefn(&oFieldDefn);
     }
+
+    if( psTree != NULL )
+        CPLDestroyXMLNode(psTree);
 
     return TRUE;
 }
@@ -571,11 +694,11 @@ static int CompValues(OGRFieldDefn* poFieldDefn,
             if (poValue1->field_type == SWQ_FLOAT)
                 n1 = (int) poValue1->float_value;
             else
-                n1 = poValue1->int_value;
+                n1 = (int) poValue1->int_value;
             if (poValue2->field_type == SWQ_FLOAT)
                 n2 = (int) poValue2->float_value;
             else
-                n2 = poValue2->int_value;
+                n2 = (int) poValue2->int_value;
             if( n1 < n2 )
                 return -1;
             if( n1 == n2 )
@@ -734,7 +857,7 @@ int FillTargetValueFromSrcExpr( OGRFieldDefn* poFieldDefn,
             if (poSrcValue->field_type == SWQ_FLOAT)
                 poTargetValue->Integer = (int) poSrcValue->float_value;
             else
-                poTargetValue->Integer = poSrcValue->int_value;
+                poTargetValue->Integer = (int) poSrcValue->int_value;
             break;
 
         case OFTReal:
@@ -1321,7 +1444,7 @@ OGRFeature* OGROpenFileGDBLayer::GetNextFeature()
 /*                          GetFeature()                               */
 /***********************************************************************/
 
-OGRFeature* OGROpenFileGDBLayer::GetFeature( long nFeatureId )
+OGRFeature* OGROpenFileGDBLayer::GetFeature( GIntBig nFeatureId )
 {
     if( !BuildLayerDefinition() )
         return NULL;
@@ -1352,7 +1475,7 @@ OGRFeature* OGROpenFileGDBLayer::GetFeature( long nFeatureId )
 /*                         SetNextByIndex()                            */
 /***********************************************************************/
 
-OGRErr OGROpenFileGDBLayer::SetNextByIndex( long nIndex )
+OGRErr OGROpenFileGDBLayer::SetNextByIndex( GIntBig nIndex )
 {
     if( m_poIterator != NULL )
         return OGRLayer::SetNextByIndex(nIndex);
@@ -1367,14 +1490,14 @@ OGRErr OGROpenFileGDBLayer::SetNextByIndex( long nIndex )
     {
         if( nIndex < 0 || nIndex >= m_nFilteredFeatureCount )
             return OGRERR_FAILURE;
-        m_iCurFeat = nIndex;
+        m_iCurFeat = (int) nIndex;
         return OGRERR_NONE;
     }
     else if( m_poLyrTable->GetValidRecordCount() == m_poLyrTable->GetTotalRecordCount() )
     {
         if( nIndex < 0 || nIndex >= m_poLyrTable->GetValidRecordCount() )
             return OGRERR_FAILURE;
-        m_iCurFeat = nIndex;
+        m_iCurFeat = (int) nIndex;
         return OGRERR_NONE;
     }
     else
@@ -1410,7 +1533,7 @@ OGRErr OGROpenFileGDBLayer::GetExtent( OGREnvelope *psExtent, int bForce )
 /*                         GetFeatureCount()                           */
 /***********************************************************************/
 
-int OGROpenFileGDBLayer::GetFeatureCount( int bForce )
+GIntBig OGROpenFileGDBLayer::GetFeatureCount( int bForce )
 {
     if( !BuildLayerDefinition() )
         return 0;

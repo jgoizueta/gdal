@@ -29,10 +29,7 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import os
-import shutil
 import sys
-import string
 import math
 
 sys.path.append( '../pymod' )
@@ -92,7 +89,7 @@ def ogr_wasp_elevation_from_linestring_z():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     for line in f:
@@ -153,7 +150,7 @@ def ogr_wasp_elevation_from_linestring_z_toler():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     for line in f:
@@ -214,7 +211,7 @@ def ogr_wasp_elevation_from_linestring_field():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     for line in f:
@@ -270,7 +267,7 @@ def ogr_wasp_roughness_from_linestring_fields():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     for line in f:
@@ -332,7 +329,7 @@ def ogr_wasp_roughness_from_polygon_z():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     res = set()
@@ -352,7 +349,7 @@ def ogr_wasp_roughness_from_polygon_z():
         return 'fail'
 
     if res != set([(0,1),(0,5),(1,2),(2,3),(3,4),(4,5)]):
-        print res
+        print(res)
         gdaltest.post_reason( 'wrong values f=in boundaries' )
         return 'fail'
     return 'success'
@@ -399,7 +396,7 @@ def ogr_wasp_roughness_from_polygon_field():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     res = set()
@@ -419,7 +416,7 @@ def ogr_wasp_roughness_from_polygon_field():
         return 'fail'
 
     if res != set([(0,1),(0,5),(1,2),(2,3),(3,4),(4,5)]):
-        print res
+        print(res)
         gdaltest.post_reason( 'wrong values f=in boundaries' )
         return 'fail'
     return 'success'
@@ -466,7 +463,7 @@ def ogr_wasp_merge():
     del layer
 
     f = open('tmp.map')
-    for i in range(4): f.next()
+    for i in range(4): f.readline()
     i = 0
     j = 0
     res = [] 
@@ -485,8 +482,8 @@ def ogr_wasp_merge():
         gdaltest.post_reason( 'there should be 6 boundaries and there are %d' %j )
         return 'fail'
 
-    if res != [(0,1) for i in range(6)]:
-        print res
+    if res != [(0,1) for k in range(6)]:
+        print(res)
         gdaltest.post_reason( 'wrong values f=in boundaries' )
         return 'fail'
     return 'success'

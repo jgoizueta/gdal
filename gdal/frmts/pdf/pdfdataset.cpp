@@ -87,7 +87,7 @@ static double Get(GDALPDFObject* poObj, int nIndice = -1);
 
 #ifdef HAVE_POPPLER
 
-static void* hGlobalParamsMutex = NULL;
+static CPLMutex* hGlobalParamsMutex = NULL;
 
 /************************************************************************/
 /*                          ObjectAutoFree                              */
@@ -128,12 +128,9 @@ class GDALPDFOutputDev : public SplashOutputDev
 
     public:
         GDALPDFOutputDev(SplashColorMode colorModeA, int bitmapRowPadA,
-                         GBool reverseVideoA, SplashColorPtr paperColorA,
-                         GBool bitmapTopDownA = gTrue,
-                         GBool allowAntialiasA = gTrue) :
+                         GBool reverseVideoA, SplashColorPtr paperColorA) :
                 SplashOutputDev(colorModeA, bitmapRowPadA,
-                                reverseVideoA, paperColorA,
-                                bitmapTopDownA, allowAntialiasA),
+                                reverseVideoA, paperColorA),
                 bEnableVector(TRUE),
                 bEnableText(TRUE),
                 bEnableBitmap(TRUE) {}
@@ -2790,6 +2787,18 @@ GDALDataset *PDFDataset::Open( GDALOpenInfo * poOpenInfo )
         return NULL;
     }
 
+    /* Sanity check to validate page count */
+    if( iPage != nPages )
+    {
+        poPagePoppler = poCatalogPoppler->getPage(nPages);
+        if ( poPagePoppler == NULL || !poPagePoppler->isOk() )
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "Invalid PDF : invalid page count");
+            PDFFreeDoc(poDocPoppler);
+            return NULL;
+        }
+    }
+
     poPagePoppler = poCatalogPoppler->getPage(iPage);
     if ( poPagePoppler == NULL || !poPagePoppler->isOk() )
     {
@@ -2837,7 +2846,10 @@ GDALDataset *PDFDataset::Open( GDALOpenInfo * poOpenInfo )
                 if (EQUAL(pszUserPwd, "ASK_INTERACTIVE"))
                 {
                     printf( "Enter password (will be echo'ed in the console): " );
-                    fgets( szPassword, sizeof(szPassword), stdin );
+                    if (0 == fgets( szPassword, sizeof(szPassword), stdin ))
+                    {
+                      fprintf(stderr, "WARNING: Error getting password.\n");
+                    }
                     szPassword[sizeof(szPassword)-1] = 0;
                     char* sz10 = strchr(szPassword, '\n');
                     if (sz10)
@@ -2903,6 +2915,10 @@ GDALDataset *PDFDataset::Open( GDALOpenInfo * poOpenInfo )
 
     try
     {
+        /* Sanity check to validate page count */
+        if( iPage != nPages )
+            poPagePodofo = poDocPodofo->GetPage(nPages - 1);
+
         poPagePodofo = poDocPodofo->GetPage(iPage - 1);
     }
     catch(PoDoFo::PdfError& oError)
@@ -3944,10 +3960,7 @@ int PDFDataset::ParseProjDict(GDALPDFDictionary* poProjDict)
                 {
                     double dfSemiMinor = Get(poEllipsoidDict, "SemiMinorAxis");
                     CPLDebug("PDF", "Datum.Ellipsoid.SemiMinorAxis = %.16g", dfSemiMinor);
-                    if( ABS(dfSemiMajor/dfSemiMinor) - 1.0 < 0.0000000000001 )
-                        dfInvFlattening = 0.0;
-                    else
-                        dfInvFlattening = -1.0 / (dfSemiMinor/dfSemiMajor - 1.0);
+                    dfInvFlattening = OSRCalcInvFlattening(dfSemiMajor, dfSemiMinor);
                 }
                 
                 if( dfSemiMajor != 0.0 && dfInvFlattening != -1.0 )

@@ -127,8 +127,8 @@ double CPLAtofDelim(const char *nptr, char point)
  * Existance of this function does not mean you should always use it.
  * Sometimes you should use standard locale aware atof(3) and its family. When
  * you need to process the user's input (for example, command line parameters)
- * use atof(3), because user works in localized environment and her input will
- * be done accordingly the locale set. In particular that means we should not
+ * use atof(3), because the user works in a localized environment and the user's input will
+ * be done according to the locale set. In particular that means we should not
  * make assumptions about character used as decimal delimiter, it can be
  * either "." or ",".
  * But when you are parsing some ASCII file in predefined format, you most
@@ -265,23 +265,41 @@ double CPLStrtodDelim(const char *nptr, char **endptr, char point)
     {
         if (strcmp(nptr, "-1.#QNAN") == 0 ||
             strcmp(nptr, "-1.#IND") == 0)
+        {
+            if( endptr ) *endptr = (char*)nptr + strlen(nptr);
             return NAN;
+        }
 
         if (strcmp(nptr,"-inf") == 0 ||
             strcmp(nptr,"-1.#INF") == 0)
+        {
+            if( endptr ) *endptr = (char*)nptr + strlen(nptr);
             return NEG_INFINITY;
+        }
     }
     else if (nptr[0] == '1')
     {
         if (strcmp(nptr, "1.#QNAN") == 0)
+        {
+            if( endptr ) *endptr = (char*)nptr + strlen(nptr);
             return NAN;
+        }
         if (strcmp (nptr,"1.#INF") == 0)
+        {
+            if( endptr ) *endptr = (char*)nptr + strlen(nptr);
             return INFINITY;
+        }
     }
     else if (nptr[0] == 'i' && strcmp(nptr,"inf") == 0)
+    {
+        if( endptr ) *endptr = (char*)nptr + strlen(nptr);
         return INFINITY;
+    }
     else if (nptr[0] == 'n' && strcmp(nptr,"nan") == 0)
+    {
+        if( endptr ) *endptr = (char*)nptr + strlen(nptr);
         return NAN;
+    }
 
 /* -------------------------------------------------------------------- */
 /*  We are implementing a simple method here: copy the input string     */

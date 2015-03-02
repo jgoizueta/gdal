@@ -46,7 +46,17 @@
 /************************************************************************/
 
 /**
- * Definition of an attribute of an OGRFeatureDefn.
+ * Definition of an attribute of an OGRFeatureDefn. A field is described by :
+ * <ul>
+ * <li>a name. See SetName() / GetNameRef()</li>
+ * <li>a type: OFTString, OFTInteger, OFTReal, ... See SetType() / GetType()</li>
+ * <li>a subtype (optional): OFSTBoolean, ... See SetSubType() / GetSubType()</li>
+ * <li>a width (optional): maximal number of characters. See SetWidth() / GetWidth()</li>
+ * <li>a precision (optional): number of digits after decimal point. See SetPrecision() / GetPrecision()</li>
+ * <li>a NOT NULL constraint (optional). See SetNullable() / IsNullable()</li>
+ * <li>a default value (optional).  See SetDefault() / GetDefault()</li>
+ * <li>a boolean to indicate whether it should be ignored when retrieving features.  See SetIgnored() / IsIgnored()</li>
+ * </ul>
  */
 
 class CPL_DLL OGRFieldDefn
@@ -57,10 +67,12 @@ class CPL_DLL OGRFieldDefn
     OGRJustification    eJustify;               
     int                 nWidth;                 /* zero is variable */
     int                 nPrecision;
-    OGRField            uDefault;
+    char                *pszDefault;
     
     int                 bIgnore;
     OGRFieldSubType     eSubType;
+    
+    int                 bNullable;
 
     void                Initialize( const char *, OGRFieldType );
     
@@ -94,11 +106,15 @@ class CPL_DLL OGRFieldDefn
     void                Set( const char *, OGRFieldType, int = 0, int = 0,
                              OGRJustification = OJUndefined );
 
-    void                SetDefault( const OGRField * );
-    const OGRField     *GetDefaultRef() { return &uDefault; }
-    
+    void                SetDefault( const char* );
+    const char         *GetDefault() const;
+    int                 IsDefaultDriverSpecific() const;
+
     int                 IsIgnored() { return bIgnore; }
     void                SetIgnored( int bIgnoreIn ) { bIgnore = bIgnoreIn; }
+
+    int                 IsNullable() const { return bNullable; }
+    void                SetNullable( int bNullableIn ) { bNullable = bNullableIn; }
 
     int                 IsSame( const OGRFieldDefn * ) const;
 };
@@ -108,10 +124,17 @@ class CPL_DLL OGRFieldDefn
 /************************************************************************/
 
 /**
- * Definition of a geometry field of an OGRFeatureDefn. A geometry field
- * is described by a name, a geometry type and a spatial reference system.
+ * Definition of a geometry field of an OGRFeatureDefn. A geometry field is
+ * described by :
+ * <ul>
+ * <li>a name. See SetName() / GetNameRef()</li>
+ * <li>a type: wkbPoint, wkbLineString, ... See SetType() / GetType()</li>
+ * <li>a spatial reference system (optional). See SetSpatialRef() / GetSpatialRef()</li>
+ * <li>a NOT NULL constraint (optional). See SetNullable() / IsNullable()</li>
+ * <li>a boolean to indicate whether it should be ignored when retrieving features.  See SetIgnored() / IsIgnored()</li>
+ * </ul>
  *
- * @since OGR 2.0
+ * @since OGR 1.11
  */
 
 class CPL_DLL OGRGeomFieldDefn
@@ -122,6 +145,7 @@ protected:
         OGRSpatialReference* poSRS;
 
         int                 bIgnore;
+        int                 bNullable;
 
         void                Initialize( const char *, OGRwkbGeometryType );
 
@@ -143,6 +167,9 @@ public:
         int                 IsIgnored() { return bIgnore; }
         void                SetIgnored( int bIgnoreIn ) { bIgnore = bIgnoreIn; }
 
+        int                 IsNullable() const { return bNullable; }
+        void                SetNullable( int bNullableIn ) { bNullable = bNullableIn; }
+
         int                 IsSame( OGRGeomFieldDefn * );
 };
 
@@ -159,11 +186,12 @@ public:
  * of features but doesn't necessarily relate to all of a layer, or just one
  * layer.
  *
- * This object also can contain some other information such as a name, the
- * base geometry type and potentially other metadata.
+ * This object also can contain some other information such as a name and
+ * potentially other metadata.
  *
+ * It is essentially a collection of field descriptions (OGRFieldDefn class).
  * Starting with GDAL 1.11, in addition to attribute fields, it can also
- * contain multiple geometry fields.
+ * contain multiple geometry fields (OGRGeomFieldDefn class).
  *
  * It is reasonable for different translators to derive classes from
  * OGRFeatureDefn with additional translator specific information. 
@@ -238,7 +266,7 @@ class CPL_DLL OGRFeature
 {
   private:
 
-    long                nFID;
+    GIntBig              nFID;
     OGRFeatureDefn      *poDefn;
     OGRGeometry        **papoGeometries;
     OGRField            *pauFields;
@@ -288,9 +316,11 @@ class CPL_DLL OGRFeature
     OGRField           *GetRawFieldRef( int i ) { return pauFields + i; }
 
     int                 GetFieldAsInteger( int i );
+    GIntBig             GetFieldAsInteger64( int i );
     double              GetFieldAsDouble( int i );
     const char         *GetFieldAsString( int i );
     const int          *GetFieldAsIntegerList( int i, int *pnCount );
+    const GIntBig      *GetFieldAsInteger64List( int i, int *pnCount );
     const double       *GetFieldAsDoubleList( int i, int *pnCount );
     char              **GetFieldAsStringList( int i );
     GByte              *GetFieldAsBinary( int i, int *pnCount );
@@ -301,6 +331,8 @@ class CPL_DLL OGRFeature
 
     int                 GetFieldAsInteger( const char *pszFName )
                       { return GetFieldAsInteger( GetFieldIndex(pszFName) ); }
+    GIntBig             GetFieldAsInteger64( const char *pszFName )
+                      { return GetFieldAsInteger64( GetFieldIndex(pszFName) ); }
     double              GetFieldAsDouble( const char *pszFName )
                       { return GetFieldAsDouble( GetFieldIndex(pszFName) ); }
     const char         *GetFieldAsString( const char *pszFName )
@@ -308,6 +340,10 @@ class CPL_DLL OGRFeature
     const int          *GetFieldAsIntegerList( const char *pszFName,
                                                int *pnCount )
                       { return GetFieldAsIntegerList( GetFieldIndex(pszFName),
+                                                      pnCount ); }
+    const GIntBig      *GetFieldAsInteger64List( const char *pszFName,
+                                               int *pnCount )
+                      { return GetFieldAsInteger64List( GetFieldIndex(pszFName),
                                                       pnCount ); }
     const double       *GetFieldAsDoubleList( const char *pszFName,
                                               int *pnCount )
@@ -317,9 +353,11 @@ class CPL_DLL OGRFeature
                       { return GetFieldAsStringList(GetFieldIndex(pszFName)); }
 
     void                SetField( int i, int nValue );
+    void                SetField( int i, GIntBig nValue );
     void                SetField( int i, double dfValue );
     void                SetField( int i, const char * pszValue );
     void                SetField( int i, int nCount, int * panValues );
+    void                SetField( int i, int nCount, const GIntBig * panValues );
     void                SetField( int i, int nCount, double * padfValues );
     void                SetField( int i, char ** papszValues );
     void                SetField( int i, OGRField * puValue );
@@ -330,12 +368,17 @@ class CPL_DLL OGRFeature
 
     void                SetField( const char *pszFName, int nValue )
                            { SetField( GetFieldIndex(pszFName), nValue ); }
+    void                SetField( const char *pszFName, GIntBig nValue )
+                           { SetField( GetFieldIndex(pszFName), nValue ); }
     void                SetField( const char *pszFName, double dfValue )
                            { SetField( GetFieldIndex(pszFName), dfValue ); }
     void                SetField( const char *pszFName, const char * pszValue)
                            { SetField( GetFieldIndex(pszFName), pszValue ); }
     void                SetField( const char *pszFName, int nCount,
                                   int * panValues )
+                         { SetField(GetFieldIndex(pszFName),nCount,panValues);}
+    void                SetField( const char *pszFName, int nCount,
+                                  const GIntBig * panValues )
                          { SetField(GetFieldIndex(pszFName),nCount,panValues);}
     void                SetField( const char *pszFName, int nCount,
                                   double * padfValues )
@@ -352,8 +395,8 @@ class CPL_DLL OGRFeature
                                        nYear, nMonth, nDay, 
                                        nHour, nMinute, nSecond, nTZFlag ); }
 
-    long                GetFID() { return nFID; }
-    virtual OGRErr      SetFID( long nFIDIn );
+    GIntBig             GetFID() { return nFID; }
+    virtual OGRErr      SetFID( GIntBig nFIDIn );
 
     void                DumpReadable( FILE *, char** papszOptions = NULL );
 
@@ -365,6 +408,11 @@ class CPL_DLL OGRFeature
                                      int *panRemapSource );
     OGRErr              RemapGeomFields( OGRFeatureDefn *poNewDefn, 
                                      int *panRemapSource );
+
+    int                 Validate( int nValidateFlags,
+                                  int bEmitError );
+    void                FillUnsetWithDefault(int bNotNullableOnly,
+                                             char** papszOptions );
 
     virtual const char *GetStyleString();
     virtual void        SetStyleString( const char * );
@@ -392,7 +440,7 @@ class CPL_DLL OGRFeatureQuery
 
     char          **FieldCollector( void *, char ** );
 
-    long       *EvaluateAgainstIndices( swq_expr_node*, OGRLayer *, int& nFIDCount);
+    GIntBig       *EvaluateAgainstIndices( swq_expr_node*, OGRLayer *, GIntBig& nFIDCount);
     
     int         CanUseIndex( swq_expr_node*, OGRLayer * );
     
@@ -403,7 +451,7 @@ class CPL_DLL OGRFeatureQuery
     OGRErr      Compile( OGRFeatureDefn *, const char * );
     int         Evaluate( OGRFeature * );
 
-    long       *EvaluateAgainstIndices( OGRLayer *, OGRErr * );
+    GIntBig       *EvaluateAgainstIndices( OGRLayer *, OGRErr * );
     
     int         CanUseIndex( OGRLayer * );
 

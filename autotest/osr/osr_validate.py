@@ -29,7 +29,6 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import os
 import sys
 
 sys.path.append( '../pymod' )
@@ -69,7 +68,7 @@ def osr_validate_3():
     srs = osr.SpatialReference()
     
     srs.ImportFromWkt("""COMPD_CS[]""")
-    print srs.Validate()
+    print(srs.Validate())
     
     srs.ImportFromWkt("""COMPD_CS["MYNAME",GEOGCS[]]""")
     if srs.Validate() == 0:

@@ -73,12 +73,15 @@
 
 #if ECWSDK_VERSION < 40
 
-#if !defined(NO_COMPRESS)
+#if !defined(NO_COMPRESS) && !defined(HAVE_COMPRESS)
 #  define HAVE_COMPRESS
 #endif
 
 #else
     #if ECWSDK_VERSION>=50
+		#if ECWSDK_VERSION>=51
+			#define JPEG2000_DOMAIN_NAME "JPEG2000"
+		#endif
         #include <NCSECWHeaderEditor.h>
         #include "NCSEcw/SDK/Box.h"
     #else 
@@ -411,7 +414,7 @@ class ECWAsyncReader : public GDALAsyncReader
 {
 private:
     CNCSJP2FileView *poFileView;
-    void            *hMutex;
+    CPLMutex        *hMutex;
     int              bUsingCustomStream;
 
     int              bUpdateReady;
@@ -644,7 +647,7 @@ class ECWRasterBand : public GDALPamRasterBand
 
   public:
 
-                   ECWRasterBand( ECWDataset *, int, int = -1 );
+                   ECWRasterBand( ECWDataset *, int, int iOverview, char** papszOpenOptions );
                    ~ECWRasterBand();
 
     virtual CPLErr IReadBlock( int, int, void * );

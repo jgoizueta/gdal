@@ -407,6 +407,10 @@ int swq_select::PushField( swq_expr_node *poExpr, const char *pszAlias,
         {
             col_def->target_type = SWQ_INTEGER;
         }
+        else if( strcasecmp(pszTypeName,"bigint") == 0 )
+        {
+            col_def->target_type = SWQ_INTEGER64;
+        }
         else if( strcasecmp(pszTypeName,"smallint") == 0 )
         {
             col_def->target_type = SWQ_INTEGER;
@@ -472,7 +476,7 @@ int swq_select::PushField( swq_expr_node *poExpr, const char *pszAlias,
                 // SRID
                 if( poExpr->nSubExprCount > 3 )
                 {
-                    col_def->nSRID = poExpr->papoSubExpr[3]->int_value;
+                    col_def->nSRID = (int)poExpr->papoSubExpr[3]->int_value;
                 }
             }
         }
@@ -492,13 +496,20 @@ int swq_select::PushField( swq_expr_node *poExpr, const char *pszAlias,
                     result_columns--;
                     return FALSE;
                 }
-                col_def->field_length = poExpr->papoSubExpr[2]->int_value;
+                col_def->field_length = (int)poExpr->papoSubExpr[2]->int_value;
             }
 
             // field width.
             if( poExpr->nSubExprCount > 3 && parse_precision )
             {
-                col_def->field_precision = poExpr->papoSubExpr[3]->int_value;
+                col_def->field_precision = (int)poExpr->papoSubExpr[3]->int_value;
+                if( col_def->field_precision == 0 )
+                {
+                    if( col_def->field_length < 10 )
+                        col_def->target_type = SWQ_INTEGER;
+                    else if( col_def->field_length < 19 )
+                        col_def->target_type = SWQ_INTEGER64;
+                }
             }
         }
     }

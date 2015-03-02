@@ -101,7 +101,7 @@ IGMLReader *CreateGMLReader(int bUseExpatParserPreferably,
 
 OGRGMLXercesState GMLReader::m_eXercesInitState = OGRGML_XERCES_UNINITIALIZED;
 int GMLReader::m_nInstanceCount = 0;
-void *GMLReader::hMutex = NULL;
+CPLMutex *GMLReader::hMutex = NULL;
 
 /************************************************************************/
 /*                             GMLReader()                              */
@@ -1353,7 +1353,7 @@ int GMLReader::PrescanForSchema( int bGetExtents, int bAnalyzeSRSPerFeature )
         if( papsGeometry != NULL && papsGeometry[0] != NULL )
         {
             if( poClass->GetGeometryPropertyCount() == 0 )
-                poClass->AddGeometryProperty( new GMLGeometryPropertyDefn( "", "", wkbUnknown ) );
+                poClass->AddGeometryProperty( new GMLGeometryPropertyDefn( "", "", wkbUnknown, -1, TRUE ) );
         }
 
 #ifdef SUPPORT_GEOMETRY

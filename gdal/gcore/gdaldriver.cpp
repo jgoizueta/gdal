@@ -835,15 +835,14 @@ GDALDatasetH CPL_STDCALL GDALCreateCopy( GDALDriverH hDriver,
 CPLErr GDALDriver::QuietDelete( const char *pszName )
 
 {
-    CPLPushErrorHandler(CPLQuietErrorHandler);
-    GDALDriver *poDriver = (GDALDriver*) GDALIdentifyDriver( pszName, NULL );
-    CPLPopErrorHandler();
-
-    if( poDriver == NULL )
-        return CE_None;
-
     VSIStatBufL sStat;
     int bExists = VSIStatExL(pszName, &sStat, VSI_STAT_EXISTS_FLAG | VSI_STAT_NATURE_FLAG) == 0;
+
+#ifdef S_ISFIFO
+    if( bExists && S_ISFIFO(sStat.st_mode) )
+        return CE_None;
+#endif
+
     if( bExists &&
         VSI_ISDIR(sStat.st_mode) )
     {
@@ -851,6 +850,13 @@ CPLErr GDALDriver::QuietDelete( const char *pszName )
         /* Necessary to avoid ogr_mitab_12 to destroy file created at ogr_mitab_7 */
         return CE_None;
     }
+
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    GDALDriver *poDriver = (GDALDriver*) GDALIdentifyDriver( pszName, NULL );
+    CPLPopErrorHandler();
+
+    if( poDriver == NULL )
+        return CE_None;
 
     CPLDebug( "GDAL", "QuietDelete(%s) invoking Delete()", pszName );
 
@@ -1462,9 +1468,16 @@ int GDALValidateOptions( const char* pszOptionList,
                     break;
                 }
 
-                if (EQUAL(pszOptionName, pszKey) ||
-                    EQUAL(CPLGetXMLValue(psChildNode, "alias", ""), pszKey))
+                if (EQUAL(pszOptionName, pszKey) )
                 {
+                    break;
+                }
+                const char* pszAlias = CPLGetXMLValue(psChildNode, "alias",
+                            CPLGetXMLValue(psChildNode, "deprecated_alias", ""));
+                if (EQUAL(pszAlias, pszKey) )
+                {
+                    CPLDebug("GDAL", "Using deprecated alias '%s'. New name is '%s'",
+                             pszAlias, pszOptionName);
                     break;
                 }
             }
@@ -1483,6 +1496,35 @@ int GDALValidateOptions( const char* pszOptionList,
             papszOptionsToValidate ++;
             continue;
         }
+
+#ifdef DEBUG
+        CPLXMLNode* psChildSubNode = psChildNode->psChild;
+        while(psChildSubNode)
+        {
+            if( psChildSubNode->eType == CXT_Attribute )
+            {
+                if( !(EQUAL(psChildSubNode->pszValue, "name") ||
+                      EQUAL(psChildSubNode->pszValue, "alias") ||
+                      EQUAL(psChildSubNode->pszValue, "deprecated_alias") ||
+                      EQUAL(psChildSubNode->pszValue, "description") ||
+                      EQUAL(psChildSubNode->pszValue, "type") ||
+                      EQUAL(psChildSubNode->pszValue, "min") ||
+                      EQUAL(psChildSubNode->pszValue, "max") ||
+                      EQUAL(psChildSubNode->pszValue, "default")) )
+                {
+                    /* Driver error */
+                    CPLError(CE_Warning, CPLE_NotSupported,
+                             "%s : unhandled attribute '%s' for %s %s.",
+                             pszErrorMessageContainerName,
+                             psChildSubNode->pszValue,
+                             pszKey,
+                             pszErrorMessageOptionType);
+                }
+            }
+            psChildSubNode = psChildSubNode->psNext;
+        }
+#endif
+
         const char* pszType = CPLGetXMLValue(psChildNode, "type", NULL);
         const char* pszMin = CPLGetXMLValue(psChildNode, "min", NULL);
         const char* pszMax = CPLGetXMLValue(psChildNode, "max", NULL);

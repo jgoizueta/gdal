@@ -30,7 +30,6 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import os
 import sys
 
 sys.path.append( '../pymod' )
@@ -116,7 +115,7 @@ def ogr_rfc28_5():
 # Test support for a quoted field name.
 
 def ogr_rfc28_6():
-    gdaltest.lyr.SetAttributeFilter( "'EAS_ID' = 166" )
+    gdaltest.lyr.SetAttributeFilter( "\"EAS_ID\" = 166" )
 
     count = gdaltest.lyr.GetFeatureCount()
     if count != 1:
@@ -130,7 +129,7 @@ def ogr_rfc28_6():
 # test with distinguished name for field in where clause.
 
 def ogr_rfc28_7():
-    ql = gdaltest.ds.ExecuteSQL( "select eas_id from idlink where 'idlink.eas_id' = 166" )
+    ql = gdaltest.ds.ExecuteSQL( "select eas_id from idlink where \"idlink.eas_id\" = 166" )
     
     count = ql.GetFeatureCount()
     if count != 1:
@@ -144,7 +143,7 @@ def ogr_rfc28_7():
 # test with distinguished name for field in target columns.
 
 def ogr_rfc28_8():
-    ql = gdaltest.ds.ExecuteSQL( "select 'idlink.eas_id' from idlink where 'idlink.eas_id' = 166" )
+    ql = gdaltest.ds.ExecuteSQL( "select \"idlink.eas_id\" from idlink where \"idlink.eas_id\" = 166" )
     
     count = ql.GetFeatureCount()
     if count != 1:
@@ -167,7 +166,7 @@ def ogr_rfc28_8():
 def ogr_rfc28_9():
     ds = ogr.Open( 'data/oddname.csv')
     lyr = ds.GetLayer(0)
-    lyr.SetAttributeFilter( "'Funky @Name' = '32'" )
+    lyr.SetAttributeFilter( "\"Funky @Name\" = '32'" )
 
     count = lyr.GetFeatureCount()
     if count != 1:
@@ -186,7 +185,7 @@ def ogr_rfc28_9():
 
 def ogr_rfc28_10():
     ds = ogr.Open( 'data/oddname.csv')
-    lyr = ds.ExecuteSQL( "SELECT * from oddname where 'Funky @Name' = '32'" )
+    lyr = ds.ExecuteSQL( "SELECT * from oddname where \"Funky @Name\" = '32'" )
 
     count = lyr.GetFeatureCount()
     if count != 1:
@@ -207,7 +206,7 @@ def ogr_rfc28_10():
 
 def ogr_rfc28_11():
     ds = ogr.Open( 'data/oddname.csv')
-    lyr = ds.ExecuteSQL( "SELECT 'Funky @Name' from oddname where prime_meridian_code = '8902'" )
+    lyr = ds.ExecuteSQL( "SELECT \"Funky @Name\" from oddname where prime_meridian_code = '8902'" )
 
     count = lyr.GetFeatureCount()
     if count != 1:
@@ -365,7 +364,7 @@ def ogr_rfc28_17():
 # Test some special distinct cases.
 
 def ogr_rfc28_18():
-    lyr = gdaltest.ds.ExecuteSQL( "SELECT COUNT(distinct id), COUNT(distinct id) as 'xx' from departs" )
+    lyr = gdaltest.ds.ExecuteSQL( "SELECT COUNT(distinct id), COUNT(distinct id) as \"xx\" from departs" )
 
     expect = [ 1 ]
     tr = ogrtest.check_features_against_list( lyr, 'COUNT_id', expect )
@@ -603,15 +602,26 @@ def ogr_rfc28_28():
         formulas.append( '5.' + operator + '3.' )
         formulas.append( '5' + operator + '3.' )
         formulas.append( '5.' + operator + '3' )
+        formulas.append( '3000000000000' + operator + '3' )
+        if operator != '/':
+            formulas.append( '3' + operator + '3000000000000' )
+        formulas.append( '3000000000000' + operator + '3.' )
+        if operator != '/':
+            formulas.append( '3.' + operator + '3000000000000' )
 
     for formula in formulas:
         lyr = gdaltest.ds.ExecuteSQL( "SELECT " + formula + " from poly where fid = 0" )
         expect = [ eval(formula) ]
+        f = lyr.GetNextFeature()
+        got = f.GetField(0)
+        lyr.ResetReading()
         tr = ogrtest.check_features_against_list( lyr, 'field_1', expect )
         gdaltest.ds.ReleaseResultSet( lyr )
 
         if tr == 0:
             gdaltest.post_reason('bad result for %s' % formula)
+            print(expect)
+            print(got)
             return 'fail'
 
     operators = [ '<', '<=', '>', '>=', ' = ', '<>' ]
@@ -630,6 +640,9 @@ def ogr_rfc28_28():
         formulas.append( "'a'" + operator + "'a'" )
         formulas.append( "'a'" + operator + "'b'" )
         formulas.append( "'b'" + operator + "'a'" )
+        formulas.append( '3' + operator + '1000000000000' )
+        formulas.append( '1000000000000' + operator + '3' )
+        formulas.append( '1000000000000' + operator + '1000000000000' )
 
     for formula in formulas:
         expected_bool = eval(formula.replace(' = ','==').replace('<>','!='))
@@ -638,6 +651,7 @@ def ogr_rfc28_28():
             return ret
 
     formulas_and_expected_bool = [ [ '3 in (3,5)', True ],
+                                   [ '1000000000000 in (1000000000000, 1000000000001)', True],
                                    [ '4 in (3,5)', False ],
                                    [ '3. in (3.,4.)', True ],
                                    [ '4. in (3.,5.)', False ],
@@ -1007,6 +1021,54 @@ def ogr_rfc28_42():
     return 'success'
 
 ###############################################################################
+# Test integer64 support
+
+def ogr_rfc28_43():
+
+    ds = ogr.GetDriverByName('Memory').CreateDataSource('')
+    lyr = ds.CreateLayer('test')
+    fld_defn = ogr.FieldDefn('myint64', ogr.OFTInteger64)
+    lyr.CreateField(fld_defn)
+    feat = ogr.Feature(lyr.GetLayerDefn())
+    feat.SetField(0, -1000000000000)
+    lyr.CreateFeature(feat)
+    feat = ogr.Feature(lyr.GetLayerDefn())
+    feat.SetField(0, 100000000000)
+    lyr.CreateFeature(feat)
+
+    lyr = ds.ExecuteSQL( "SELECT 1000000000000, myint64, CAST(1 AS bigint), CAST(1 AS numeric(15,0)) FROM test WHERE myint64 < -9999999999 or myint64 > 9999999999" )
+    f = lyr.GetNextFeature()
+    if lyr.GetLayerDefn().GetFieldDefn(2).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(3).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if f.GetField(0) != 1000000000000 or f.GetField(1) != -1000000000000:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    gdaltest.ds.ReleaseResultSet( lyr )
+
+    lyr = ds.ExecuteSQL( "SELECT MIN(myint64), MAX(myint64), SUM(myint64) FROM test" )
+    f = lyr.GetNextFeature()
+    if f.GetField('MIN_myint64') != -1000000000000:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    if f.GetField('MAX_myint64') != 100000000000:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    if f.GetField('SUM_myint64') != -1000000000000 + 100000000000:
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    gdaltest.ds.ReleaseResultSet( lyr )
+
+    return 'success'
+
+###############################################################################
 def ogr_rfc28_cleanup():
     gdaltest.lyr = None
     gdaltest.ds.Destroy()
@@ -1058,6 +1120,7 @@ gdaltest_list = [
     ogr_rfc28_40,
     ogr_rfc28_41,
     ogr_rfc28_42,
+    ogr_rfc28_43,
     ogr_rfc28_cleanup ]
 
 if __name__ == '__main__':

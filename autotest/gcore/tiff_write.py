@@ -30,11 +30,9 @@
 import os
 import sys
 from osgeo import gdal
-import string
 import array
 import shutil
 from osgeo import osr
-import sys
 
 sys.path.append( '../pymod' )
 
@@ -474,8 +472,6 @@ def tiff_write_14():
 
 def tiff_write_15():
 
-    drv = gdal.GetDriverByName( 'GTiff' )
-
     ds_in = gdal.Open('data/byte.vrt')
 
     ds = gdaltest.tiff_drv.CreateCopy( 'tmp/tw_15.tif', ds_in, options=['PROFILE=BASELINE'] )
@@ -812,7 +808,6 @@ def tiff_write_20():
             return 'fail'
 
     new_ds = None
-    src_ds = None
 
     # Test just unsetting once, but leaving other unchanged
     ds = gdal.Open( 'tmp/tags.tif', gdal.GA_Update )
@@ -1046,7 +1041,7 @@ def tiff_write_27():
 
     ds = gdal.Open( 'tmp/ct16.tif' )
     new_ds = gdaltest.tiff_drv.CreateCopy( 'tmp/ct16_copy.tif', ds )
-    new_ds = None
+    del new_ds
     ds = None
 
     ds = gdal.Open( 'tmp/ct16_copy.tif' )
@@ -1208,7 +1203,7 @@ def tiff_write_32():
 
     # Test copy
     new_ds = gdaltest.tiff_drv.CreateCopy( 'tmp/byte_rotated_copy.tif', ds )
-    new_ds = None
+    del new_ds
 
     # Check copy
     ds = gdal.Open( 'tmp/byte_rotated_copy.tif' )
@@ -1222,7 +1217,6 @@ def tiff_write_32():
             return 'fail'
 
     ds = None
-    new_ds = None
 
     gdaltest.tiff_drv.Delete( 'tmp/byte_rotated.tif' )
     gdaltest.tiff_drv.Delete( 'tmp/byte_rotated_copy.tif' )
@@ -1512,7 +1506,7 @@ def tiff_write_44():
     ds2 = None
 
     ds2 = gdal.Open('tmp/tw_44_copy.tif')
-    bnd = ds.GetRasterBand(1)
+    bnd = ds2.GetRasterBand(1)
     md = bnd.GetMetadata('IMAGE_STRUCTURE')
     bnd = None
     if md['NBITS'] != '9':
@@ -1546,7 +1540,7 @@ def tiff_write_45():
     ds2 = None
 
     ds2 = gdal.Open('tmp/tw_45_copy.tif')
-    bnd = ds.GetRasterBand(1)
+    bnd = ds2.GetRasterBand(1)
     md = bnd.GetMetadata('IMAGE_STRUCTURE')
     bnd = None
     if md['NBITS'] != '17':
@@ -1668,7 +1662,7 @@ def tiff_write_49():
     # At this point, for the purpose of the copy, the dataset will have been opened as RAW
     if new_ds.GetRasterBand(1).GetRasterColorInterpretation()!= gdal.GCI_CyanBand:
         gdaltest.post_reason( 'Wrong color interpretation.')
-        print((ds.GetRasterBand(1).GetRasterColorInterpretation()))
+        print(new_ds.GetRasterBand(1).GetRasterColorInterpretation())
         return 'fail'
 
     new_ds = None
@@ -1703,7 +1697,7 @@ def tiff_write_50():
 
     if new_ds.GetRasterBand(1).GetRasterColorInterpretation()!= gdal.GCI_CyanBand:
         gdaltest.post_reason( 'Wrong color interpretation.')
-        print((ds.GetRasterBand(1).GetRasterColorInterpretation()))
+        print(new_ds.GetRasterBand(1).GetRasterColorInterpretation())
         return 'fail'
 
     new_ds = None
@@ -2382,12 +2376,22 @@ def tiff_write_70():
     ref_ds = None
 
     ds = gdaltest.tiff_drv.Create('tmp/tiff_write_70.tif', 32, 32, 1, gdal.GDT_Int16, options = ['SPARSE_OK=YES'] )
+    ds.GetRasterBand(1).SetNoDataValue(0)
+    if os.stat('tmp/tiff_write_70.tif').st_size > 8:
+        gdaltest.post_reason('directory should not be cryztalized')
+        print(os.stat('tmp/tiff_write_70.tif').st_size)
+        return 'fail'
+    ds = None
+
+    ds = gdal.Open('tmp/tiff_write_70.tif', gdal.GA_Update)
     ds.GetRasterBand(1).SetNoDataValue(-32768)
     ds = None
 
     ds = gdal.Open('tmp/tiff_write_70.tif')
     if ds.GetRasterBand(1).Checksum() != expected_cs:
+        gdaltest.post_reason('wrong checksum')
         print((ds.GetRasterBand(1).Checksum()))
+        print(expected_cs)
         return 'fail'
     ds = None
 
@@ -2469,8 +2473,8 @@ def tiff_write_72():
     for profile in ('GDALGeotiff', 'GEOTIFF', 'BASELINE'):
         src_ds = gdal.Open('tmp/byte.tif')
         out_ds = gdaltest.tiff_drv.CreateCopy('tmp/tiff_write_72.tif', src_ds, options = ['ENDIANNESS=LITTLE', 'PROFILE=' + profile])
+        del out_ds
         src_ds = None
-        out_ds = None
 
         fileobj = open( 'tmp/tiff_write_72.tif', mode='rb')
         binvalues = array.array('b')
@@ -3444,7 +3448,7 @@ def tiff_write_88():
             options = ['TILED=YES', 'COPY_SRC_OVERVIEWS=YES', 'ENDIANNESS=LITTLE'])
     gdal.PopErrorHandler()
     gdal.SetConfigOption('GTIFF_DELETE_ON_ERROR', None)
-    ds = None
+    del ds
     src_ds = None
 
     f = open('tmp/tiff_write_88_dst.tif', 'rb')
@@ -4004,7 +4008,7 @@ def tiff_write_99():
 
     src_ds = gdal.Open('data/rgbsmall.tif')
     new_ds = gdaltest.tiff_drv.CreateCopy( 'tmp/test_99.tif', src_ds, options = ['COMPRESS=JPEG'] )
-    new_ds = None
+    del new_ds
     src_ds = None
 
     ds = gdal.Open('tmp/test_99.tif')
@@ -4029,7 +4033,7 @@ def tiff_write_100():
     src_ds = gdaltest.tiff_drv.Create( '/vsimem/test_100_src.tif', 16, 16, 2 )
     src_ds.GetRasterBand(1).Fill(255)
     new_ds = gdaltest.tiff_drv.CreateCopy( '/vsimem/test_100_dst.tif', src_ds, options = ['COMPRESS=JPEG'] )
-    new_ds = None
+    del new_ds
     src_ds = None
 
     ds = gdal.Open('/vsimem/test_100_dst.tif')
@@ -4205,7 +4209,7 @@ def tiff_write_104():
     dst_ds = gdaltest.tiff_drv.CreateCopy( 'tmp/test_104.tif', src_ds )
 
     src_ds = None
-    dst_ds = None
+    del dst_ds
 
     ds = gdal.Open( 'tmp/test_104.tif' )
     wkt = ds.GetProjectionRef()
@@ -4694,7 +4698,7 @@ def tiff_write_123():
         return 'fail'
 
     new_ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_123.tif', src_ds)
-    new_ds = None
+    del new_ds
     statBuf = gdal.VSIStatL('/vsimem/tiff_write_123.tif.aux.xml', gdal.VSI_STAT_EXISTS_FLAG | gdal.VSI_STAT_NATURE_FLAG | gdal.VSI_STAT_SIZE_FLAG)
     if statBuf is not None:
         gdaltest.post_reason('did not expect PAM file')
@@ -5244,6 +5248,402 @@ def tiff_write_131():
     return ut.testCreateCopy()
 
 ###############################################################################
+# Test that PAM metadata is cleared when internal metadata is set (#5807)
+
+def tiff_write_132():
+
+    ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_132.tif', 1, 1)
+    ds = None
+
+    # Open in read-only
+    ds = gdal.Open('/vsimem/tiff_write_132.tif')
+    ds.SetMetadataItem('FOO', 'BAR')
+    ds.GetRasterBand(1).SetMetadataItem('FOO', 'BAR')
+    ds = None
+    
+    # Check that PAM file exists
+    if gdal.VSIStatL('/vsimem/tiff_write_132.tif.aux.xml') is None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # Open in read-write
+    ds = gdal.Open('/vsimem/tiff_write_132.tif', gdal.GA_Update)
+    ds.SetMetadataItem('FOO', 'BAZ')
+    ds.GetRasterBand(1).SetMetadataItem('FOO', 'BAZ')
+    ds = None
+    
+    # Check that PAM file no longer exists
+    if gdal.VSIStatL('/vsimem/tiff_write_132.tif.aux.xml') is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    ds = gdal.Open('/vsimem/tiff_write_132.tif')
+    if ds.GetMetadataItem('FOO') != 'BAZ' or ds.GetRasterBand(1).GetMetadataItem('FOO') != 'BAZ':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_132.tif')
+    
+    return 'success'
+
+###############################################################################
+# Test streaming capabilities
+
+def tiff_write_133():
+
+    src_ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_133.tif', 1024, 1000, 3, options = [ 'STREAMABLE_OUTPUT=YES' ])
+    src_ds.SetGeoTransform([1,2,0,3,0,-2])
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput('EPSG:32601')
+    src_ds.SetProjection(srs.ExportToWkt())
+    src_ds.SetMetadataItem('FOO', 'BAR')
+    src_ds.GetRasterBand(1).SetNoDataValue(127)
+    src_ds.GetRasterBand(1).Fill(64)
+    src_ds.GetRasterBand(2).Fill(127)
+    src_ds.GetRasterBand(3).Fill(184)
+
+    src_ds.FlushCache()
+    gdal.PushErrorHandler()
+    ret = src_ds.SetProjection(srs.ExportToWkt())
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    gdal.PushErrorHandler()
+    ret = src_ds.SetGeoTransform([1,2,0,3,0,-4])
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    gdal.PushErrorHandler()
+    ret = src_ds.SetMetadataItem('FOO', 'BAZ')
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    gdal.PushErrorHandler()
+    ret = src_ds.SetMetadata({})
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    gdal.PushErrorHandler()
+    ret = src_ds.GetRasterBand(1).SetMetadataItem('FOO', 'BAZ')
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    gdal.PushErrorHandler()
+    ret = src_ds.GetRasterBand(1).SetMetadata({})
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    gdal.PushErrorHandler()
+    ret = src_ds.GetRasterBand(1).SetNoDataValue(0)
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # Pixel interleaved
+    out_ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_133_dst.tif', src_ds, options = [ 'STREAMABLE_OUTPUT=YES', 'BLOCKYSIZE=32' ])
+    out_ds = None
+    
+    gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+    ds = gdal.Open('/vsimem/tiff_write_133_dst.tif')
+    gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+    if ds.GetProjectionRef().find('32601') < 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetGeoTransform() != (1.0, 2.0, 0.0, 3.0, 0.0, -2.0):
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetMetadataItem('FOO') != 'BAR':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetMetadataItem('UNORDERED_BLOCKS', 'TIFF') is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    old_val = gdal.GetCacheMax()
+    gdal.SetCacheMax(0)
+    for y in range(1000):
+        got_data = ds.ReadRaster(0, y, 1024, 1)
+        if got_data is None:
+            gdal.SetCacheMax(old_val)
+            gdaltest.post_reason('fail')
+            return 'fail'
+    gdal.SetCacheMax(old_val)
+    ds.FlushCache()
+    for y in range(1000):
+        gdal.PushErrorHandler()
+        got_data = ds.ReadRaster(0, y, 1024, 1)
+        gdal.PopErrorHandler()
+        if got_data is not None:
+            gdaltest.post_reason('fail')
+            return 'fail'
+    ds = None
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_133_dst.tif')
+
+    # Tiled
+    out_ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_133_dst.tif', src_ds, options = [ 'STREAMABLE_OUTPUT=YES', 'TILED=YES' ])
+    out_ds = None
+    
+    gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+    ds = gdal.Open('/vsimem/tiff_write_133_dst.tif')
+    gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+    if ds.GetProjectionRef().find('32601') < 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetGeoTransform() != (1.0, 2.0, 0.0, 3.0, 0.0, -2.0):
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetMetadataItem('FOO') != 'BAR':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetMetadataItem('UNORDERED_BLOCKS', 'TIFF') is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    old_val = gdal.GetCacheMax()
+    gdal.SetCacheMax(0)
+    for yblock in range(int((1000 + 256-1) / 256)):
+        y = 256 * yblock
+        ysize = 256
+        if y + ysize > ds.RasterYSize:
+            ysize = ds.RasterYSize - y
+        for xblock in range(int((1024 + 256-1) / 256)):
+            x = 256 * xblock
+            xsize = 256
+            if x + xsize > ds.RasterXSize:
+                xsize = ds.RasterXSize - x
+            got_data = ds.ReadRaster(x, y, xsize, ysize)
+            if got_data is None:
+                gdal.SetCacheMax(old_val)
+                gdaltest.post_reason('fail')
+                return 'fail'
+    gdal.SetCacheMax(old_val)
+
+    ds = None
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_133_dst.tif')
+
+    # Band interleaved
+    out_ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_133_dst.tif', src_ds, options = [ 'STREAMABLE_OUTPUT=YES', 'INTERLEAVE=BAND' ])
+    out_ds = None
+    
+    gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+    ds = gdal.Open('/vsimem/tiff_write_133_dst.tif')
+    gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+    if ds.GetMetadataItem('UNORDERED_BLOCKS', 'TIFF') is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    old_val = gdal.GetCacheMax()
+    gdal.SetCacheMax(0)
+    for band in range(3):
+        for y in range(1000):
+            got_data = ds.GetRasterBand(band+1).ReadRaster(0, y, 1024, 1)
+            if got_data is None:
+                gdal.SetCacheMax(old_val)
+                gdaltest.post_reason('fail')
+                return 'fail'
+    gdal.SetCacheMax(old_val)
+    ds = None
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_133_dst.tif')
+
+    # BIGTIFF
+    md = gdaltest.tiff_drv.GetMetadata()
+    if md['DMD_CREATIONOPTIONLIST'].find('BigTIFF') >= 0:
+        out_ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_133_dst.tif', src_ds, options = [ 'STREAMABLE_OUTPUT=YES', 'BIGTIFF=YES' ])
+        out_ds = None
+        
+        gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+        ds = gdal.Open('/vsimem/tiff_write_133_dst.tif')
+        gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+        if ds.GetMetadataItem('UNORDERED_BLOCKS', 'TIFF') is not None:
+            gdaltest.post_reason('fail')
+            return 'fail'
+        old_val = gdal.GetCacheMax()
+        gdal.SetCacheMax(0)
+        for y in range(1000):
+            got_data = ds.ReadRaster(0, y, 1024, 1)
+            if got_data is None:
+                gdal.SetCacheMax(old_val)
+                gdaltest.post_reason('fail')
+                return 'fail'
+        gdal.SetCacheMax(old_val)
+        ds = None
+        gdaltest.tiff_drv.Delete('/vsimem/tiff_write_133_dst.tif')
+    
+    # Compression not supported
+    gdal.PushErrorHandler()
+    out_ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_133_dst.tif', src_ds, options = [ 'STREAMABLE_OUTPUT=YES', 'COMPRESS=DEFLATE' ])
+    gdal.PopErrorHandler()
+    if out_ds is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # Test writing into a non authorized file
+    ds = gdaltest.tiff_drv.Create('/foo/bar', 1024, 1000, 3, options = [ 'STREAMABLE_OUTPUT=YES', 'BLOCKYSIZE=1' ])
+    if ds is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    gdal.PushErrorHandler()
+    out_ds = gdaltest.tiff_drv.CreateCopy('/foo/bar', src_ds, options = [ 'STREAMABLE_OUTPUT=YES'] )
+    gdal.PopErrorHandler()
+    if out_ds is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    src_ds = None
+    
+    # Classical TIFF with IFD not at offset 8
+    gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+    gdal.PushErrorHandler()
+    ds = gdal.Open('data/byte.tif')
+    gdal.PopErrorHandler()
+    gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+    if ds is not None:
+        gdaltest.post_reason('fail')
+        return 'fail'
+
+    # BigTIFF with IFD not at offset 16
+    if md['DMD_CREATIONOPTIONLIST'].find('BigTIFF') >= 0:
+        ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_133.tif', 1024, 1000, 3, options = [ 'BIGTIFF=YES' ])
+        ds.GetRasterBand(1).Fill(0)
+        ds.FlushCache()
+        ds.SetGeoTransform([1,2,0,3,0,-2])
+        ds = None
+        
+        gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+        gdal.PushErrorHandler()
+        ds = gdal.Open('/vsimem/tiff_write_133.tif')
+        gdal.PopErrorHandler()
+        gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+        if ds is not None:
+            gdaltest.post_reason('fail')
+            return 'fail'
+
+    # Test reading strips in not increasing order
+    ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_133.tif', 1024, 1000, 3, options = [ 'BLOCKYSIZE=1' ])
+    for y in range(1000):
+        ds.WriteRaster(0, 1000-y-1, 1024, 1, ''.join('a' for i in range(3*1024)))
+        ds.FlushCache()
+    ds = None
+    
+    gdal.SetConfigOption('TIFF_READ_STREAMING', 'YES')
+    gdal.PushErrorHandler()
+    ds = gdal.Open('/vsimem/tiff_write_133.tif')
+    gdal.PopErrorHandler()
+    gdal.SetConfigOption('TIFF_READ_STREAMING', None)
+    if ds.GetMetadataItem('UNORDERED_BLOCKS', 'TIFF') != 'YES':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    old_val = gdal.GetCacheMax()
+    gdal.SetCacheMax(0)
+    for y in range(1000):
+        got_data = ds.ReadRaster(0, 1000-y-1, 1024, 1)
+        if got_data is None:
+            gdal.SetCacheMax(old_val)
+            gdaltest.post_reason('fail')
+            return 'fail'
+    gdal.SetCacheMax(old_val)
+
+    # Test writing strips in not increasing order in a streamable output
+    ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_133.tif', 1024, 1000, 3, options = [ 'STREAMABLE_OUTPUT=YES', 'BLOCKYSIZE=1' ])
+    gdal.ErrorReset()
+    gdal.PushErrorHandler()
+    ret = ds.WriteRaster(0, 999, 1024, 1, ''.join('a' for i in range(3*1024)))
+    ds.FlushCache()
+    gdal.PopErrorHandler()
+    if gdal.GetLastErrorMsg() == '':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    # Test writing tiles in not increasing order in a streamable output
+    ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_133.tif', 1024, 1000, 3, options = [ 'STREAMABLE_OUTPUT=YES', 'TILED=YES' ])
+    gdal.ErrorReset()
+    gdal.PushErrorHandler()
+    ret = ds.WriteRaster(256, 256, 256, 256, ''.join('a' for i in range(3*256*256)))
+    ds.FlushCache()
+    gdal.PopErrorHandler()
+    if gdal.GetLastErrorMsg() == '':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_133.tif')
+
+    
+    return 'success'
+
+###############################################################################
+# Test DISCARD_LSB
+
+def tiff_write_134():
+
+    ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_134.tif', 1, 1, 3, options = [ 'DISCARD_LSB=0,1,3' ])
+    ds.GetRasterBand(1).Fill(127)
+    ds.GetRasterBand(2).Fill(127)
+    ds.GetRasterBand(3).Fill(127)
+    ds = None
+    ds = gdal.Open('/vsimem/tiff_write_134.tif')
+    cs1 = ds.GetRasterBand(1).Checksum()
+    cs2 = ds.GetRasterBand(2).Checksum()
+    cs3 = ds.GetRasterBand(3).Checksum()
+    if cs1 != 1 or cs2 != 0 or cs3 != 5:
+        gdaltest.post_reason('fail')
+        print(cs1)
+        print(cs2)
+        print(cs3)
+        return 'fail'
+    ds = None
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_134.tif')
+    
+    src_ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_134_src.tif', 1, 1, 3)
+    src_ds.GetRasterBand(1).Fill(127)
+    src_ds.GetRasterBand(2).Fill(127)
+    src_ds.GetRasterBand(3).Fill(127)
+    ds = gdaltest.tiff_drv.CreateCopy('/vsimem/tiff_write_134.tif', src_ds, options = [ 'DISCARD_LSB=0,1,3' ])
+    ds = None
+    ds = gdal.Open('/vsimem/tiff_write_134.tif')
+    cs1 = ds.GetRasterBand(1).Checksum()
+    cs2 = ds.GetRasterBand(2).Checksum()
+    cs3 = ds.GetRasterBand(3).Checksum()
+    if cs1 != 1 or cs2 != 0 or cs3 != 5:
+        gdaltest.post_reason('fail')
+        print(cs1)
+        print(cs2)
+        print(cs3)
+        return 'fail'
+    ds = None
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_134_src.tif')
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_134.tif')
+
+    ds = gdaltest.tiff_drv.Create('/vsimem/tiff_write_134.tif', 1, 1, 3, options = [ 'DISCARD_LSB=3' ])
+    ds.GetRasterBand(1).Fill(127)
+    ds.GetRasterBand(2).Fill(127)
+    ds.GetRasterBand(3).Fill(127)
+    ds = None
+    ds = gdal.Open('/vsimem/tiff_write_134.tif')
+    cs1 = ds.GetRasterBand(1).Checksum()
+    cs2 = ds.GetRasterBand(2).Checksum()
+    cs3 = ds.GetRasterBand(3).Checksum()
+    if cs1 != 5 or cs2 != 5 or cs3 != 5:
+        gdaltest.post_reason('fail')
+        print(cs1)
+        print(cs2)
+        print(cs3)
+        return 'fail'
+    ds = None
+    gdaltest.tiff_drv.Delete('/vsimem/tiff_write_134.tif')
+
+    return 'success'
+    
+###############################################################################
 # Ask to run again tests with GDAL_API_PROXY=YES
 
 def tiff_write_api_proxy():
@@ -5405,8 +5805,15 @@ gdaltest_list = [
     tiff_write_129,
     tiff_write_130,
     tiff_write_131,
+    tiff_write_132,
+    tiff_write_133,
+    tiff_write_134,
     #tiff_write_api_proxy,
     tiff_write_cleanup ]
+
+#gdaltest_list = [
+#    tiff_write_1,
+#    tiff_write_134 ]
 
 if __name__ == '__main__':
 

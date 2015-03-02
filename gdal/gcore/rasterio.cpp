@@ -636,7 +636,6 @@ CPLErr GDALRasterBand::IRasterIO( GDALRWFlag eRWFlag,
                     pabySrcBlock = (GByte *) poBlock->GetDataRef();
                     if( pabySrcBlock == NULL )
                     {
-                        poBlock->DropLock();
                         eErr = CE_Failure;
                         break;
                     }
@@ -667,6 +666,8 @@ CPLErr GDALRasterBand::IRasterIO( GDALRWFlag eRWFlag,
 
                 iBufOffset += (int)nPixelSpace;
             }
+            if( eErr == CE_Failure )
+                break;
 
             if( psExtraArg->pfnProgress != NULL &&
                 !psExtraArg->pfnProgress(1.0 * (iBufYOff + 1) / nBufYSize, "",
@@ -3555,6 +3556,8 @@ CPLErr CPL_STDCALL GDALDatasetCopyWholeRaster(
     if( pszInterleave != NULL 
         && (EQUAL(pszInterleave,"PIXEL") || EQUAL(pszInterleave,"LINE")) )
         bInterleave = TRUE;
+    else if( pszInterleave != NULL && EQUAL(pszInterleave,"BAND") )
+        bInterleave = FALSE;
 
     /* If the destination is compressed, we must try to write blocks just once, to save */
     /* disk space (GTiff case for example), and to avoid data loss (JPEG compression for example) */

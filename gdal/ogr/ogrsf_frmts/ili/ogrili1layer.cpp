@@ -154,7 +154,7 @@ OGRFeature *OGRILI1Layer::GetFeatureRef( long nFID )
 /*                          GetFeatureCount()                           */
 /************************************************************************/
 
-int OGRILI1Layer::GetFeatureCount( int bForce )
+GIntBig OGRILI1Layer::GetFeatureCount( int bForce )
 {
     if (m_poFilterGeom == NULL && m_poAttrQuery == NULL &&
         1 /*poAreaLineLayer == NULL*/)
@@ -298,7 +298,7 @@ OGRErr OGRILI1Layer::ICreateFeature( OGRFeature *poFeature ) {
     {
         //Input is not generated from an Interlis 1 source
         if (poFeature->GetFID() != OGRNullFID)
-            tid = poFeature->GetFID();
+            tid = (int)poFeature->GetFID();
         else
             ++tid;
         VSIFPrintf( poDS->GetTransferFile(), " %ld", tid );
@@ -427,12 +427,12 @@ void OGRILI1Layer::JoinSurfaceLayer( OGRILI1Layer* poSurfacePolyLayer, int nSurf
     CPLDebug( "OGR_ILI", "Joining surface layer %s with geometries", GetLayerDefn()->GetName());
     poSurfacePolyLayer->ResetReading();
     while (OGRFeature *polyfeature = poSurfacePolyLayer->GetNextFeatureRef()) {
-        long reftid = polyfeature->GetFID();
-        OGRFeature *feature = GetFeatureRef(reftid);
+        GIntBig reftid = polyfeature->GetFID();
+        OGRFeature *feature = GetFeatureRef((int)reftid);
         if (feature) {
             feature->SetGeomField(nSurfaceFieldIndex, polyfeature->GetGeomFieldRef(0));
         } else {
-            CPLDebug( "OGR_ILI", "Couldn't join feature FID %ld", reftid );
+            CPLDebug( "OGR_ILI", "Couldn't join feature FID " CPL_FRMT_GIB, reftid );
         }
     }
 
@@ -510,7 +510,7 @@ void OGRILI1Layer::PolygonizeAreaLayer( OGRILI1Layer* poAreaLineLayer, int nArea
     CPLDebug( "OGR_ILI", "Resulting polygons: %d", polys->getNumGeometries());
     if (polys->getNumGeometries() != GetFeatureCount())
     {
-        CPLDebug( "OGR_ILI", "Feature count of layer %s: %d", GetLayerDefn()->GetName(), GetFeatureCount());
+        CPLDebug( "OGR_ILI", "Feature count of layer %s: " CPL_FRMT_GIB, GetLayerDefn()->GetName(), GetFeatureCount());
         CPLDebug( "OGR_ILI", "Polygonizing again with crossing line fix");
         delete polys;
         polys = Polygonize( gc, true ); //try again with crossing line fix

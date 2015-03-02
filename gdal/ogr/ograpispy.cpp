@@ -126,7 +126,10 @@ static int OGRAPISpyEnabled()
     fprintf(fpSpyFile, "from osgeo import ogr\n");
     fprintf(fpSpyFile, "from osgeo import osr\n");
     fprintf(fpSpyFile, "import os\n");
-    fprintf(fpSpyFile, "import shutil\n\n");
+    fprintf(fpSpyFile, "import shutil\n");
+    fprintf(fpSpyFile, "os.access\n"); // to make pyflakes happy in case it's unused later
+    fprintf(fpSpyFile, "shutil.copy\n"); // same here
+    fprintf(fpSpyFile, "\n");
 
     return TRUE;
 }
@@ -269,7 +272,9 @@ static CPLString OGRAPISpyGetFieldType(OGRFieldType eType)
     switch(eType)
     {
         casePrefixOgrDot(OFTInteger)
+        casePrefixOgrDot(OFTInteger64)
         casePrefixOgrDot(OFTIntegerList)
+        casePrefixOgrDot(OFTInteger64List)
         casePrefixOgrDot(OFTReal)
         casePrefixOgrDot(OFTRealList)
         casePrefixOgrDot(OFTString)
@@ -530,7 +535,6 @@ void OGRAPISpy_DS_DeleteLayer( OGRDataSourceH hDS, int iLayer, CPL_UNUSED OGRErr
     OGRAPISpyFileClose();
 }
 
-
 void OGRAPISpy_L_GetFeatureCount( OGRLayerH hLayer, int bForce )
 {
     OGRAPISpyFlushDiffered();
@@ -564,18 +568,18 @@ void OGRAPISpy_L_SetAttributeFilter( OGRLayerH hLayer, const char* pszFilter )
     OGRAPISpyFileClose();
 }
 
-void OGRAPISpy_L_GetFeature( OGRLayerH hLayer, long nFeatureId )
+void OGRAPISpy_L_GetFeature( OGRLayerH hLayer, GIntBig nFeatureId )
 {
     OGRAPISpyFlushDiffered();
-    fprintf(fpSpyFile, "%s.GetFeature(%ld)\n",
+    fprintf(fpSpyFile, "%s.GetFeature(" CPL_FRMT_GIB ")\n",
             OGRAPISpyGetLayerVar(hLayer).c_str(), nFeatureId);
     OGRAPISpyFileClose();
 }
 
-void OGRAPISpy_L_SetNextByIndex( OGRLayerH hLayer, long nIndex )
+void OGRAPISpy_L_SetNextByIndex( OGRLayerH hLayer, GIntBig nIndex )
 {
     OGRAPISpyFlushDiffered();
-    fprintf(fpSpyFile, "%s.SetNextByIndex(%ld)\n",
+    fprintf(fpSpyFile, "%s.SetNextByIndex(" CPL_FRMT_GIB ")\n",
             OGRAPISpyGetLayerVar(hLayer).c_str(), nIndex);
     OGRAPISpyFileClose();
 }
@@ -601,7 +605,7 @@ static void OGRAPISpyDumpFeature( OGRLayerH hLayer, OGRFeatureH hFeat )
     fprintf(fpSpyFile, "f = ogr.Feature(%s_defn)\n",
             OGRAPISpyGetLayerVar(hLayer).c_str());
     if( poFeature->GetFID() != -1 )
-        fprintf(fpSpyFile, "f.SetFID(%ld)\n", poFeature->GetFID());
+        fprintf(fpSpyFile, "f.SetFID(" CPL_FRMT_GIB ")\n", poFeature->GetFID());
     int i;
     for(i = 0; i < poFeature->GetFieldCount(); i++)
     {
@@ -664,6 +668,11 @@ static void OGRAPISpyDumpFieldDefn( OGRFieldDefn* poFieldDefn )
         fprintf(fpSpyFile, "fd.SetWidth(%d)\n", poFieldDefn->GetWidth() );
     if( poFieldDefn->GetPrecision() > 0 )
         fprintf(fpSpyFile, "fd.SetPrecision(%d)\n", poFieldDefn->GetPrecision() );
+    if( !poFieldDefn->IsNullable() )
+        fprintf(fpSpyFile, "fd.SetNullable(0)\n");
+    if( poFieldDefn->GetDefault() != NULL )
+        fprintf(fpSpyFile, "fd.SetDefault(%s)\n",
+                OGRAPISpyGetString(poFieldDefn->GetDefault()).c_str());
 }
 
 void OGRAPISpy_L_CreateField( OGRLayerH hLayer, OGRFieldDefnH hField, 
@@ -731,6 +740,8 @@ void OGRAPISpy_L_CreateGeomField( OGRLayerH hLayer, OGRGeomFieldDefnH hField,
     if( poGeomFieldDefn->GetSpatialRef() != NULL )
         fprintf(fpSpyFile, "geom_fd.SetSpatialRef(%s)\n", OGRAPISpyGetSRS(
             (OGRSpatialReferenceH)poGeomFieldDefn->GetSpatialRef()).c_str() );
+    if( !poGeomFieldDefn->IsNullable() )
+        fprintf(fpSpyFile, "geom_fd.SetNullable(0)\n");
     fprintf(fpSpyFile, "%s.CreateGeomField(geom_fd, approx_ok = %d)\n",
             OGRAPISpyGetLayerVar(hLayer).c_str(), bApproxOK);
     OGRAPISpyFileClose();
@@ -830,10 +841,10 @@ void OGRAPISpy_L_SetSpatialFilterRectEx( OGRLayerH hLayer, int iGeomField,
     OGRAPISpyFileClose();
 }
 
-void OGRAPISpy_L_DeleteFeature( OGRLayerH hLayer, long nFID )
+void OGRAPISpy_L_DeleteFeature( OGRLayerH hLayer, GIntBig nFID )
 {
     OGRAPISpyFlushDiffered();
-    fprintf(fpSpyFile, "%s.DeleteFeature(%ld)\n",
+    fprintf(fpSpyFile, "%s.DeleteFeature(" CPL_FRMT_GIB ")\n",
             OGRAPISpyGetLayerVar(hLayer).c_str(), nFID);
     OGRAPISpyFileClose();
 }

@@ -133,9 +133,9 @@ GDALDataset* OGRJMLDataset::Open( GDALOpenInfo* poOpenInfo )
 /************************************************************************/
 
 GDALDataset* OGRJMLDataset::Create( const char *pszFilename, 
-                                CPL_UNUSED int nBands,
                                 CPL_UNUSED int nXSize,
                                 CPL_UNUSED int nYSize,
+                                CPL_UNUSED int nBands,
                                 CPL_UNUSED GDALDataType eDT,
                                 CPL_UNUSED char **papszOptions )
 {
@@ -235,6 +235,8 @@ void RegisterOGRJML()
         poDriver->SetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST,
 "<CreationOptionList/>"
 );
+        
+        poDriver->SetMetadataItem( GDAL_DMD_CREATIONFIELDDATATYPES, "Integer Integer64 Real String Date DateTime" );
 
         poDriver->pfnOpen = OGRJMLDataset::Open;
         poDriver->pfnIdentify = OGRJMLDataset::Identify;

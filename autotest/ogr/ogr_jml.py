@@ -29,16 +29,12 @@
 # DEALINGS IN THE SOFTWARE.
 ###############################################################################
 
-import os
 import sys
-import string
 
 sys.path.append( '../pymod' )
 
 import gdaltest
-import ogrtest
 from osgeo import ogr
-from osgeo import osr
 from osgeo import gdal
 
 def ogr_jml_init():
@@ -152,7 +148,7 @@ def ogr_jml_2():
     ds = None
     
     f = gdal.VSIFOpenL('/vsimem/ogr_jml.jml', 'rb')
-    data = gdal.VSIFReadL(1, 1000, f)
+    data = gdal.VSIFReadL(1, 1000, f).decode('ascii')
     gdal.VSIFCloseL(f)
     
     if data != """<?xml version='1.0' encoding='UTF-8'?>
@@ -228,7 +224,7 @@ def ogr_jml_2():
     ds = None
     
     f = gdal.VSIFOpenL('/vsimem/ogr_jml.jml', 'rb')
-    data = gdal.VSIFReadL(1, 10000, f)
+    data = gdal.VSIFReadL(1, 10000, f).decode('ascii')
     gdal.VSIFCloseL(f)
     
     if data != """<?xml version='1.0' encoding='UTF-8'?>
@@ -355,7 +351,7 @@ def ogr_jml_2():
     ds = None
     
     f = gdal.VSIFOpenL('/vsimem/ogr_jml.jml', 'rb')
-    data = gdal.VSIFReadL(1, 10000, f)
+    data = gdal.VSIFReadL(1, 10000, f).decode('ascii')
     gdal.VSIFCloseL(f)
     
     if data.find('112233') < 0 or data.find('445566') < 0:
@@ -374,7 +370,7 @@ def ogr_jml_2():
     ds = None
     
     f = gdal.VSIFOpenL('/vsimem/ogr_jml.jml', 'rb')
-    data = gdal.VSIFReadL(1, 10000, f)
+    data = gdal.VSIFReadL(1, 10000, f).decode('ascii')
     gdal.VSIFCloseL(f)
     
     if data.find('R_G_B') >= 0:
@@ -394,7 +390,7 @@ def ogr_jml_2():
     ds = None
     
     f = gdal.VSIFOpenL('/vsimem/ogr_jml.jml', 'rb')
-    data = gdal.VSIFReadL(1, 10000, f)
+    data = gdal.VSIFReadL(1, 10000, f).decode('ascii')
     gdal.VSIFCloseL(f)
     
     if data.find('OGR_STYLE') < 0 or data.find('PEN(c:#445566)') < 0:
@@ -416,7 +412,7 @@ def ogr_jml_2():
     ds = None
     
     f = gdal.VSIFOpenL('/vsimem/ogr_jml.jml', 'rb')
-    data = gdal.VSIFReadL(1, 10000, f)
+    data = gdal.VSIFReadL(1, 10000, f).decode('ascii')
     gdal.VSIFCloseL(f)
     
     if data.find('OGR_STYLE') < 0 or data.find('PEN(c:#445566)') < 0 or data.find('112233') < 0:
@@ -527,7 +523,7 @@ def ogr_jml_4():
     ds = ogr.Open('/vsimem/ogr_jml.jml')
     lyr = ds.GetLayer(0)
     gdal.PushErrorHandler('CPLQuietErrorHandler')
-    field_count = lyr.GetLayerDefn().GetFieldCount()
+    lyr.GetLayerDefn().GetFieldCount()
     gdal.PopErrorHandler()
     if gdal.GetLastErrorType() == 0:
         gdaltest.post_reason('fail')
@@ -558,12 +554,12 @@ def ogr_jml_4():
     ds = ogr.Open('/vsimem/ogr_jml.jml')
     lyr = ds.GetLayer(0)
     gdal.PushErrorHandler('CPLQuietErrorHandler')
-    field_count = lyr.GetLayerDefn().GetFieldCount()
+    lyr.GetLayerDefn().GetFieldCount()
     gdal.PopErrorHandler()
     if gdal.GetLastErrorType() == 0:
         gdaltest.post_reason('fail')
         return 'fail'
-    ds = None
+    del ds
     
     # Invalid column definitions
     gdal.FileFromMemBuffer('/vsimem/ogr_jml.jml',"""<?xml version='1.0' encoding='UTF-8'?>
@@ -633,7 +629,7 @@ def ogr_jml_4():
     if lyr.GetLayerDefn().GetFieldCount() != 0:
         gdaltest.post_reason('fail')
         return 'fail'
-    feat = lyr.GetNextFeature()
+    lyr.GetNextFeature()
     ds = None
 
     return 'success'

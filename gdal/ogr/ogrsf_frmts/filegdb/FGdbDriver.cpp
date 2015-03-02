@@ -113,8 +113,25 @@ OGRDataSource *FGdbDriver::Open( const char* pszFilename, int bUpdate )
         if (FAILED(hr) || pGeoDatabase == NULL)
         {
             delete pGeoDatabase;
-
-            GDBErr(hr, "Failed to open Geodatabase");
+            
+            if( OGRGetDriverByName("OpenFileGDB") != NULL && bUpdate == FALSE )
+            {
+                std::wstring fgdb_error_desc_w;
+                std::string fgdb_error_desc("Unknown error");
+                fgdbError er;
+                er = FileGDBAPI::ErrorInfo::GetErrorDescription(hr, fgdb_error_desc_w);
+                if ( er == S_OK )
+                {
+                    fgdb_error_desc = WStringToString(fgdb_error_desc_w);
+                }
+                CPLDebug("FileGDB", "Cannot open %s with FileGDB driver: %s. Failing silently so OpenFileGDB can be tried",
+                         pszFilename,
+                         fgdb_error_desc.c_str());
+            }
+            else
+            {
+                GDBErr(hr, "Failed to open Geodatabase");
+            }
             return NULL;
         }
 
@@ -285,7 +302,8 @@ void RegisterOGRFileGDB()
 "<LayerCreationOptionList>"
 "  <Option name='FEATURE_DATASET' type='string' description='FeatureDataset folder into to put the new layer'/>"
 "  <Option name='GEOMETRY_NAME' type='string' description='Name of geometry column' default='SHAPE'/>"
-"  <Option name='OID_NAME' type='string' description='Name of OID column' default='OBJECTID'/>"
+"  <Option name='GEOMETRY_NULLABLE' type='boolean' description='Whether the values of the geometry column can be NULL' default='YES'/>"
+"  <Option name='FID' type='string' description='Name of OID column' default='OBJECTID' deprecated_alias='OID_NAME'/>"
 "  <Option name='XYTOLERANCE' type='float' description='Snapping tolerance, used for advanced ArcGIS features like network and topology rules, on 2D coordinates, in the units of the CRS'/>"
 "  <Option name='ZTOLERANCE' type='float' description='Snapping tolerance, used for advanced ArcGIS features like network and topology rules, on Z coordinates, in the units of the CRS'/>"
 "  <Option name='XORIGIN' type='float' description='X origin of the coordinate precision grid'/>"
@@ -306,6 +324,11 @@ void RegisterOGRFileGDB()
 "    <Value>GEOMETRY_AND_BLOB_OUTOFLINE</Value>"
 "  </Option>"
 "</LayerCreationOptionList>");
+    
+    poDriver->SetMetadataItem( GDAL_DMD_CREATIONFIELDDATATYPES, "Integer Real String Date DateTime Binary" );
+    poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_FIELDS, "YES" );
+    poDriver->SetMetadataItem( GDAL_DCAP_DEFAULT_FIELDS, "YES" );
+    poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_GEOMFIELDS, "YES" );
 
     OGRSFDriverRegistrar::GetRegistrar()->RegisterDriver(poDriver);
 }

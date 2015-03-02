@@ -30,13 +30,11 @@
 
 import os
 import sys
-import string
 import shutil
 
 sys.path.append( '../pymod' )
 
 import gdaltest
-import ogrtest
 from osgeo import gdal
 from osgeo import ogr
 
@@ -341,7 +339,7 @@ def ogr_ods_6():
 
     src_ds = ogr.Open('ODS:data/content_formulas.xml')
     out_ds = ogr.GetDriverByName('CSV').CopyDataSource(src_ds, '/vsimem/content_formulas.csv')
-    out_ds = None
+    del out_ds
     src_ds = None
 
     fp = gdal.VSIFOpenL('/vsimem/content_formulas.csv', 'rb')
@@ -417,6 +415,46 @@ def ogr_ods_7():
 
     return 'success'
 
+###############################################################################
+# Test Integer64
+
+def ogr_ods_8():
+
+    drv = ogr.GetDriverByName('ODS')
+    if drv is None:
+        return 'skip'
+
+    ds = drv.CreateDataSource('/vsimem/ogr_ods_8.ods')
+    lyr = ds.CreateLayer('foo')
+    lyr.CreateField(ogr.FieldDefn('Field1', ogr.OFTInteger64))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 12345678901234)
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_ods_8.ods')
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 12345678901234:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    ds = None
+
+    gdal.Unlink('/vsimem/ogr_ods_8.ods')
+
+    return 'success'
+
 gdaltest_list = [ 
     ogr_ods_1,
     ogr_ods_kspread_1,
@@ -425,7 +463,8 @@ gdaltest_list = [
     ogr_ods_4,
     ogr_ods_5,
     ogr_ods_6,
-    ogr_ods_7
+    ogr_ods_7,
+    ogr_ods_8
 ]
 
 if __name__ == '__main__':

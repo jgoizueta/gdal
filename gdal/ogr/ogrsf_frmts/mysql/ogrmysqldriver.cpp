@@ -33,7 +33,7 @@
 
 CPL_CVSID("$Id$");
 
-static void* hMutex = NULL;
+static CPLMutex* hMutex = NULL;
 static int   bInitialized = FALSE;
 
 /************************************************************************/
@@ -140,7 +140,25 @@ void RegisterOGRMySQL()
         poDriver->SetMetadataItem( GDAL_DMD_LONGNAME,
                                    "MySQL" );
         poDriver->SetMetadataItem( GDAL_DMD_HELPTOPIC,
-                                   "drv_mysqls.html" );
+                                   "drv_mysql.html" );
+
+        poDriver->SetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST, "<CreationOptionList/>");
+
+        poDriver->SetMetadataItem( GDAL_DS_LAYER_CREATIONOPTIONLIST,
+    "<LayerCreationOptionList>"
+    "  <Option name='OVERWRITE' type='boolean' description='Whether to overwrite an existing table with the layer name to be created' default='NO'/>"
+    "  <Option name='LAUNDER' type='boolean' description='Whether layer and field names will be laundered' default='YES'/>"
+    "  <Option name='PRECISION' type='boolean' description='Whether fields created should keep the width and precision' default='YES'/>"
+    "  <Option name='GEOMETRY_NAME' type='string' description='Name of geometry column.' default='SHAPE'/>"
+    "  <Option name='SPATIAL_INDEX' type='boolean' description='Whether to create a spatial index' default='YES'/>"
+    "  <Option name='FID' type='string' description='Name of the FID column to create' default='OGR_FID' deprecated_alias='MYSQL_FID'/>"
+    "  <Option name='FID64' type='boolean' description='Whether to create the FID column with BIGINT type to handle 64bit wide ids' default='NO'/>"
+    "  <Option name='ENGINE' type='string' description='Database engine to use.'/>"
+    "</LayerCreationOptionList>");
+        
+        poDriver->SetMetadataItem( GDAL_DMD_CREATIONFIELDDATATYPES, "Integer Integer64 Real String Date DateTime Time Binary" );
+        poDriver->SetMetadataItem( GDAL_DCAP_NOTNULL_FIELDS, "YES" );
+        poDriver->SetMetadataItem( GDAL_DCAP_DEFAULT_FIELDS, "YES" );
 
         poDriver->pfnOpen = OGRMySQLDriverOpen;
         poDriver->pfnCreate = OGRMySQLDriverCreate;

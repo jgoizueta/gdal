@@ -64,9 +64,6 @@ OGRSQLiteLayer::OGRSQLiteLayer()
     panFieldOrdinals = NULL;
     iFIDCol = -1;
 
-    bHasSpatialIndex = FALSE;
-    bHasM = FALSE;
-
     bIsVirtualShape = FALSE;
 
     bUseComprGeom = CSLTestBoolean(CPLGetConfigOption("COMPRESS_GEOM", "FALSE"));
@@ -176,8 +173,8 @@ int OGRIsBinaryGeomCol( sqlite3_stmt *hStmt,
 
 void OGRSQLiteLayer::BuildFeatureDefn( const char *pszLayerName,
                                        sqlite3_stmt *hStmt,
-                                       const char* pszExpectedGeomCol,
-                                       const std::set<CPLString>& aosGeomCols )
+                                       const std::set<CPLString>& aosGeomCols,
+                                       const std::set<CPLString>& aosIgnoredCols )
 
 {
     poFeatureDefn = new OGRSQLiteFeatureDefn( pszLayerName );
@@ -213,18 +210,46 @@ void OGRSQLiteLayer::BuildFeatureDefn( const char *pszLayerName,
 
         //oField.SetWidth( MAX(0,poStmt->GetColSize( iCol )) );
 
-        if( pszExpectedGeomCol != NULL
-            && EQUAL(oField.GetNameRef(),pszExpectedGeomCol) )
+        if( aosIgnoredCols.find( CPLString(oField.GetNameRef()).tolower() ) != aosIgnoredCols.end() )
+        {
+            continue;
+        }
+        if( aosGeomCols.find( CPLString(oField.GetNameRef()).tolower() ) != aosGeomCols.end() )
         {
             OGRSQLiteGeomFieldDefn* poGeomFieldDefn =
                 new OGRSQLiteGeomFieldDefn(oField.GetNameRef(), iCol);
             poFeatureDefn->AddGeomFieldDefn(poGeomFieldDefn, FALSE);
             continue;
         }
-        if( aosGeomCols.find( oField.GetNameRef() ) != aosGeomCols.end() )
-            continue;
 
         int nColType = sqlite3_column_type( hStmt, iCol );
+        switch( nColType )
+        {
+          case SQLITE_INTEGER:
+            if( CSLTestBoolean(CPLGetConfigOption("OGR_PROMOTE_TO_INTEGER64", "FALSE")) )
+                oField.SetType( OFTInteger64 );
+            else
+            {
+                GIntBig nVal = sqlite3_column_int64(hStmt, iCol);
+                if( (GIntBig)(int)nVal == nVal )
+                    oField.SetType( OFTInteger );
+                else
+                    oField.SetType( OFTInteger64 );
+            }
+            break;
+
+          case SQLITE_FLOAT:
+            oField.SetType( OFTReal );
+            break;
+
+          case SQLITE_BLOB:
+            oField.SetType( OFTBinary );
+            break;
+
+          default:
+            /* leave it as OFTString */;
+        }
+        
         const char * pszDeclType = sqlite3_column_decltype(hStmt, iCol);
         //CPLDebug("SQLITE", "decltype(%s) = %s",
         //         oField.GetNameRef(), pszDeclType ? pszDeclType : "null");
@@ -233,45 +258,51 @@ void OGRSQLiteLayer::BuildFeatureDefn( const char *pszLayerName,
         {
             if (EQUAL(pszDeclType, "INTEGER_BOOLEAN"))
             {
-                nColType = SQLITE_INTEGER;
                 oField.SetType(OFTInteger);
                 oField.SetSubType(OFSTBoolean);
             }
             else if (EQUAL(pszDeclType, "INTEGER_INT16"))
             {
-                nColType = SQLITE_INTEGER;
                 oField.SetType(OFTInteger);
                 oField.SetSubType(OFSTInt16);
             }
             else if (EQUAL(pszDeclType, "INTEGERLIST"))
             {
-                nColType = SQLITE_TEXT;
                 oField.SetType(OFTIntegerList);
+            }
+            else if (EQUAL(pszDeclType, "INTEGER64LIST"))
+            {
+                oField.SetType(OFTInteger64List);
             }
             else if (EQUAL(pszDeclType, "REALLIST"))
             {
-                nColType = SQLITE_TEXT;
                 oField.SetType(OFTRealList);
             }
             else if (EQUAL(pszDeclType, "STRINGLIST"))
             {
-                nColType = SQLITE_TEXT;
                 oField.SetType(OFTStringList);
             }
+            else if (EQUAL(pszDeclType, "BIGINT") || EQUAL(pszDeclType, "INT8"))
+            {
+                oField.SetType(OFTInteger64);
+            }
             else if (EQUALN(pszDeclType, "INTEGER", strlen("INTEGER")))
-                nColType = SQLITE_INTEGER;
+            {
+                oField.SetType(OFTInteger);
+            }
             else if (EQUAL(pszDeclType, "FLOAT_FLOAT32"))
             {
-                nColType = SQLITE_FLOAT;
                 oField.SetType(OFTReal);
                 oField.SetSubType(OFSTFloat32);
             }
             else if (EQUAL(pszDeclType, "FLOAT") ||
                      EQUAL(pszDeclType, "DECIMAL"))
-                nColType = SQLITE_FLOAT;
+            {
+                oField.SetType(OFTReal);
+            }
             else if (EQUALN(pszDeclType, "BLOB", 4))
             {
-                nColType = SQLITE_BLOB;
+                oField.SetType( OFTBinary );
                 /* Parse format like BLOB_POINT_25D_4326 created by */
                 /* OGRSQLiteExecuteSQL() */
                 if( pszDeclType[4] == '_' )
@@ -314,7 +345,7 @@ void OGRSQLiteLayer::BuildFeatureDefn( const char *pszLayerName,
             else if (EQUAL(pszDeclType, "TEXT") ||
                      EQUALN(pszDeclType, "VARCHAR", 7))
             {
-                nColType = SQLITE_TEXT;
+                oField.SetType( OFTString );
                 if( strstr(pszDeclType, "_deflate") != NULL )
                 {
                     if( CSLFindString(papszCompressedColumns,
@@ -454,24 +485,6 @@ void OGRSQLiteLayer::BuildFeatureDefn( const char *pszLayerName,
         if( EQUAL(oField.GetNameRef(),"OGC_FID") )
             continue;
 
-        switch( nColType )
-        {
-          case SQLITE_INTEGER:
-            oField.SetType( OFTInteger );
-            break;
-
-          case SQLITE_FLOAT:
-            oField.SetType( OFTReal );
-            break;
-
-          case SQLITE_BLOB:
-            oField.SetType( OFTBinary );
-            break;
-
-          default:
-            /* leave it as OFTString */;
-        }
-        
         /* config option just in case we wouldn't want that in some cases */
         if( (eFieldType == OFTTime || eFieldType == OFTDate ||
              eFieldType == OFTDateTime) &&
@@ -696,21 +709,36 @@ OGRFeature *OGRSQLiteLayer::GetNextRawFeature()
 
         int iRawField = panFieldOrdinals[iField];
 
-        if( sqlite3_column_type( hStmt, iRawField ) == SQLITE_NULL )
+        int nSQLite3Type = sqlite3_column_type( hStmt, iRawField );
+        if( nSQLite3Type == SQLITE_NULL )
             continue;
 
         switch( poFieldDefn->GetType() )
         {
         case OFTInteger:
-            //FIXME use int64 when OGR has 64bit integer support
-            poFeature->SetField( iField, 
-                sqlite3_column_int( hStmt, iRawField ) );
+        case OFTInteger64:
+        {
+            /* Possible since SQLite3 has no strong typing */
+            if( nSQLite3Type == SQLITE_TEXT )
+                poFeature->SetField( iField, 
+                        (const char *)sqlite3_column_text( hStmt, iRawField ) );
+            else
+                poFeature->SetField( iField, 
+                    sqlite3_column_int64( hStmt, iRawField ) );
             break;
+        }
 
         case OFTReal:
-            poFeature->SetField( iField, 
-                sqlite3_column_double( hStmt, iRawField ) );
+        {
+            /* Possible since SQLite3 has no strong typing */
+            if( nSQLite3Type == SQLITE_TEXT )
+                poFeature->SetField( iField, 
+                        (const char *)sqlite3_column_text( hStmt, iRawField ) );
+            else
+                poFeature->SetField( iField, 
+                    sqlite3_column_double( hStmt, iRawField ) );
             break;
+        }
 
         case OFTBinary:
             {
@@ -723,6 +751,7 @@ OGRFeature *OGRSQLiteLayer::GetNextRawFeature()
 
         case OFTString:
         case OFTIntegerList:
+        case OFTInteger64List:
         case OFTRealList:
         case OFTStringList:
         {
@@ -779,7 +808,7 @@ OGRFeature *OGRSQLiteLayer::GetNextRawFeature()
 /*                             GetFeature()                             */
 /************************************************************************/
 
-OGRFeature *OGRSQLiteLayer::GetFeature( long nFeatureId )
+OGRFeature *OGRSQLiteLayer::GetFeature( GIntBig nFeatureId )
 
 {
     return OGRLayer::GetFeature( nFeatureId );
@@ -3139,6 +3168,8 @@ int OGRSQLITEStringToDateTimeField( OGRFeature* poFeature, int iField,
     nYear = 0; nMonth = 0; nDay = 0; nHour = 0;
     nMinute = 0; fSecond = 0;
     if( sscanf(pszValue, "%04d-%02d-%02d %02d:%02d:%f",
+                &nYear, &nMonth, &nDay, &nHour, &nMinute, &fSecond) == 6 ||
+        sscanf(pszValue, "%04d/%02d/%02d %02d:%02d:%f",
                 &nYear, &nMonth, &nDay, &nHour, &nMinute, &fSecond) == 6 )
     {
         if( poFeature )
@@ -3151,6 +3182,8 @@ int OGRSQLITEStringToDateTimeField( OGRFeature* poFeature, int iField,
     nYear = 0; nMonth = 0; nDay = 0; nHour = 0;
     nMinute = 0;
     if( sscanf(pszValue, "%04d-%02d-%02d %02d:%02d",
+                &nYear, &nMonth, &nDay, &nHour, &nMinute) == 5 ||
+        sscanf(pszValue, "%04d/%02d/%02d %02d:%02d",
                 &nYear, &nMonth, &nDay, &nHour, &nMinute) == 5 )
     {
         if( poFeature )
@@ -3186,6 +3219,8 @@ int OGRSQLITEStringToDateTimeField( OGRFeature* poFeature, int iField,
     /* YYYY-MM-DD */
     nYear = 0; nMonth = 0; nDay = 0;
     if( sscanf(pszValue, "%04d-%02d-%02d",
+                &nYear, &nMonth, &nDay) == 3 ||
+        sscanf(pszValue, "%04d/%02d/%02d",
                 &nYear, &nMonth, &nDay) == 3 )
     {
         if( poFeature )
@@ -3232,6 +3267,12 @@ CPLString OGRSQLiteLayer::FormatSpatialFilterFromRTree(OGRGeometry* poFilterGeom
 
     poFilterGeom->getEnvelope( &sEnvelope );
 
+    if( CPLIsInf(sEnvelope.MinX) && sEnvelope.MinX < 0 &&
+        CPLIsInf(sEnvelope.MinY) && sEnvelope.MinY < 0 &&
+        CPLIsInf(sEnvelope.MaxX) && sEnvelope.MaxX > 0 &&
+        CPLIsInf(sEnvelope.MaxY) && sEnvelope.MaxY > 0 )
+        return "";
+
     osSpatialWHERE.Printf("%s IN ( SELECT pkid FROM 'idx_%s_%s' WHERE "
                     "xmax >= %s AND xmin <= %s AND ymax >= %s AND ymin <= %s)",
                     pszRowIDName,
@@ -3257,6 +3298,12 @@ CPLString OGRSQLiteLayer::FormatSpatialFilterFromMBR(OGRGeometry* poFilterGeom,
     OGREnvelope  sEnvelope;
 
     poFilterGeom->getEnvelope( &sEnvelope );
+
+    if( CPLIsInf(sEnvelope.MinX) && sEnvelope.MinX < 0 &&
+        CPLIsInf(sEnvelope.MinY) && sEnvelope.MinY < 0 &&
+        CPLIsInf(sEnvelope.MaxX) && sEnvelope.MaxX > 0 &&
+        CPLIsInf(sEnvelope.MaxY) && sEnvelope.MaxY > 0 )
+        return "";
 
     /* A bit inefficient but still faster than OGR filtering */
     osSpatialWHERE.Printf("MBRIntersects(\"%s\", BuildMBR(%s, %s, %s, %s))",

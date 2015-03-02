@@ -494,7 +494,6 @@ def test_gdal_translate_18():
 
     # Check that all datasets are closed
     if ret_stderr.find('Open GDAL Datasets') != -1:
-        print(ret)
         return 'fail'
 
     ds = gdal.Open('tmp/test18_2.tif')
@@ -702,7 +701,7 @@ def test_gdal_translate_26():
 0 0 -999
 1 0 10
 0 1 15
-1 1 20""")
+1 1 20""".encode('ascii'))
     f.close()
     gdaltest.runexternal(test_cli_utilities.get_gdal_translate_path() + ' -a_nodata -999 -stats tmp/test_gdal_translate_26.xyz tmp/test_gdal_translate_26.tif')
 
@@ -736,7 +735,7 @@ xllcorner    440720.000000000000
 yllcorner    3750120.000000000000
 cellsize     60.000000000000
  0 256
- 0 0""")
+ 0 0""".encode('ascii'))
     f.close()
 
     gdaltest.runexternal(test_cli_utilities.get_gdalinfo_path() + ' -stats tmp/test_gdal_translate_27.asc')

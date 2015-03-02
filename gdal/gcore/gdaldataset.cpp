@@ -82,7 +82,7 @@ static CPLHashSet* phSharedDatasetSet = NULL;
 /* if GDALClose is called from a different thread */
 static std::map<GDALDataset*, GIntBig>* poAllDatasetMap = NULL;
 
-static void *hDLMutex = NULL;
+static CPLMutex *hDLMutex = NULL;
 
 /* Static array of all datasets. Used by GDALGetOpenDatasets */
 /* Not thread-safe. See GDALGetOpenDatasets */
@@ -115,7 +115,7 @@ static void GDALSharedDatasetFreeFunc(void* elt)
 /************************************************************************/
 
 /* The open-shared mutex must be used by the ProxyPool too */
-void** GDALGetphDLMutex()
+CPLMutex** GDALGetphDLMutex()
 {
     return &hDLMutex;
 }
@@ -1638,7 +1638,8 @@ CPLErr GDALDataset::ValidateRasterIOOrAdviseReadParameters(
  * on "block boundaries" as returned by GetBlockSize(), or use the
  * ReadBlock() and WriteBlock() methods.
  *
- * This method is the same as the C GDALDatasetRasterIO() function.
+ * This method is the same as the C GDALDatasetRasterIO() or
+ * GDALDatasetRasterIOEx() functions.
  *
  * @param eRWFlag Either GF_Read to read a region of data, or GF_Write to
  * write a region of data.
@@ -1829,6 +1830,9 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
 
 /**
  * \brief Read/write a region of image data from multiple bands.
+ *
+ * Use GDALDatasetRasterIOEx() if 64 bit spacings or extra arguments (resampling
+ * resolution, progress callback, etc. are needed)
  *
  * @see GDALDataset::RasterIO()
  */
@@ -2732,19 +2736,6 @@ void CPL_STDCALL GDALClose( GDALDatasetH hDS )
         return;
 
     GDALDataset *poDS = (GDALDataset *) hDS;
-    if( poDS->bIsInternal )
-    {
-        if (poDS->GetShared())
-        {
-            if( poDS->Dereference() > 0 )
-                return;
-        }
-        delete poDS;
-        return;
-    }
-        
-    CPLMutexHolderD( &hDLMutex );
-    //CPLLocaleC  oLocaleForcer;
 
     if (poDS->GetShared())
     {
@@ -3695,7 +3686,7 @@ In GDAL 1.X, this method used to be in the OGRDataSource class.
 int GDALDataset::GetSummaryRefCount() const
 
 {
-    CPLMutexHolderD( (void **) &m_hMutex );
+    CPLMutexHolderD( (CPLMutex**) &m_hMutex );
     int nSummaryCount = nRefCount;
     int iLayer;
     GDALDataset *poUseThis = (GDALDataset *) this;
@@ -3910,7 +3901,7 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
         if( poDstFeature->SetFrom( poFeature, panMap, TRUE ) != OGRERR_NONE )
         {
             CPLError( CE_Failure, CPLE_AppDefined,
-                      "Unable to translate feature %ld from layer %s.\n",
+                      "Unable to translate feature " CPL_FRMT_GIB " from layer %s.\n",
                       poFeature->GetFID(), poSrcDefn->GetName() );
             OGRFeature::DestroyFeature( poFeature );
             CPLFree(panMap);
@@ -3961,7 +3952,7 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
             if( papoDstFeature[nFeatCount]->SetFrom( poFeature, panMap, TRUE ) != OGRERR_NONE )
             {
                 CPLError( CE_Failure, CPLE_AppDefined,
-                          "Unable to translate feature %ld from layer %s.\n",
+                          "Unable to translate feature " CPL_FRMT_GIB " from layer %s.\n",
                           poFeature->GetFID(), poSrcDefn->GetName() );
                 OGRFeature::DestroyFeature( poFeature );
                 bStopTransfer = TRUE;
@@ -5146,6 +5137,13 @@ OGRLayer* GDALDataset::BuildLayerFromSelectInfo(void* psSelectInfoIn,
                 else
                     sFieldList.types[iOutField] = SWQ_INTEGER;
             }
+            else if( poFDefn->GetType() == OFTInteger64 )
+            {
+                if( poFDefn->GetSubType() == OFSTBoolean )
+                    sFieldList.types[iOutField] = SWQ_BOOLEAN;
+                else
+                    sFieldList.types[iOutField] = SWQ_INTEGER64;
+            }
             else if( poFDefn->GetType() == OFTReal )
                 sFieldList.types[iOutField] = SWQ_FLOAT;
             else if( poFDefn->GetType() == OFTString )
@@ -5217,11 +5215,7 @@ OGRLayer* GDALDataset::BuildLayerFromSelectInfo(void* psSelectInfoIn,
 /* -------------------------------------------------------------------- */
     if( psSelectInfo->where_expr != NULL )
     {
-        if (EQUAL(GetDriverName(), "PostgreSQL") ||
-                EQUAL(GetDriverName(), "FileGDB" ) )
-            pszWHERE = psSelectInfo->where_expr->Unparse( &sFieldList, '"' );
-        else
-            pszWHERE = psSelectInfo->where_expr->Unparse( &sFieldList, '\'' );
+        pszWHERE = psSelectInfo->where_expr->Unparse( &sFieldList, '"' );
         //CPLDebug( "OGR", "Unparse() -> %s", pszWHERE );
     }
 

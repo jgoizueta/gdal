@@ -2604,6 +2604,15 @@ GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, int nOptions )
             if( CSLFetchNameValue( papszMD, GDAL_DMD_CREATIONDATATYPES ) )
                 printf( "  Creation Datatypes: %s\n",
                         CSLFetchNameValue( papszMD, GDAL_DMD_CREATIONDATATYPES ) );
+            if( CSLFetchNameValue( papszMD, GDAL_DMD_CREATIONFIELDDATATYPES ) )
+                printf( "  Creation Field Datatypes: %s\n",
+                        CSLFetchNameValue( papszMD, GDAL_DMD_CREATIONFIELDDATATYPES ) );
+            if( CSLFetchBoolean( papszMD, GDAL_DCAP_NOTNULL_FIELDS, FALSE ) )
+                printf( "  Supports: Creating fields with NOT NULL constraint.\n" );
+            if( CSLFetchBoolean( papszMD, GDAL_DCAP_DEFAULT_FIELDS, FALSE ) )
+                printf( "  Supports: Creating fields with DEFAULT values.\n" );
+            if( CSLFetchBoolean( papszMD, GDAL_DCAP_NOTNULL_GEOMFIELDS, FALSE ) )
+                printf( "  Supports: Creating geometry fields with NOT NULL constraint.\n" );
             if( CSLFetchNameValue( papszMD, GDAL_DMD_CREATIONOPTIONLIST ) )
             {
                 CPLXMLNode *psCOL = 

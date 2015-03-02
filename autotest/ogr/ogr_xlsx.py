@@ -30,13 +30,11 @@
 
 import os
 import sys
-import string
 import shutil
 
 sys.path.append( '../pymod' )
 
 import gdaltest
-import ogrtest
 from osgeo import gdal
 from osgeo import ogr
 
@@ -343,6 +341,45 @@ def ogr_xlsx_8():
 
     return 'success'
 
+###############################################################################
+# Test Integer64
+
+def ogr_xlsx_9():
+
+    drv = ogr.GetDriverByName('XLSX')
+    if drv is None:
+        return 'skip'
+
+    ds = drv.CreateDataSource('/vsimem/ogr_xlsx_9.xlsx')
+    lyr = ds.CreateLayer('foo')
+    lyr.CreateField(ogr.FieldDefn('Field1', ogr.OFTInteger64))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 12345678901234)
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_xlsx_9.xlsx')
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 12345678901234:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    ds = None
+
+    gdal.Unlink('/vsimem/ogr_xlsx_9.xlsx')
+
+    return 'success'
 
 gdaltest_list = [
     ogr_xlsx_1,
@@ -352,7 +389,8 @@ gdaltest_list = [
     ogr_xlsx_5,
     ogr_xlsx_6,
     ogr_xlsx_7,
-    ogr_xlsx_8
+    ogr_xlsx_8,
+    ogr_xlsx_9
 ]
 
 if __name__ == '__main__':

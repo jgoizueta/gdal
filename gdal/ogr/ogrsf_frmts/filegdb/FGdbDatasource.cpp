@@ -106,7 +106,10 @@ bool FGdbDataSource::OpenFGDBTables(const std::wstring &type,
         if (FAILED(hr = m_pGeodatabase->OpenTable(layers[i], *pTable)))
         {
             delete pTable;
-            GDBDebug(hr, "Error opening " + WStringToString(layers[i]) + ". Skipping it");
+            GDBErr(hr, "Error opening " + WStringToString(layers[i]),
+                   CE_Warning,
+                   ". Skipping it. "
+                   "Might be due to unsupported spatial reference system. Using OpenFileGDB driver should solve it");
             continue;
         }
         FGdbLayer* pLayer = new FGdbLayer();
@@ -263,7 +266,7 @@ OGRErr FGdbDataSource::DeleteLayer( int iLayer )
 
     // Fetch FGDBAPI Table before deleting OGR layer object
 
-    Table* pTable = poBaseLayer->GetTable();
+    //Table* pTable = poBaseLayer->GetTable();
 
     std::string name = poBaseLayer->GetLayerDefn()->GetName();
     std::wstring strPath = poBaseLayer->GetTablePath();
@@ -272,7 +275,7 @@ OGRErr FGdbDataSource::DeleteLayer( int iLayer )
     // delete OGR layer
     delete m_layers[iLayer];
 
-    pTable = NULL; // OGR Layer had ownership of FGDB Table
+    //pTable = NULL; // OGR Layer had ownership of FGDB Table
 
     m_layers.erase(m_layers.begin() + iLayer);
 
@@ -490,8 +493,20 @@ OGRLayer * FGdbDataSource::ExecuteSQL( const char *pszSQLCommand,
 /* -------------------------------------------------------------------- */
     EnumRows* pEnumRows = new EnumRows;
     long hr;
-    if (FAILED(hr = m_pGeodatabase->ExecuteSQL(
-                                StringToWString(pszSQLCommand), true, *pEnumRows)))
+    try
+    {
+        hr = m_pGeodatabase->ExecuteSQL(
+                                StringToWString(pszSQLCommand), true, *pEnumRows);
+    }
+    catch(...)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Exception occured at executing '%s'. Application may become unstable", pszSQLCommand);
+        delete pEnumRows;
+        return NULL;
+    }
+
+    if (FAILED(hr))
     {
         GDBErr(hr, CPLSPrintf("Failed at executing '%s'", pszSQLCommand));
         delete pEnumRows;

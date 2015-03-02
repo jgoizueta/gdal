@@ -99,6 +99,8 @@ int swqlex( YYSTYPE *ppNode, swq_parse_context *context )
         char chQuote = *pszInput;
         int bFoundEndQuote = FALSE;
 
+        int nRet = *pszInput == '"' ? SWQT_IDENTIFIER : SWQT_STRING;
+
         pszInput++;
 
         token = (char *) CPLMalloc(strlen(pszInput)+1);
@@ -136,7 +138,7 @@ int swqlex( YYSTYPE *ppNode, swq_parse_context *context )
 
         context->pszNext = pszInput;
 
-        return SWQT_STRING;
+        return nRet;
     }
 
 /* -------------------------------------------------------------------- */
@@ -182,7 +184,11 @@ int swqlex( YYSTYPE *ppNode, swq_parse_context *context )
         }
         else
         {
-            *ppNode = new swq_expr_node( atoi(osToken) );
+            GIntBig nVal = CPLAtoGIntBig(osToken);
+            if( (GIntBig)(int)nVal == nVal )
+                *ppNode = new swq_expr_node( (int)nVal );
+            else
+                *ppNode = new swq_expr_node( nVal );
             return SWQT_INTEGER_NUMBER;
         }
     }
@@ -337,7 +343,7 @@ swq_select_summarize( swq_select *select_info,
     
     if( def->distinct_flag )
     {
-        int  i;
+        GIntBig  i;
 
         /* This should be implemented with a much more complicated
            data structure to achieve any sort of efficiency. */
@@ -358,9 +364,9 @@ swq_select_summarize( swq_select *select_info,
             char  **old_list = summary->distinct_list;
             
             summary->distinct_list = (char **) 
-                CPLMalloc(sizeof(char *) * (summary->count+1));
+                CPLMalloc(sizeof(char *) * (size_t)(summary->count+1));
             memcpy( summary->distinct_list, old_list, 
-                    sizeof(char *) * summary->count );
+                    sizeof(char *) * (size_t)summary->count );
             summary->distinct_list[(summary->count)++] = 
                 (value != NULL) ? CPLStrdup( value ) : NULL;
 
@@ -535,7 +541,7 @@ const char *swq_select_finish_summarize( swq_select *select_info )
 
 {
     int (FORCE_CDECL *compare_func)(const void *, const void*);
-    int count = 0;
+    GIntBig count = 0;
     char **distinct_list = NULL;
 
     if( select_info->query_mode != SWQM_DISTINCT_LIST 
@@ -562,7 +568,7 @@ const char *swq_select_finish_summarize( swq_select *select_info )
     distinct_list = select_info->column_summary[0].distinct_list;
     count = select_info->column_summary[0].count;
 
-    qsort( distinct_list, count, sizeof(char *), compare_func );
+    qsort( distinct_list, (size_t)count, sizeof(char *), compare_func );
 
 /* -------------------------------------------------------------------- */
 /*      Do we want the list ascending in stead of descending?           */
@@ -570,7 +576,7 @@ const char *swq_select_finish_summarize( swq_select *select_info )
     if( !select_info->order_defs[0].ascending_flag )
     {
         char *saved;
-        int i;
+        GIntBig i;
 
         for( i = 0; i < count/2; i++ )
         {
@@ -843,6 +849,7 @@ const char* SWQFieldTypeToString( swq_field_type field_type )
     switch(field_type)
     {
         case SWQ_INTEGER:   return "integer";
+        case SWQ_INTEGER64: return "bigint";
         case SWQ_FLOAT:     return "float";
         case SWQ_STRING:    return "string";
         case SWQ_BOOLEAN:   return "boolean";

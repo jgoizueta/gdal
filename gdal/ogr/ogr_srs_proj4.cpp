@@ -32,8 +32,9 @@
 #include "ogr_spatialref.h"
 #include "ogr_p.h"
 #include "cpl_conv.h"
+#include <vector>
 
-extern int EPSGGetWGS84Transform( int nGeogCS, double *padfTransform );
+extern int EPSGGetWGS84Transform( int nGeogCS, std::vector<CPLString>& asTransform );
 
 CPL_CVSID("$Id$");
 
@@ -1023,11 +1024,7 @@ OGRErr OGRSpatialReference::importFromProj4( const char * pszProj4 )
             {
                 CPLAssert( EQUALN(ogr_pj_ellps[i+2],"b=",2) );
                 dfSemiMinor = CPLAtof(ogr_pj_ellps[i+2]+2);
-                
-                if( ABS(dfSemiMajor/dfSemiMinor) - 1.0 < 0.0000000000001 )
-                    dfInvFlattening = 0.0;
-                else
-                    dfInvFlattening = -1.0 / (dfSemiMinor/dfSemiMajor - 1.0);
+                dfInvFlattening = OSRCalcInvFlattening(dfSemiMajor, dfSemiMinor);
             }
             
             SetGeogCS( ogr_pj_ellps[i+3], "unknown", ogr_pj_ellps[i], 
@@ -1084,10 +1081,7 @@ OGRErr OGRSpatialReference::importFromProj4( const char * pszProj4 )
 
         if( dfInvFlattening == -1.0 )
         {
-            if( ABS(dfSemiMajor/dfSemiMinor) - 1.0 < 0.0000000000001 )
-                dfInvFlattening = 0.0;
-            else
-                dfInvFlattening = -1.0 / (dfSemiMinor/dfSemiMajor - 1.0);
+            dfInvFlattening = OSRCalcInvFlattening(dfSemiMajor, dfSemiMinor);
         }
         
         SetGeogCS( "unnamed ellipse", "unknown", "unnamed",
@@ -1691,7 +1685,7 @@ OGRErr OGRSpatialReference::exportToProj4( char ** ppszProj4 ) const
                  GetNormProjParm(SRS_PP_FALSE_NORTHING,0.0) );
     }
 
-    else if( EQUAL(pszProjection,SRS_PT_MERCATOR_AUXILARY_SPHERE) )
+    else if( EQUAL(pszProjection,SRS_PT_MERCATOR_AUXILIARY_SPHERE) )
     {
        // This is EPSG:3875 Pseudo Mercator. No point in trying to parse the
        // rest of the parameters, since we know pretty much everything at this
@@ -2522,17 +2516,17 @@ OGRErr OGRSpatialReference::exportToProj4( char ** ppszProj4 ) const
         // based on the EPSG GCS code.
         else if( nEPSGGeogCS != -1 && pszPROJ4Datum == NULL )
         {
-            double padfTransform[7];
-            if( EPSGGetWGS84Transform( nEPSGGeogCS, padfTransform ) )
+            std::vector<CPLString> asBursaTransform;
+            if( EPSGGetWGS84Transform( nEPSGGeogCS, asBursaTransform ) )
             {
-                CPLsprintf( szTOWGS84, "+towgs84=%.16g,%.16g,%.16g,%.16g,%.16g,%.16g,%.16g",
-                         padfTransform[0],
-                         padfTransform[1],
-                         padfTransform[2],
-                         padfTransform[3],
-                         padfTransform[4],
-                         padfTransform[5],
-                         padfTransform[6] );
+                CPLsprintf( szTOWGS84, "+towgs84=%s,%s,%s,%s,%s,%s,%s",
+                         asBursaTransform[0].c_str(),
+                         asBursaTransform[1].c_str(),
+                         asBursaTransform[2].c_str(),
+                         asBursaTransform[3].c_str(),
+                         asBursaTransform[4].c_str(),
+                         asBursaTransform[5].c_str(),
+                         asBursaTransform[6].c_str() );
                 SAFE_PROJ4_STRCAT( szEllipseDef );
                 szEllipseDef[0] = '\0';
 

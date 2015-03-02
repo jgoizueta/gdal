@@ -50,7 +50,7 @@ CPL_C_END
 
 extern const char *pszGDALSignature;
 
-void *hHDF4Mutex = NULL;
+CPLMutex *hHDF4Mutex = NULL;
 
 /************************************************************************/
 /* ==================================================================== */
@@ -1246,5 +1246,9 @@ void GDALRegister_HDF4()
 
         GetGDALDriverManager()->RegisterDriver( poDriver );
     }
-}
 
+#ifdef HDF4_PLUGIN
+    GDALRegister_HDF4Image();
+#endif
+
+}

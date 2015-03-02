@@ -30,7 +30,6 @@
 import os
 import shutil
 import sys
-import string
 
 sys.path.append( '../pymod' )
 
@@ -200,7 +199,7 @@ def ogr_shape_6():
         return 'skip'
 
     sql_lyr = gdaltest.shape_ds.ExecuteSQL( \
-        'select * from tpoly where prfedea = "35043413"' )
+        "select * from tpoly where prfedea = '35043413'" )
 
     tr = ogrtest.check_features_against_list( sql_lyr, 'prfedea', [ '35043413' ] )
     if tr:
@@ -1182,7 +1181,7 @@ def ogr_shape_27():
     ds.Destroy()
     ds = None
     
-    return 'success'
+    return result
 
 ###############################################################################
 # Test reading a 3 GB .DBF (#3011)
@@ -1304,7 +1303,7 @@ def ogr_shape_29():
     shutil.copy('data/poly.shx', 'tmp/UPPERCASE/UPPERCASE.SHX')
     shutil.copy('data/poly.dbf', 'tmp/UPPERCASE/UPPERCASE.DBF')
     f = open('tmp/UPPERCASE/UPPERCASE.CPG', 'wb')
-    f.write('UTF-8')
+    f.write('UTF-8'.encode('ascii'))
     f.close()
 
     ds = ogr.Open('tmp/UPPERCASE', update = 1)
@@ -2002,8 +2001,8 @@ def ogr_shape_45():
 def ogr_shape_46():
 
     ds = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource( '/vsimem/ogr_shape_46.shp' )
-    lyr = ds.CreateLayer( 'you_can_put_here_what_you_want_i_dont_care' )
-    lyr = ds.CreateLayer( 'this_one_i_care_46' )
+    ds.CreateLayer( 'you_can_put_here_what_you_want_i_dont_care' )
+    ds.CreateLayer( 'this_one_i_care_46' )
     ds = None
 
     ds = ogr.Open('/vsimem/ogr_shape_46.shp')
@@ -2705,7 +2704,7 @@ def ogr_shape_54():
         gdal.ErrorReset()
         gdal.PushErrorHandler('CPLQuietErrorHandler')
         lyr.ResetReading()
-        feat = lyr.GetNextFeature()
+        lyr.GetNextFeature()
         gdal.PopErrorHandler()
         if gdal.GetLastErrorMsg() == '':
             gdaltest.post_reason('failed')
@@ -2718,7 +2717,7 @@ def ogr_shape_54():
     gdal.ErrorReset()
     gdal.PushErrorHandler('CPLQuietErrorHandler')
     lyr.ResetReading()
-    feat = lyr.GetNextFeature()
+    lyr.GetNextFeature()
     gdal.PopErrorHandler()
     #if gdal.GetLastErrorMsg() == '':
     #    gdaltest.post_reason('failed')
@@ -3950,10 +3949,10 @@ def ogr_shape_82():
     gdaltest.shape_lyr.CreateFeature(feat)
 
     #insert feature with long string in English
-    init_en = 'Remont kablukov i ih zamena; zamena naboek; profilaktika i remont podoshvy; remont i zamena supinatorov; zamena stelek; zamena obuvnoj furnitury; remont golenishha; rastjazhka obuvi; chistka i pokraska obuvi.	Smolenskaja oblast, p. Monastyrshhina, ulica Sovetskaja, d. 38.	Rabotaet ponedelnik – chetverg s 9.00 do 18.00, pjatnica s 10.00 do 17.00, vyhodnoj: subbota'
-    result_en = 'Remont kablukov i ih zamena; zamena naboek; profilaktika i remont podoshvy; remont i zamena supinatorov; zamena stelek; zamena obuvnoj furnitury; remont golenishha; rastjazhka obuvi; chistka i pokraska obuvi.	Smolenskaja oblast, p. Monastyrshhina, ul'
+    init_en = 'Remont kablukov i ih zamena; zamena naboek; profilaktika i remont podoshvy; remont i zamena supinatorov; zamena stelek; zamena obuvnoj furnitury; remont golenishha; rastjazhka obuvi; chistka i pokraska obuvi. Smolenskaja oblast, p. Monastyrshhina, ulica Sovetskaja, d. 38.	Rabotaet ponedelnik – chetverg s 9.00 do 18.00, pjatnica s 10.00 do 17.00, vyhodnoj: subbota'
+    result_en = 'Remont kablukov i ih zamena; zamena naboek; profilaktika i remont podoshvy; remont i zamena supinatorov; zamena stelek; zamena obuvnoj furnitury; remont golenishha; rastjazhka obuvi; chistka i pokraska obuvi. Smolenskaja oblast, p. Monastyrshhina, ulica'
     feat = ogr.Feature(feature_def = gdaltest.shape_lyr.GetLayerDefn())
-    feat.SetField('cut_field',  init_rus)
+    feat.SetField('cut_field',  init_en)
     gdaltest.shape_lyr.CreateFeature(feat)
 
     #TODO: check you language
@@ -3967,8 +3966,10 @@ def ogr_shape_82():
         return 'fail'
 
     feat = gdaltest.shape_lyr.GetFeature(1) #en
-    if feat.cut_field != result_rus:
+    if feat.cut_field != result_en:
         gdaltest.post_reason('Wrong en string cut')
+        print(feat.cut_field)
+        print(result_en)
         return 'fail'
 
     return 'success'
@@ -4015,6 +4016,116 @@ def ogr_shape_84():
     return 'success'
 
 ###############################################################################
+# Test Integer64
+
+def ogr_shape_85():
+
+    ds = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('/vsimem/ogr_shape_85.shp')
+    lyr = ds.CreateLayer('ogr_shape_85')
+    lyr.CreateField(ogr.FieldDefn('int', ogr.OFTInteger))
+    lyr.CreateField(ogr.FieldDefn('int64', ogr.OFTInteger64))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 123456789)
+    f.SetField(1, 123456789012345678)
+    lyr.CreateFeature(f)
+    f = None
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_shape_85.shp', update = 1)
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(1).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 123456789 or f.GetField(1) != 123456789012345678:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    # Passing from 9 to 10 figures causes "promotion" to Integer64
+    f.SetField(0, 2000000000)
+    # Passing from 18 to 19 figures causes "promotion" to Real
+    f.SetField(1, 9000000000000000000)
+    lyr.SetFeature(f)
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_shape_85.shp')
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(1).GetType() != ogr.OFTReal:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 2000000000 or f.GetField(1) != 9000000000000000000:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    ds = None
+    
+    # Test open option ADJUST_TYPE
+    ds = gdal.OpenEx('/vsimem/ogr_shape_85.shp', gdal.OF_VECTOR, open_options = ['ADJUST_TYPE=YES'])
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(1).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 2000000000 or f.GetField(1) != 9000000000000000000:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    ds = None
+    
+    ogr.GetDriverByName('ESRI Shapefile').DeleteDataSource( '/vsimem/ogr_shape_85.shp' )
+    
+    ds = ogr.GetDriverByName('ESRI Shapefile').CreateDataSource('/vsimem/ogr_shape_85.shp')
+    lyr = ds.CreateLayer('ogr_shape_85')
+    lyr.CreateField(ogr.FieldDefn('int', ogr.OFTInteger))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 123456789)
+    lyr.CreateFeature(f)
+    fd = ogr.FieldDefn("foo", ogr.OFTInteger64)
+    ret = lyr.AlterFieldDefn(0, fd, ogr.ALTER_TYPE_FLAG)
+    if ret != 0:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f.SetField(0, 123456789012345678)
+    lyr.SetFeature(f)
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_shape_85.shp', update = 1)
+    lyr = ds.GetLayer(0)
+    if lyr.GetLayerDefn().GetFieldDefn(0).GetType() != ogr.OFTInteger64:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    f = lyr.GetNextFeature()
+    if f.GetField(0) != 123456789012345678:
+        gdaltest.post_reason('failure')
+        return 'fail'
+    ds = None
+    
+    return 'success'
+
+###############################################################################
+# Robustness: test reading a non-conformant shapefile that mixes different shape type
+# OGR can not produce such a file (unless patched)
+
+def ogr_shape_86():
+
+    ds = ogr.Open('data/mixed_shape_type_non_conformant.shp')
+    sql_lyr = ds.ExecuteSQL("select count(distinct ogr_geometry) from mixed_shape_type_non_conformant")
+    f = sql_lyr.GetNextFeature()
+    val = f.GetField(0)
+    ds.ReleaseResultSet(sql_lyr)
+    if val != 6:
+        return 'fail'
+
+    return 'success'
+
+###############################################################################
 # 
 
 def ogr_shape_cleanup():
@@ -4049,6 +4160,7 @@ def ogr_shape_cleanup():
     shape_drv.DeleteDataSource( '/vsimem/ogr_shape_81.shp' )
     shape_drv.DeleteDataSource( '/vsimem/ogr_shape_83.shp' )
     shape_drv.DeleteDataSource( '/vsimem/ogr_shape_84.shp' )
+    shape_drv.DeleteDataSource( '/vsimem/ogr_shape_85.shp' )
 
     return 'success'
 
@@ -4139,6 +4251,8 @@ gdaltest_list = [
     ogr_shape_82,
     ogr_shape_83,
     ogr_shape_84,
+    ogr_shape_85,
+    ogr_shape_86,
     ogr_shape_cleanup ]
 
 if __name__ == '__main__':

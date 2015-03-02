@@ -33,7 +33,6 @@
 import os
 import os.path
 import sys
-import string
 import array
 import shutil
 from osgeo import gdal
@@ -89,9 +88,16 @@ def ecw_1():
 
         sdk_off = longname.find('SDK ')
         if sdk_off != -1:
-            gdaltest.ecw_drv.major_version = int(longname[sdk_off+4])
+            gdaltest.ecw_drv.major_version = int(float(longname[sdk_off+4]))
+            sdk_minor_off = longname.find('.', sdk_off)
+            if sdk_minor_off >= 0:
+                gdaltest.ecw_drv.minor_version = int(longname[sdk_minor_off+1])
+            else:
+                gdaltest.ecw_drv.minor_version = 0
         else:
             gdaltest.ecw_drv.major_version = 3
+            gdaltest.ecw_drv.minor_version = 3
+
     # we set ECW to not resolve projection and datum strings to get 3.x behavior.     
     gdal.SetConfigOption("ECW_DO_NOT_RESOLVE_DATUM_PROJECTION", "YES")
     return 'success'
@@ -863,15 +869,15 @@ def ecw_25():
 
     if got_proj != proj:
         gdaltest.post_reason('fail')
-        print(proj)
+        print(got_proj)
         return 'fail'
     if got_datum != datum:
         gdaltest.post_reason('fail')
-        print(datum)
+        print(got_datum)
         return 'fail'
     if got_units != units:
         gdaltest.post_reason('fail')
-        print(units)
+        print(got_units)
         return 'fail'
 
     if wkt != got_wkt:
@@ -999,8 +1005,8 @@ def ecw_28():
     ds = None
 
     import struct
-    tab1 = struct.unpack('B' * 3, multiband_data)
-    tab2 = struct.unpack('B' * 3, data1 + data2 + data3)
+    struct.unpack('B' * 3, multiband_data)
+    struct.unpack('B' * 3, data1 + data2 + data3)
 
     # Due to the nature of ECW, reading one band or several bands does not give
     # the same results.
@@ -1050,8 +1056,8 @@ def ecw_29():
             for i in range(2 * int((ds1.RasterXSize - tile/2) / tile)):
                 tmp_ds1 = gdal.GetDriverByName('MEM').Create('', tile ,tile, 1)
                 tmp_ds2 = gdal.GetDriverByName('MEM').Create('', tile ,tile, 1)
-                data1 = ds1.ReadRaster(i * (tile/2), j * (tile/2), tile, tile)
-                data2 = ds2.ReadRaster(i * (tile/2), j * (tile/2), tile, tile)
+                data1 = ds1.ReadRaster(i * int(tile/2), j * int(tile/2), tile, tile)
+                data2 = ds2.ReadRaster(i * int(tile/2), j * int(tile/2), tile, tile)
                 tmp_ds1.WriteRaster(0,0,tile,tile,data1)
                 tmp_ds2.WriteRaster(0,0,tile,tile,data2)
                 (ignored, ignored, mean1, stddev1) = tmp_ds1.GetRasterBand(1).GetStatistics(1,1)
@@ -1091,7 +1097,7 @@ def ecw_30():
     data_readblock = ds.GetRasterBand(1).ReadBlock(0,0)
     ds = None
 
-    if data_readraster != data_readraster:
+    if data_readraster != data_readblock:
         return 'fail'
 
     return 'success'
@@ -1301,7 +1307,7 @@ def ecw_34():
     ds.GetRasterBand(1).Fill(65535)
     ref_data = ds.GetRasterBand(1).ReadRaster(0, 0, 128, 128, buf_type = gdal.GDT_UInt16)
     out_ds = gdaltest.ecw_drv.CreateCopy( 'tmp/UInt16_big_out.ecw', ds, options = ['ECW_FORMAT_VERSION=3','TARGET=1'] )
-    out_ds = None
+    del out_ds
     ds = None
 
     ds = gdal.Open( 'tmp/UInt16_big_out.ecw' )
@@ -1329,7 +1335,7 @@ def ecw_35():
     ds.GetRasterBand(1).Fill(65535)
     ref_data = ds.GetRasterBand(1).ReadRaster(0, 0, 128, 128, buf_type = gdal.GDT_UInt16)
     out_ds = gdaltest.jp2ecw_drv.CreateCopy( 'tmp/UInt16_big_out.jp2', ds, options = ['TARGET=1'] )
-    out_ds = None
+    del out_ds
     ds = None
 
     ds = gdal.Open( 'tmp/UInt16_big_out.jp2' )
@@ -1771,6 +1777,7 @@ def ecw_42():
 
 ###############################################################################
 # Test auto-promotion of 1bit alpha band to 8bit
+# Note: only works on reversible files like this one
 
 def ecw_43():
 
@@ -1788,7 +1795,7 @@ def ecw_43():
         return 'fail'
     jp2_bands_data = ds.ReadRaster(0,0,ds.RasterXSize,ds.RasterYSize)
     jp2_fourth_band_data = fourth_band.ReadRaster(0,0,ds.RasterXSize,ds.RasterYSize)
-    jp2_fourth_band_subsampled_data = fourth_band.ReadRaster(0,0,ds.RasterXSize,ds.RasterYSize,ds.RasterXSize/16,ds.RasterYSize/16)
+    fourth_band.ReadRaster(0,0,ds.RasterXSize,ds.RasterYSize,int(ds.RasterXSize/16),int(ds.RasterYSize/16))
 
     tmp_ds = gdal.GetDriverByName('GTiff').CreateCopy('/vsimem/ecw_43.tif', ds)
     fourth_band = tmp_ds.GetRasterBand(4)
@@ -1811,8 +1818,55 @@ def ecw_43():
         gdaltest.post_reason('fail')
         return 'fail'
 
+    ds = gdal.OpenEx('data/stefan_full_rgba_alpha_1bit.jp2', open_options = ['1BIT_ALPHA_PROMOTION=NO'])
+    fourth_band = ds.GetRasterBand(4)
+    if fourth_band.GetMetadataItem('NBITS', 'IMAGE_STRUCTURE') != '1':
+        gdaltest.post_reason('fail')
+        return 'fail'
+
     return 'success'
 
+###############################################################################
+# Test metadata retrieval from JP2 file
+
+def ecw_44():
+
+    if gdaltest.jp2ecw_drv is None:
+        return 'skip'
+    if gdaltest.ecw_drv.major_version < 5 or (gdaltest.ecw_drv.major_version ==5 and gdaltest.ecw_drv.minor_version <1) :
+        return 'skip'
+
+    ds = gdal.Open('data/stefan_full_rgba_alpha_1bit.jp2')
+
+    expected_md = [
+  ('CODE_BLOCK_SIZE_X','64'),
+  ('CODE_BLOCK_SIZE_Y','64'),
+  ('GML_JP2_DATA','FALSE'),
+  ('PRECINCT_SIZE_X','128,128'),
+  ('PRECINCT_SIZE_Y','128,128'),
+  ('PRECISION','8,8,8,1'),
+  ('PROFILE','0'),
+  ('PROGRESSION_ORDER','RPCL'),
+  ('QUALITY_LAYERS','1'),
+  ('RESOLUTION_LEVELS','2'),
+  ('PROGRESSION_ORDER','RPCL'),
+  ('TILE_HEIGHT','150'),
+  ('TILE_WIDTH','162'),
+  ('TILES_X','1'),
+  ('TILES_Y','1'),
+  ('TRANSFORMATION_TYPE','5x3'),
+  ('USE_EPH','TRUE'),
+  ('USE_SOP','FALSE') ]
+
+    got_md = ds.GetMetadata('JPEG2000')
+    for (key,value) in expected_md:
+        if key not in got_md or got_md[key] != value:
+            gdaltest.post_reason('fail')
+            print(key)
+            print(got_md)
+            return 'fail'
+
+    return 'success'
 ###############################################################################
 def ecw_online_1():
     if gdaltest.jp2ecw_drv is None:
@@ -2137,6 +2191,7 @@ gdaltest_list = [
     ecw_41,
     ecw_42,
     ecw_43,
+    ecw_44,
     ecw_online_1,
     ecw_online_2,
     #JTO this test does not make sense. It tests difference between two files pixel by pixel but compression is lossy# ecw_online_3, 

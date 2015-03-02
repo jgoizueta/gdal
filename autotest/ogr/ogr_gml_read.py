@@ -32,15 +32,14 @@
 
 import os
 import sys
-import string
 
 sys.path.append( '../pymod' )
 
 import gdaltest
 import ogrtest
+from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
-from osgeo import gdal
 import shutil
 
 ###############################################################################
@@ -301,9 +300,14 @@ def ogr_gml_8():
     gml_ds = ogr.Open( 'data/utf8.gml' )
     lyr = gml_ds.GetLayer()
     feat = lyr.GetNextFeature()
-    if feat.GetFieldAsString('name') != '\xc4\x80liamanu':
-        print(feat.GetFieldAsString('name'))
-        return 'fail'
+    if sys.version_info >= (3,0,0):
+        if feat.GetFieldAsString('name') != '\xc4\x80liamanu'.encode('latin1').decode('utf-8'):
+            print(feat.GetFieldAsString('name'))
+            return 'fail'
+    else:
+        if feat.GetFieldAsString('name') != '\xc4\x80liamanu':
+            print(feat.GetFieldAsString('name'))
+            return 'fail'
 
     gml_ds.Destroy()
 
@@ -323,7 +327,7 @@ def ogr_gml_9():
     lyr.CreateField(ogr.FieldDefn('test', ogr.OFTString))
 
     dst_feat = ogr.Feature( lyr.GetLayerDefn() )
-    dst_feat.SetField('test', '\x80bad')
+    dst_feat.SetFieldBinaryFromHexString('test', '80626164') # \x80bad'
 
     # Avoid the warning
     gdal.PushErrorHandler('CPLQuietErrorHandler')
@@ -340,12 +344,12 @@ def ogr_gml_9():
     ds = ogr.Open('tmp/broken_utf8.gml')
     lyr = ds.GetLayerByName('test')
     feat = lyr.GetNextFeature()
-
     if feat.GetField('test') != '?bad':
         gdaltest.post_reason('Unexpected content.')
+        print(feat.GetField('test'))
         return 'fail'
 
-    feat.Destroy();
+    feat.Destroy()
     ds.Destroy()
 
     os.remove('tmp/broken_utf8.gml')
@@ -581,7 +585,7 @@ def ogr_gml_14():
     gdal.SetConfigOption( 'GML_SKIP_RESOLVE_ELEMS', 'gml:directedNode' )
     gdal.SetConfigOption( 'GML_SAVE_RESOLVED_TO', 'tmp/cache/xlink2resolved.gml' )
     gml_ds = ogr.Open( 'tmp/cache/xlink1.gml' )
-    gml_ds = None
+    del gml_ds
     gdal.SetConfigOption( 'GML_SKIP_RESOLVE_ELEMS', None )
     gdal.SetConfigOption( 'GML_SAVE_RESOLVED_TO', None )
 
@@ -778,7 +782,7 @@ def ogr_gml_20():
 
     idx = ldefn.GetFieldIndex("cat")
     fddefn = ldefn.GetFieldDefn(idx)
-    if fddefn.GetFieldTypeName(fddefn.GetType()) != 'Integer':
+    if fddefn.GetFieldTypeName(fddefn.GetType()) != 'Integer64':
         gdaltest.post_reason('did not get expected column type for col "cat"')
         return 'fail'
     idx = ldefn.GetFieldIndex("str1")
@@ -3005,7 +3009,7 @@ def ogr_gml_65():
         ds = None
 
         f = gdal.VSIFOpenL(filename, 'rb')
-        data = gdal.VSIFReadL(1, 10000, f)
+        data = gdal.VSIFReadL(1, 10000, f).decode('ascii')
         gdal.VSIFCloseL(f)
 
         if data.find(expected) < 0:
@@ -3374,7 +3378,7 @@ def ogr_gml_66():
     return 'success'
 
 ###############################################################################
-# Test boolean and int16 type
+# Test boolean, int16, integer64 type
 
 def ogr_gml_67():
 
@@ -3399,12 +3403,24 @@ def ogr_gml_67():
     fld_defn = ogr.FieldDefn('float', ogr.OFTReal)
     fld_defn.SetSubType(ogr.OFSTFloat32)
     lyr.CreateField(fld_defn)
+    fld_defn = ogr.FieldDefn('int64', ogr.OFTInteger64)
+    lyr.CreateField(fld_defn)
+    fld_defn = ogr.FieldDefn('int64list', ogr.OFTInteger64List)
+    lyr.CreateField(fld_defn)
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetField(0, 1)
     f.SetField(1, 0)
     f.SetFieldIntegerList(2, [1,0])
     f.SetField(3, -32768)
     f.SetField(4, 1.23)
+    f.SetField(5, 1)
+    f.SetFieldInteger64List(6, [1])
+    lyr.CreateFeature(f)
+    
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetFID(1234567890123)
+    f.SetField(5, 1234567890123)
+    f.SetFieldInteger64List(6, [1, 1234567890123])
     lyr.CreateFeature(f)
     f = None
 
@@ -3437,8 +3453,22 @@ def ogr_gml_67():
                 print(i)
                 gdaltest.post_reason('fail')
                 return 'fail'
+        if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('int64')).GetType() != ogr.OFTInteger64:
+            print(i)
+            gdaltest.post_reason('fail')
+            return 'fail'
+        if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('int64list')).GetType() != ogr.OFTInteger64List:
+            print(i)
+            gdaltest.post_reason('fail')
+            return 'fail'
         f = lyr.GetNextFeature()
         if f.GetField('b1') != 1 or f.GetField('b2') != 0 or f.GetFieldAsString('bool_list') != '(2:1,0)' or f.GetField('short') != -32768 or f.GetField('float') != 1.23:
+            print(i)
+            gdaltest.post_reason('fail')
+            f.DumpReadable()
+            return 'fail'
+        f = lyr.GetNextFeature()
+        if f.GetFID() != 1234567890123 or f.GetField('int64') != 1234567890123 or f.GetField('int64list') != [1, 1234567890123]:
             print(i)
             gdaltest.post_reason('fail')
             f.DumpReadable()
@@ -3479,6 +3509,114 @@ def ogr_gml_68():
             return 'fail'
 
     ds = None
+
+    return 'success'
+
+###############################################################################
+# Test not nullable fields
+
+def ogr_gml_69():
+
+    if not gdaltest.have_gml_reader:
+        return 'skip'
+
+    ds = ogr.GetDriverByName('GML').CreateDataSource('/vsimem/ogr_gml_69.gml')
+    lyr = ds.CreateLayer('test', geom_type = ogr.wkbNone)
+    field_defn = ogr.FieldDefn('field_not_nullable', ogr.OFTString)
+    field_defn.SetNullable(0)
+    lyr.CreateField(field_defn)
+    field_defn = ogr.FieldDefn('field_nullable', ogr.OFTString)
+    lyr.CreateField(field_defn)
+    field_defn = ogr.GeomFieldDefn('geomfield_not_nullable', ogr.wkbPoint)
+    field_defn.SetNullable(0)
+    lyr.CreateGeomField(field_defn)
+    field_defn = ogr.GeomFieldDefn('geomfield_nullable', ogr.wkbPoint)
+    lyr.CreateGeomField(field_defn)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField('field_not_nullable', 'not_null')
+    f.SetGeomFieldDirectly('geomfield_not_nullable', ogr.CreateGeometryFromWkt('POINT(0 0)'))
+    lyr.CreateFeature(f)
+    f = None
+    
+    # Error case: missing geometry
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField('field_not_nullable', 'not_null')
+    gdal.PushErrorHandler()
+    ret = lyr.CreateFeature(f)
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = None
+    
+    # Error case: missing non-nullable field
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometryDirectly(ogr.CreateGeometryFromWkt('POINT(0 0)'))
+    gdal.PushErrorHandler()
+    ret = lyr.CreateFeature(f)
+    gdal.PopErrorHandler()
+    if ret == 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    f = None
+
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_gml_69.gml')
+    lyr = ds.GetLayerByName('test')
+    if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('field_not_nullable')).IsNullable() != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if lyr.GetLayerDefn().GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex('field_nullable')).IsNullable() != 1:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if lyr.GetLayerDefn().GetGeomFieldDefn(lyr.GetLayerDefn().GetGeomFieldIndex('geomfield_not_nullable')).IsNullable() != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if lyr.GetLayerDefn().GetGeomFieldDefn(lyr.GetLayerDefn().GetGeomFieldIndex('geomfield_nullable')).IsNullable() != 1:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    gdal.Unlink("/vsimem/ogr_gml_69.gml")
+    gdal.Unlink("/vsimem/ogr_gml_69.xsd")
+
+    return 'success'
+
+###############################################################################
+# Test default fields (not really supported, but we must do something as we
+# support not nullable fields)
+
+def ogr_gml_70():
+
+    if not gdaltest.have_gml_reader:
+        return 'skip'
+
+    ds = ogr.GetDriverByName('GML').CreateDataSource('/vsimem/ogr_gml_70.gml')
+    lyr = ds.CreateLayer('test', geom_type = ogr.wkbNone)
+    
+    field_defn = ogr.FieldDefn( 'field_string', ogr.OFTString )
+    field_defn.SetDefault("'a'")
+    field_defn.SetNullable(0)
+    lyr.CreateField(field_defn)
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    lyr.CreateFeature(f)
+    f = None
+
+    ds = None
+
+    ds = ogr.Open('/vsimem/ogr_gml_70.gml')
+    lyr = ds.GetLayerByName('test')
+    f = lyr.GetNextFeature()
+    if f.GetField('field_string') != 'a':
+        gdaltest.post_reason('fail')
+        f.DumpReadable()
+        return 'fail'
+    ds = None
+    
+    gdal.Unlink("/vsimem/ogr_gml_70.gml")
+    gdal.Unlink("/vsimem/ogr_gml_70.xsd")
 
     return 'success'
 
@@ -3682,6 +3820,8 @@ gdaltest_list = [
     ogr_gml_66,
     ogr_gml_67,
     ogr_gml_68,
+    ogr_gml_69,
+    ogr_gml_70,
     ogr_gml_cleanup ]
 
 #gdaltest_list = [ 

@@ -3,6 +3,8 @@ from osgeo import ogr
 from osgeo import osr
 import os
 import shutil
+os.access
+shutil.copy
 
 ogr.Open('non_existing', update = 0)
 ogr.Open('non_existing', update = 1)
@@ -10,6 +12,7 @@ ds1 = ogr.GetDriverByName('CSV').CreateDataSource('/vsimem/test.csv', options = 
 ds1_lyr1 = ds1.CreateLayer('test', srs = None, geom_type = ogr.wkbUnknown, options = [])
 geom_fd = ogr.GeomFieldDefn('geomfield', ogr.wkbPolygon)
 geom_fd.SetSpatialRef(osr.SpatialReference("""GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]"""))
+geom_fd.SetNullable(0)
 ds1_lyr1.CreateGeomField(geom_fd, approx_ok = 1)
 ds1 = None
 ds1 = ogr.Open('/vsimem/test.csv', update = 1)
@@ -26,6 +29,8 @@ ds1_lyr1.CreateField(fd, approx_ok = 1)
 fd = ogr.FieldDefn('realfield', ogr.OFTReal)
 fd.SetWidth(24)
 fd.SetPrecision(15)
+fd.SetNullable(0)
+fd.SetDefault('3')
 ds1_lyr1.CreateField(fd, approx_ok = 1)
 fd = ogr.FieldDefn('strfield', ogr.OFTString)
 ds1_lyr1.CreateField(fd, approx_ok = 1)

@@ -83,7 +83,7 @@ void CopyMetadata( void  *poDS, int fpImage, int CDFVarID,
 // uncomment this for more debug ouput
 // #define NCDF_DEBUG 1
 
-void *hNCMutex = NULL;
+CPLMutex *hNCMutex = NULL;
 
 /************************************************************************/
 /* ==================================================================== */
@@ -447,6 +447,15 @@ netCDFRasterBand::netCDFRasterBand( netCDFDataset *poNCDFDS,
         }
 	} 		
 #endif
+
+/* -------------------------------------------------------------------- */
+/*      Force block size to 1 scanline for bottom-up datasets if        */
+/*      nBlockYSize != 1                                                */
+/* -------------------------------------------------------------------- */
+    if( poNCDFDS->bBottomUp && nBlockYSize != 1 ) {
+        nBlockXSize = nRasterXSize;
+        nBlockYSize = 1;
+    }
 }
 
 /* constructor in create mode */
@@ -1990,8 +1999,8 @@ void netCDFDataset::SetProjectionFromVar( int nVarId )
                         if( dfSemiMajorAxis < 0.0 )
                             dfSemiMajorAxis = dfEarthRadius;
                         //set inv_flat using semi_minor/major
-                        dfInverseFlattening = 
-                            1.0 / ( dfSemiMajorAxis - dfSemiMinorAxis ) / dfSemiMajorAxis;
+                        dfInverseFlattening = OSRCalcInvFlattening(dfSemiMajorAxis, dfSemiMinorAxis);
+
                         oSRS.SetGeogCS( "unknown", 
                                         NULL, 
                                         "Spheroid", 
@@ -5924,6 +5933,10 @@ void GDALRegister_netCDF()
 
         GetGDALDriverManager( )->RegisterDriver( poDriver );
     }
+
+#ifdef NETCDF_PLUGIN
+    GDALRegister_GMT();
+#endif
 }
 
 /************************************************************************/

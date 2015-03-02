@@ -498,7 +498,7 @@ int JP2OpenJPEGDataset::PreloadBlocks(JP2OpenJPEGRasterBand* poBand,
         if( nBlocksToLoad > 1 )
         {
             int nThreads = MIN(nBlocksToLoad, nMaxThreads);
-            void** pahThreads = (void**) CPLMalloc( sizeof(void*) * nThreads );
+            CPLJoinableThread** pahThreads = (CPLJoinableThread**) CPLMalloc( sizeof(CPLJoinableThread*) * nThreads );
             int i;
 
             CPLDebug("OPENJPEG", "%d blocks to load", nBlocksToLoad);
@@ -1002,7 +1002,10 @@ GDALDataset *JP2OpenJPEGDataset::Open( GDALOpenInfo * poOpenInfo )
 
     opj_image_t * psImage = NULL;
     OPJ_INT32  nX0,nY0;
-    OPJ_UINT32 nTileW,nTileH,nTilesX,nTilesY;
+    OPJ_UINT32 nTileW,nTileH;
+#ifdef DEBUG
+    OPJ_UINT32 nTilesX,nTilesY;
+#endif
     if(!opj_read_header(pStream,pCodec,&psImage))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "opj_read_header() failed");
@@ -1018,8 +1021,10 @@ GDALDataset *JP2OpenJPEGDataset::Open( GDALOpenInfo * poOpenInfo )
     nY0 = pCodeStreamInfo->ty0;
     nTileW = pCodeStreamInfo->tdx;
     nTileH = pCodeStreamInfo->tdy;
+#ifdef DEBUG
     nTilesX = pCodeStreamInfo->tw;
     nTilesY = pCodeStreamInfo->th;
+#endif
     int mct = pCodeStreamInfo->m_default_tile_info.mct;
     int numResolutions = pCodeStreamInfo->m_default_tile_info.tccp_info[0].numresolutions;
     opj_destroy_cstr_info(&pCodeStreamInfo);
@@ -1039,6 +1044,8 @@ GDALDataset *JP2OpenJPEGDataset::Open( GDALOpenInfo * poOpenInfo )
     CPLDebug("OPENJPEG", "nY0 = %d", nY0);
     CPLDebug("OPENJPEG", "nTileW = %d", nTileW);
     CPLDebug("OPENJPEG", "nTileH = %d", nTileH);
+    CPLDebug("OPENJPEG", "nTilesX = %d", nTilesX);
+    CPLDebug("OPENJPEG", "nTilesY = %d", nTilesY);
     CPLDebug("OPENJPEG", "mct = %d", mct);
     CPLDebug("OPENJPEG", "psImage->x0 = %d", psImage->x0);
     CPLDebug("OPENJPEG", "psImage->y0 = %d", psImage->y0);
@@ -1163,7 +1170,10 @@ GDALDataset *JP2OpenJPEGDataset::Open( GDALOpenInfo * poOpenInfo )
             psImage->comps[1].prec == 8 &&
             psImage->comps[2].prec == 8 &&
             psImage->comps[3].prec == 1 && 
-            CSLTestBoolean(CPLGetConfigOption("JP2OPENJPEG_PROMOTE_1BIT_ALPHA_AS_8BIT", "YES")) );
+            CSLFetchBoolean(poOpenInfo->papszOpenOptions, "1BIT_ALPHA_PROMOTION",
+                    CSLTestBoolean(CPLGetConfigOption("JP2OPENJPEG_PROMOTE_1BIT_ALPHA_AS_8BIT", "YES"))) );
+        if( bPromoteTo8Bit )
+            CPLDebug("JP2OpenJPEG", "Fourth (alpha) band is promoted from 1 bit to 8 bit");
 
         JP2OpenJPEGRasterBand* poBand =
             new JP2OpenJPEGRasterBand( poDS, iBand, eDataType,
@@ -2017,6 +2027,11 @@ void GDALRegister_JP2OpenJPEG()
         poDriver->SetMetadataItem( GDAL_DMD_EXTENSION, "jp2" );
         poDriver->SetMetadataItem( GDAL_DMD_CREATIONDATATYPES, 
                                    "Byte Int16 UInt16 Int32 UInt32" );
+
+        poDriver->SetMetadataItem( GDAL_DMD_OPENOPTIONLIST, 
+"<OpenOptionList>"
+"   <Option name='1BIT_ALPHA_PROMOTION' type='boolean' description='Whether a 1-bit alpha channel should be promoted to 8-bit' default='YES'/>"
+"</OpenOptionList>" );
 
         poDriver->SetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST,
 "<CreationOptionList>"

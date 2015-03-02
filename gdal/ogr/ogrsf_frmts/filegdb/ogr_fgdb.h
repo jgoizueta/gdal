@@ -115,7 +115,7 @@ class FGdbLayer : public FGdbBaseLayer
 
   std::vector<ByteArray*> m_apoByteArrays;
   OGRErr              PopulateRowWithFeature( Row& row, OGRFeature *poFeature );
-  OGRErr              GetRow( EnumRows& enumRows, Row& row, long nFID );
+  OGRErr              GetRow( EnumRows& enumRows, Row& row, GIntBig nFID );
 
   char              **m_papszOptions;
   
@@ -141,7 +141,7 @@ public:
 
   virtual void        ResetReading();
   virtual OGRFeature* GetNextFeature();
-  virtual OGRFeature* GetFeature( long nFeatureId );
+  virtual OGRFeature* GetFeature( GIntBig nFeatureId );
 
   Table* GetTable() { return m_pTable; }
 
@@ -156,10 +156,10 @@ public:
 
   virtual OGRErr      ICreateFeature( OGRFeature *poFeature );
   virtual OGRErr      ISetFeature( OGRFeature *poFeature );
-  virtual OGRErr      DeleteFeature( long nFID );
+  virtual OGRErr      DeleteFeature( GIntBig nFID );
 
   virtual OGRErr      GetExtent( OGREnvelope *psExtent, int bForce );
-  virtual int         GetFeatureCount( int bForce );
+  virtual GIntBig     GetFeatureCount( int bForce );
   virtual OGRErr      SetAttributeFilter( const char *pszQuery );
   virtual void 	      SetSpatialFilterRect (double dfMinX, double dfMinY, double dfMaxX, double dfMaxY);
   virtual void        SetSpatialFilter( OGRGeometry * );
@@ -296,7 +296,7 @@ public:
 class FGdbDriver : public OGRSFDriver
 {
   std::map<CPLString, FGdbDatabaseConnection*> oMapConnections;
-  void* hMutex;
+  CPLMutex* hMutex;
 
 public:
   FGdbDriver();
@@ -309,7 +309,7 @@ public:
   virtual OGRErr DeleteDataSource( const char *pszDataSource );
 
   void Release(const char* pszName);
-  void* GetMutex() { return hMutex; }
+  CPLMutex* GetMutex() { return hMutex; }
 
 private:
 

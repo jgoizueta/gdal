@@ -76,6 +76,50 @@ Out-of-tree drivers :
     GDALRasterBand and GDALDataset::RasterIO() take a new
     GDALRasterIOExtraArg* psExtraArg argument
 
+D) RFC 31: OGR 64bit Integer Fields and FIDs
+
+Link:http://trac.osgeo.org/gdal/wiki/rfc31_ogr_64
+
+C++ API:
+  * OGRLayer::GetFeature(), OGRLayer::DeleteFeature(), OGRLayer::SetNextByIndex() take a GIntBig instead of a long
+  * OGRFeature::GetFID() and OGRLayer::GetFeatureCount() now returns a GIntBig
+
+C API:
+  * OGR_L_GetFeature(), OGR_L_DeleteFeature(), OGR_L_SetNextByIndex() take a GIntBig instead of a long
+  * OGR_F_GetFID() and OGR_L_GetFeatureCount() now returns a GIntBig
+
+Behaviour changes :
+  * OFTInteger64 and OFTIntegerList64 can be returned whereas OGRFieldType is returned.
+
+Out-of-tree drivers :
+  * Virtual method signature change: OGRLayer::GetFeature(), OGRLayer::DeleteFeature(),
+    OGRLayer::SetNextByIndex() take a GIntBig argument instead of a long
+  * Virtual method signature change: OGRLayer::GetFeatureCount() now returns a GIntBig
+  * OGRFeature::GetFID() returns a GIntBig
+
+E) RFC 52: Strict OGR SQL quoting
+
+Link: http://trac.osgeo.org/gdal/wiki/rfc52_strict_sql_quoting
+
+No API changes
+
+Behaviour changes:
+  * Identifiers, i.e column names or table names, can no longer be quoted with
+    single quote characters, but must use double quote characters if quoting is
+    needed, conforming with SQL 92 syntax. Failure to do the change will not
+    necessarily need to verbose errors at runtime since an expression like
+    WHERE 'a_column_name' = 'a_value' will now always evaluate to FALSE whereas
+    it would have been interpreted as WHERE "a_column_name" = 'a_value" if
+    a_column_name was indeed a column name.
+
+F) RFC 53: 
+
+http://trac.osgeo.org/gdal/wiki/rfc53_ogr_notnull_default
+
+API changes:
+    * OGRFieldDefn::SetDefault() now takes a const char* as argument.
+      OGRFieldDefn::GetDefaultRef() removed and replaced by GetDefault() that
+      returns a const char*
 
 MIGRATION GUIDE FROM GDAL 1.10 to GDAL 1.11
 -------------------------------------------

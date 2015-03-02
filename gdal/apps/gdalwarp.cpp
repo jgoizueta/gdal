@@ -149,7 +149,7 @@ target resolution. Specify an integer value (0-based, i.e. 0=1st overview level)
 to select a particular level. Specify AUTO-n where n is an integer greater or
 equal to 1, to select an overview level below the AUTO one. Or specify NONE to
 force the base resolution to be used.</dd>
-<dt> <b>-wo</b> <em>"NAME=VALUE"</em>:</dt><dd> Set a warp options.  The 
+<dt> <b>-wo</b> <em>"NAME=VALUE"</em>:</dt><dd> Set a warp option.  The 
 GDALWarpOptions::papszWarpOptions docs show all options.  Multiple
  <b>-wo</b> options may be listed.</dd>
 <dt> <b>-ot</b> <em>type</em>:</dt><dd> For the output bands to be of the
@@ -409,6 +409,19 @@ int main( int argc, char ** argv )
     argc = GDALGeneralCmdLineProcessor( argc, &argv, 0 );
     if( argc < 1 )
         GDALExit( -argc );
+
+/* -------------------------------------------------------------------- */
+/*      Set optimal setting for best performance with huge input VRT.   */
+/*      The rationale for 450 is that typical Linux process allow       */
+/*      only 1024 file descriptors per process and we need to keep some */
+/*      spare for shared libraries, etc. so let's go down to 900.       */
+/*      And some datasets may need 2 file descriptors, so divide by 2   */
+/*      for security.                                                   */
+/* -------------------------------------------------------------------- */
+    if( CPLGetConfigOption("GDAL_MAX_DATASET_POOL_SIZE", NULL) == NULL )
+    {
+        CPLSetConfigOption("GDAL_MAX_DATASET_POOL_SIZE", "450");
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Parse arguments.                                                */
@@ -793,10 +806,36 @@ int main( int argc, char ** argv )
         fprintf(stderr, "Source and destination datasets must be different.\n");
         GDALExit( 1 );
     }
+    
+    int bOutStreaming = FALSE;
+    if( strcmp(pszDstFilename, "/vsistdout/") == 0 )
+    {
+        bQuiet = TRUE;
+        bOutStreaming = TRUE;
+    }
+#ifdef S_ISFIFO
+    else
+    {
+        VSIStatBufL sStat;
+        if( VSIStatExL(pszDstFilename, &sStat, VSI_STAT_EXISTS_FLAG | VSI_STAT_NATURE_FLAG) == 0 &&
+            S_ISFIFO(sStat.st_mode) )
+        {
+            bOutStreaming = TRUE;
+        }
+    }
+#endif
 
-    CPLPushErrorHandler( CPLQuietErrorHandler );
-    hDstDS = GDALOpen( pszDstFilename, GA_Update );
-    CPLPopErrorHandler();
+    if( bOutStreaming )
+    {
+        papszWarpOptions = CSLSetNameValue(papszWarpOptions, "STREAMABLE_OUTPUT", "YES");
+        hDstDS = NULL;
+    }
+    else
+    {
+        CPLPushErrorHandler( CPLQuietErrorHandler );
+        hDstDS = GDALOpen( pszDstFilename, GA_Update );
+        CPLPopErrorHandler();
+    }
 
     if( hDstDS != NULL && bOverwrite )
     {
@@ -816,7 +855,7 @@ int main( int argc, char ** argv )
 
     /* Avoid overwriting an existing destination file that cannot be opened in */
     /* update mode with a new GTiff file */
-    if ( hDstDS == NULL && !bOverwrite )
+    if ( !bOutStreaming && hDstDS == NULL && !bOverwrite )
     {
         CPLPushErrorHandler( CPLQuietErrorHandler );
         hDstDS = GDALOpen( pszDstFilename, GA_ReadOnly );

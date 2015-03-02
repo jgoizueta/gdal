@@ -69,7 +69,7 @@ OGRSQLiteSelectLayer::OGRSQLiteSelectLayer( OGRSQLiteDataSource *poDSIn,
     this->bAllowMultipleGeomFields = bAllowMultipleGeomFields;
 
     std::set<CPLString> aosEmpty;
-    BuildFeatureDefn( "SELECT", hStmtIn, NULL, aosEmpty );
+    BuildFeatureDefn( "SELECT", hStmtIn, aosEmpty, aosEmpty );
     SetDescription( "SELECT" );
 
     if( bUseStatementForGetNextFeature )
@@ -255,12 +255,12 @@ OGRErr OGRSQLiteSelectLayerCommonBehaviour::SetAttributeFilter( const char *pszQ
 /*                           GetNextFeature()                           */
 /************************************************************************/
 
-int OGRSQLiteSelectLayer::GetFeatureCount( int bForce )
+GIntBig OGRSQLiteSelectLayer::GetFeatureCount( int bForce )
 {
     return poBehaviour->GetFeatureCount(bForce);
 }
 
-int OGRSQLiteSelectLayerCommonBehaviour::GetFeatureCount( int bForce )
+GIntBig OGRSQLiteSelectLayerCommonBehaviour::GetFeatureCount( int bForce )
 {
     if( bEmptyLayer )
         return 0;

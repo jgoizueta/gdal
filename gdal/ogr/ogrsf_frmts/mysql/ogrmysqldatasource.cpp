@@ -859,10 +859,15 @@ OGRMySQLDataSource::ICreateLayer( const char * pszLayerNameIn,
     if (!pszGeomColumnName)
         pszGeomColumnName="SHAPE";
 
-    pszExpectedFIDName = CSLFetchNameValue( papszOptions, "MYSQL_FID" );
+    pszExpectedFIDName = CSLFetchNameValue( papszOptions, "FID" );
+    if (!pszExpectedFIDName)
+        pszExpectedFIDName = CSLFetchNameValue( papszOptions, "MYSQL_FID" );
     if (!pszExpectedFIDName)
         pszExpectedFIDName="OGR_FID";
 
+    int bFID64 = CSLFetchBoolean(papszOptions, "FID64", FALSE);
+    const char* pszFIDType = bFID64 ? "BIGINT": "INT";
+    
 
     CPLDebug("MYSQL","Geometry Column Name %s.", pszGeomColumnName);
     CPLDebug("MYSQL","FID Column Name %s.", pszExpectedFIDName);
@@ -871,16 +876,16 @@ OGRMySQLDataSource::ICreateLayer( const char * pszLayerNameIn,
     {
         osCommand.Printf(
                  "CREATE TABLE `%s` ( "
-                 "   %s INT UNIQUE NOT NULL AUTO_INCREMENT )",
-                 pszLayerName, pszExpectedFIDName );
+                 "   %s %s UNIQUE NOT NULL AUTO_INCREMENT )",
+                 pszLayerName, pszExpectedFIDName, pszFIDType );
     }
     else
     {
         osCommand.Printf(
                  "CREATE TABLE `%s` ( "
-                 "   %s INT UNIQUE NOT NULL AUTO_INCREMENT, "
+                 "   %s %s UNIQUE NOT NULL AUTO_INCREMENT, "
                  "   %s GEOMETRY NOT NULL )",
-                 pszLayerName, pszExpectedFIDName, pszGeomColumnName );
+                 pszLayerName, pszExpectedFIDName, pszFIDType, pszGeomColumnName );
     }
 
     if( CSLFetchNameValue( papszOptions, "ENGINE" ) != NULL )
@@ -1037,6 +1042,8 @@ OGRMySQLDataSource::ICreateLayer( const char * pszLayerNameIn,
     eErr = poLayer->Initialize(pszLayerName);
     if (eErr == OGRERR_FAILURE)
         return NULL;
+    if( eType != wkbNone )
+        poLayer->GetLayerDefn()->GetGeomFieldDefn(0)->SetNullable(FALSE);
 
     poLayer->SetLaunderFlag( CSLFetchBoolean(papszOptions,"LAUNDER",TRUE) );
     poLayer->SetPrecisionFlag( CSLFetchBoolean(papszOptions,"PRECISION",TRUE));

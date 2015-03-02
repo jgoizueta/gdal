@@ -106,10 +106,10 @@ class OGRWFSWrappedResultLayer : public OGRLayer
 
         virtual void        ResetReading() { poLayer->ResetReading(); }
         virtual OGRFeature *GetNextFeature() { return poLayer->GetNextFeature(); }
-        virtual OGRErr      SetNextByIndex( long nIndex ) { return poLayer->SetNextByIndex(nIndex); }
-        virtual OGRFeature *GetFeature( long nFID ) { return poLayer->GetFeature(nFID); }
+        virtual OGRErr      SetNextByIndex( GIntBig nIndex ) { return poLayer->SetNextByIndex(nIndex); }
+        virtual OGRFeature *GetFeature( GIntBig nFID ) { return poLayer->GetFeature(nFID); }
         virtual OGRFeatureDefn *GetLayerDefn() { return poLayer->GetLayerDefn(); }
-        virtual int         GetFeatureCount( int bForce = TRUE ) { return poLayer->GetFeatureCount(bForce); }
+        virtual GIntBig     GetFeatureCount( int bForce = TRUE ) { return poLayer->GetFeatureCount(bForce); }
         virtual int         TestCapability( const char * pszCap )  { return poLayer->TestCapability(pszCap); }
 };
 
@@ -834,6 +834,12 @@ int OGRWFSDataSource::Open( const char * pszFilename, int bUpdateIn)
             papszHttpOptions =
                 CSLSetNameValue( papszHttpOptions,
                                 "USERPWD", pszParm );
+
+        pszParm = CPLGetXMLValue( psRoot, "COOKIE", NULL );
+        if( pszParm )
+            papszHttpOptions =
+                CSLSetNameValue( papszHttpOptions,
+                                "COOKIE", pszParm );
 
         pszParm = CPLGetXMLValue( psRoot, "Version", NULL );
         if( pszParm )
