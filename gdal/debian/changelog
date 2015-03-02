@@ -1,3 +1,11 @@
+ogr2ogr2 (2.0.0+svn.28596-precise1ubuntu2) precise; urgency=medium
+
+  * ogr2ogr2: fix for issue #5856 in r28548 (prevents column wkb_geometry with
+    null values)
+  * Other commits from upstream
+
+ --  Rafa de la Torre <rtorre@cartodb.com>  Mon, 02 Mar 2015 15:47:53 +0000
+
 ogr2ogr2 (2.0.0+svn.28335-precise1ubuntu1) precise; urgency=medium
 
   * ogr2ogr: fix regression when using -nlt PROMOTE_TO_MULTI on wkbUnknown
