@@ -1,3 +1,11 @@
+ogr2ogr2 (2.0.0+svn.29247c-precise1ubuntu1) precise; urgency=high
+
+  * Fix heavy queries on system tables for pg
+  * Add new build dependency gawk
+  * Add new build dependency libtool
+
+ --  Rafa de la Torre <rtorre@cartodb.com>  Mon, 01 Jun 2015 14:41:40 +0000
+
 ogr2ogr2 (2.0.0+svn.28596-precise1ubuntu2) precise; urgency=medium
 
   * ogr2ogr2: fix for issue #5856 in r28548 (prevents column wkb_geometry with
