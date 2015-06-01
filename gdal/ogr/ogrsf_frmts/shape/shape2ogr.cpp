@@ -460,7 +460,8 @@ OGRGeometry *SHPReadOGRObject( SHPHandle hSHP, int iShape, SHPObject *psShape )
 /*                         SHPWriteOGRObject()                          */
 /************************************************************************/
 
-OGRErr SHPWriteOGRObject( SHPHandle hSHP, int iShape, OGRGeometry *poGeom )
+OGRErr SHPWriteOGRObject( SHPHandle hSHP, int iShape, OGRGeometry *poGeom,
+                          int bRewind)
 
 {
     int nReturnedShapeID;
@@ -846,7 +847,8 @@ OGRErr SHPWriteOGRObject( SHPHandle hSHP, int iShape, OGRGeometry *poGeom )
         psShape = SHPCreateObject( hSHP->nShapeType, iShape, nRings,
                                    panRingStart, NULL,
                                    nVertex, padfX, padfY, padfZ, NULL );
-        SHPRewindObject( hSHP, psShape );
+        if( bRewind )
+            SHPRewindObject( hSHP, psShape );
         nReturnedShapeID = SHPWriteObject( hSHP, iShape, psShape );
         SHPDestroyObject( psShape );
         
@@ -1076,6 +1078,8 @@ OGRFeature *SHPReadOGRFeature( SHPHandle hSHP, DBFHandle hDBF,
         CPLError( CE_Failure, CPLE_AppDefined, 
                   "Attempt to read shape with feature id (%d), but it is marked deleted.",
                   iShape );
+        if( psShape != NULL )
+            SHPDestroyObject(psShape);
         return NULL;
     }
 
@@ -1240,7 +1244,8 @@ OGRErr SHPWriteOGRFeature( SHPHandle hSHP, DBFHandle hDBF,
                            OGRFeatureDefn * poDefn, 
                            OGRFeature * poFeature,
                            const char *pszSHPEncoding,
-                           int* pbTruncationWarningEmitted )
+                           int* pbTruncationWarningEmitted,
+                           int bRewind )
 
 {
 #ifdef notdef
@@ -1265,7 +1270,7 @@ OGRErr SHPWriteOGRFeature( SHPHandle hSHP, DBFHandle hDBF,
     if( hSHP != NULL )
     {
         eErr = SHPWriteOGRObject( hSHP, (int)poFeature->GetFID(),
-                                  poFeature->GetGeometryRef() );
+                                  poFeature->GetGeometryRef(), bRewind );
         if( eErr != OGRERR_NONE )
             return eErr;
     }
@@ -1443,20 +1448,16 @@ OGRErr SHPWriteOGRFeature( SHPHandle hSHP, DBFHandle hDBF,
 
           case OFTDate:
           {
-              int  nYear, nMonth, nDay;
+              const OGRField* psField = poFeature->GetRawFieldRef(iField);
 
-              if( poFeature->GetFieldAsDateTime( iField, &nYear, &nMonth, &nDay,
-                                                 NULL, NULL, NULL, NULL ) )
+              if( psField->Date.Year < 0 || psField->Date.Year > 9999 )
               {
-                  if( nYear < 0 || nYear > 9999 )
-                  {
-                      CPLError(CE_Warning, CPLE_NotSupported,
-                               "Year < 0 or > 9999 is not a valid date for shapefile");
-                  }
-                  else
-                      DBFWriteIntegerAttribute( hDBF, (int)poFeature->GetFID(), iField, 
-                                            nYear*10000 + nMonth*100 + nDay );
+                  CPLError(CE_Warning, CPLE_NotSupported,
+                          "Year < 0 or > 9999 is not a valid date for shapefile");
               }
+              else
+                  DBFWriteIntegerAttribute( hDBF, (int)poFeature->GetFID(), iField, 
+                                            psField->Date.Year*10000 + psField->Date.Month*100 + psField->Date.Day );
           }
           break;
 

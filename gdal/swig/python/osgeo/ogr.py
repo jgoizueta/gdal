@@ -151,9 +151,21 @@ ODsCCreateLayer = _ogr.ODsCCreateLayer
 ODsCDeleteLayer = _ogr.ODsCDeleteLayer
 ODsCCreateGeomFieldAfterCreateLayer = _ogr.ODsCCreateGeomFieldAfterCreateLayer
 ODsCCurveGeometries = _ogr.ODsCCurveGeometries
+ODsCTransactions = _ogr.ODsCTransactions
+ODsCEmulatedTransactions = _ogr.ODsCEmulatedTransactions
 ODrCCreateDataSource = _ogr.ODrCCreateDataSource
 ODrCDeleteDataSource = _ogr.ODrCDeleteDataSource
 OLMD_FID64 = _ogr.OLMD_FID64
+OGRERR_NONE = _ogr.OGRERR_NONE
+OGRERR_NOT_ENOUGH_DATA = _ogr.OGRERR_NOT_ENOUGH_DATA
+OGRERR_NOT_ENOUGH_MEMORY = _ogr.OGRERR_NOT_ENOUGH_MEMORY
+OGRERR_UNSUPPORTED_GEOMETRY_TYPE = _ogr.OGRERR_UNSUPPORTED_GEOMETRY_TYPE
+OGRERR_UNSUPPORTED_OPERATION = _ogr.OGRERR_UNSUPPORTED_OPERATION
+OGRERR_CORRUPT_DATA = _ogr.OGRERR_CORRUPT_DATA
+OGRERR_FAILURE = _ogr.OGRERR_FAILURE
+OGRERR_UNSUPPORTED_SRS = _ogr.OGRERR_UNSUPPORTED_SRS
+OGRERR_INVALID_HANDLE = _ogr.OGRERR_INVALID_HANDLE
+OGRERR_NON_EXISTING_FEATURE = _ogr.OGRERR_NON_EXISTING_FEATURE
 
 def GetUseExceptions(*args):
   """GetUseExceptions() -> int"""
@@ -716,6 +728,10 @@ class DataSource(MajorObject):
         """
         return _ogr.DataSource_SyncToDisk(self, *args)
 
+    def FlushCache(self, *args):
+        """FlushCache(self)"""
+        return _ogr.DataSource_FlushCache(self, *args)
+
     def CreateLayer(self, *args, **kwargs):
         """
         CreateLayer(self, char name, SpatialReference srs = None, OGRwkbGeometryType geom_type = wkbUnknown, 
@@ -946,6 +962,18 @@ class DataSource(MajorObject):
 
         """
         return _ogr.DataSource_SetStyleTable(self, *args)
+
+    def StartTransaction(self, *args, **kwargs):
+        """StartTransaction(self, int force = True) -> OGRErr"""
+        return _ogr.DataSource_StartTransaction(self, *args, **kwargs)
+
+    def CommitTransaction(self, *args):
+        """CommitTransaction(self) -> OGRErr"""
+        return _ogr.DataSource_CommitTransaction(self, *args)
+
+    def RollbackTransaction(self, *args):
+        """RollbackTransaction(self) -> OGRErr"""
+        return _ogr.DataSource_RollbackTransaction(self, *args)
 
     def Destroy(self):
       "Once called, self has effectively been destroyed.  Do not access. For backwards compatiblity only"
@@ -2901,9 +2929,9 @@ class Feature(_object):
         SetField(self, int id, double value)
         SetField(self, char name, double value)
         SetField(self, int id, int year, int month, int day, int hour, int minute, 
-            int second, int tzflag)
+            float second, int tzflag)
         SetField(self, char name, int year, int month, int day, int hour, 
-            int minute, int second, int tzflag)
+            int minute, float second, int tzflag)
         """
         return _ogr.Feature_SetField(self, *args)
 

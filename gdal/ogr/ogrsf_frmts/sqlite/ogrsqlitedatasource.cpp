@@ -147,6 +147,7 @@ OGRSQLiteBaseDataSource::OGRSQLiteBaseDataSource()
 {
     m_pszFilename = NULL;
     hDB = NULL;
+    bUpdate = FALSE;
 
 #ifdef HAVE_SQLITE_VFS
     pMyVFS = NULL;
@@ -157,6 +158,9 @@ OGRSQLiteBaseDataSource::OGRSQLiteBaseDataSource()
 #ifdef SPATIALITE_412_OR_LATER
     hSpatialiteCtxt = NULL;
 #endif
+
+    bUserTransactionActive = FALSE;
+    nSoftTransactionLevel = 0;
 }
 
 /************************************************************************/
@@ -207,8 +211,6 @@ OGRSQLiteDataSource::OGRSQLiteDataSource()
     papoLayers = NULL;
     nLayers = 0;
 
-    nSoftTransactionLevel = 0;
-
     nKnownSRID = 0;
     panSRID = NULL;
     papoSRS = NULL;
@@ -216,12 +218,12 @@ OGRSQLiteDataSource::OGRSQLiteDataSource()
     bHaveGeometryColumns = FALSE;
     bIsSpatiaLiteDB = FALSE;
     bSpatialite4Layout = FALSE;
-    bUpdate = FALSE;
 
     nUndefinedSRID = -1; /* will be changed to 0 if Spatialite >= 4.0 detected */
 
     nFileTimestamp = 0;
     bLastSQLCommandIsUpdateLayerStatistics = FALSE;
+    papszOpenOptions = NULL;
 }
 
 /************************************************************************/
@@ -257,6 +259,7 @@ OGRSQLiteDataSource::~OGRSQLiteDataSource()
     }
     CPLFree( panSRID );
     CPLFree( papoSRS );
+    CSLDestroy( papszOpenOptions );
 }
 
 /************************************************************************/
@@ -818,7 +821,7 @@ int OGRSQLiteDataSource::Create( const char * pszNameIn, char **papszOptions )
             return FALSE;
     }
 
-    return Open(m_pszFilename, TRUE);
+    return Open(m_pszFilename, TRUE, NULL);
 }
 
 /************************************************************************/
@@ -828,7 +831,6 @@ int OGRSQLiteDataSource::Create( const char * pszNameIn, char **papszOptions )
 int OGRSQLiteDataSource::InitWithEPSG()
 {
     CPLString osCommand;
-    char* pszErrMsg = NULL;
 
     if ( bIsSpatiaLiteDB )
     {
@@ -840,19 +842,13 @@ int OGRSQLiteDataSource::InitWithEPSG()
         if ( iSpatialiteVersion >= 24 )
             return TRUE;
     }
-
-    int rc = sqlite3_exec( hDB, "BEGIN", NULL, NULL, &pszErrMsg );
-    if( rc != SQLITE_OK )
-    {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                "Unable to insert into spatial_ref_sys: %s",
-                pszErrMsg );
-        sqlite3_free( pszErrMsg );
+    
+    if( SoftStartTransaction() != OGRERR_NONE )
         return FALSE;
-    }
 
     FILE* fp;
     int i;
+    int rc = SQLITE_OK;
     for(i=0;i<2 && rc == SQLITE_OK;i++)
     {
         const char* pszFilename = (i == 0) ? "gcs.csv" : "pcs.csv";
@@ -1028,20 +1024,17 @@ int OGRSQLiteDataSource::InitWithEPSG()
         VSIFClose(fp);
     }
 
-    if (rc == SQLITE_OK)
-        rc = sqlite3_exec( hDB, "COMMIT", NULL, NULL, &pszErrMsg );
-    else
-        rc = sqlite3_exec( hDB, "ROLLBACK", NULL, NULL, &pszErrMsg );
-
-    if( rc != SQLITE_OK )
+    if( rc == SQLITE_OK )
     {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                "Unable to insert into spatial_ref_sys: %s",
-                pszErrMsg );
-        sqlite3_free( pszErrMsg );
+        if( SoftCommitTransaction() != OGRERR_NONE )
+            return FALSE;
+        return TRUE;
     }
-
-    return (rc == SQLITE_OK);
+    else
+    {
+        SoftRollbackTransaction();
+        return FALSE;
+    }
 }
 
 /************************************************************************/
@@ -1056,14 +1049,15 @@ void OGRSQLiteDataSource::ReloadLayers()
     papoLayers = NULL;
     nLayers = 0;
 
-    Open(m_pszFilename, bUpdate);
+    Open(m_pszFilename, bUpdate, NULL);
 }
 
 /************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
 
-int OGRSQLiteDataSource::Open( const char * pszNewName, int bUpdateIn )
+int OGRSQLiteDataSource::Open( const char * pszNewName, int bUpdateIn,
+                               char** papszOpenOptionsIn)
 
 {
     CPLAssert( nLayers == 0 );
@@ -1078,13 +1072,23 @@ int OGRSQLiteDataSource::Open( const char * pszNewName, int bUpdateIn )
     {
         nFileTimestamp = sStat.st_mtime;
     }
-
-    int bListAllTables = CSLTestBoolean(CPLGetConfigOption("SQLITE_LIST_ALL_TABLES", "NO"));
+    
+    if( papszOpenOptionsIn )
+    {
+        CSLDestroy(papszOpenOptions);
+        papszOpenOptions = CSLDuplicate(papszOpenOptionsIn);
+    }
+    
+    int bListAllTables = CSLTestBoolean(CSLFetchNameValueDef(
+        papszOpenOptions, "LIST_ALL_TABLES",
+        CPLGetConfigOption("SQLITE_LIST_ALL_TABLES", "NO")));
 
     // Don't list by default: there might be some security implications
     // if a user is provided with a file and doesn't know that there are
     // virtual OGR tables in it.
-    int bListVirtualOGRLayers = CSLTestBoolean(CPLGetConfigOption("OGR_SQLITE_LIST_VIRTUAL_OGR", "NO"));
+    int bListVirtualOGRLayers = CSLTestBoolean(CSLFetchNameValueDef(
+        papszOpenOptions, "LIST_VIRTUAL_OGR",
+        CPLGetConfigOption("OGR_SQLITE_LIST_VIRTUAL_OGR", "NO")));
 
 /* -------------------------------------------------------------------- */
 /*      Try to open the sqlite database properly now.                   */
@@ -1548,7 +1552,19 @@ int OGRSQLiteDataSource::TestCapability( const char * pszCap )
     else if EQUAL(pszCap,ODsCCreateGeomFieldAfterCreateLayer)
         return bUpdate;
     else
-        return FALSE;
+        return OGRSQLiteBaseDataSource::TestCapability(pszCap);
+}
+
+/************************************************************************/
+/*                           TestCapability()                           */
+/************************************************************************/
+
+int OGRSQLiteBaseDataSource::TestCapability( const char * pszCap )
+{
+    if EQUAL(pszCap,ODsCTransactions)
+        return TRUE;
+    else
+        return GDALPamDataset::TestCapability(pszCap);
 }
 
 /************************************************************************/
@@ -1652,6 +1668,7 @@ OGRLayer * OGRSQLiteDataSource::ExecuteSQL( const char *pszSQLCommand,
         {
             OGRSQLiteTableLayer* poLayer = (OGRSQLiteTableLayer*) papoLayers[iLayer];
             poLayer->RunDeferredCreationIfNecessary();
+            poLayer->CreateSpatialIndexIfNecessary();
         }
     }
 
@@ -2334,6 +2351,112 @@ OGRErr OGRSQLiteDataSource::DeleteLayer(int iLayer)
     return OGRERR_NONE;
 }
 
+
+/************************************************************************/
+/*                         StartTransaction()                           */
+/*                                                                      */
+/* Should only be called by user code. Not driver internals.            */
+/************************************************************************/
+
+OGRErr OGRSQLiteBaseDataSource::StartTransaction(CPL_UNUSED int bForce)
+{
+    if( bUserTransactionActive || nSoftTransactionLevel != 0 )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Transaction already established");
+        return OGRERR_FAILURE;
+    }
+
+    OGRErr eErr = SoftStartTransaction();
+    if( eErr != OGRERR_NONE )
+        return eErr;
+
+    bUserTransactionActive = TRUE;
+    return OGRERR_NONE;
+}
+
+/************************************************************************/
+/*                         CommitTransaction()                          */
+/*                                                                      */
+/* Should only be called by user code. Not driver internals.            */
+/************************************************************************/
+
+OGRErr OGRSQLiteBaseDataSource::CommitTransaction()
+{
+    if( !bUserTransactionActive )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Transaction not established");
+        return OGRERR_FAILURE;
+    }
+
+    bUserTransactionActive = FALSE;
+    CPLAssert( nSoftTransactionLevel == 1 );
+    return SoftCommitTransaction();
+}
+
+OGRErr OGRSQLiteDataSource::CommitTransaction()
+
+{
+    if( nSoftTransactionLevel == 1 )
+    {
+        for( int iLayer = 0; iLayer < nLayers; iLayer++ )
+        {
+            if( papoLayers[iLayer]->IsTableLayer() )
+            {
+                OGRSQLiteTableLayer* poLayer = (OGRSQLiteTableLayer*) papoLayers[iLayer];
+                poLayer->RunDeferredCreationIfNecessary();
+                //poLayer->CreateSpatialIndexIfNecessary();
+            }
+        }
+    }
+
+    return OGRSQLiteBaseDataSource::CommitTransaction();
+}
+
+/************************************************************************/
+/*                        RollbackTransaction()                         */
+/*                                                                      */
+/* Should only be called by user code. Not driver internals.            */
+/************************************************************************/
+
+OGRErr OGRSQLiteBaseDataSource::RollbackTransaction()
+{
+    if( !bUserTransactionActive )
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Transaction not established");
+        return OGRERR_FAILURE;
+    }
+
+    bUserTransactionActive = FALSE;
+    CPLAssert( nSoftTransactionLevel == 1 );
+    return SoftRollbackTransaction();
+}
+
+OGRErr OGRSQLiteDataSource::RollbackTransaction()
+
+{
+    if( nSoftTransactionLevel == 1 )
+    {
+        for( int iLayer = 0; iLayer < nLayers; iLayer++ )
+        {
+            if( papoLayers[iLayer]->IsTableLayer() )
+            {
+                OGRSQLiteTableLayer* poLayer = (OGRSQLiteTableLayer*) papoLayers[iLayer];
+                poLayer->RunDeferredCreationIfNecessary();
+                poLayer->CreateSpatialIndexIfNecessary();
+            }
+        }
+
+        for(int i = 0; i < nLayers; i++)
+        {
+            papoLayers[i]->InvalidateCachedFeatureCountAndExtent();
+            papoLayers[i]->ResetReading();
+        }
+    }
+
+    return OGRSQLiteBaseDataSource::RollbackTransaction();
+}
+
 /************************************************************************/
 /*                        SoftStartTransaction()                        */
 /*                                                                      */
@@ -2342,133 +2465,107 @@ OGRErr OGRSQLiteDataSource::DeleteLayer(int iLayer)
 /*      an increment to the scope count.                                */
 /************************************************************************/
 
-OGRErr OGRSQLiteDataSource::SoftStartTransaction()
+OGRErr OGRSQLiteBaseDataSource::SoftStartTransaction()
 
 {
     nSoftTransactionLevel++;
 
+    OGRErr eErr = OGRERR_NONE;
     if( nSoftTransactionLevel == 1 )
     {
-        int rc;
-        char *pszErrMsg;
-        
-#ifdef DEBUG
-        CPLDebug( "OGR_SQLITE", "BEGIN Transaction" );
-#endif
-
-        rc = sqlite3_exec( hDB, "BEGIN", NULL, NULL, &pszErrMsg );
-        if( rc != SQLITE_OK )
-        {
-            nSoftTransactionLevel--;
-            CPLError( CE_Failure, CPLE_AppDefined, 
-                      "BEGIN transaction failed: %s",
-                      pszErrMsg );
-            sqlite3_free( pszErrMsg );
-            return OGRERR_FAILURE;
-        }
+        eErr = DoTransactionCommand("BEGIN");
     }
+    
+    //CPLDebug("SQLite", "%p->SoftStartTransaction() : %d",
+    //         this, nSoftTransactionLevel);
 
-    return OGRERR_NONE;
+    return eErr;
 }
 
 /************************************************************************/
-/*                             SoftCommit()                             */
+/*                     SoftCommitTransaction()                          */
 /*                                                                      */
 /*      Commit the current transaction if we are at the outer           */
 /*      scope.                                                          */
 /************************************************************************/
 
-OGRErr OGRSQLiteDataSource::SoftCommit()
+OGRErr OGRSQLiteBaseDataSource::SoftCommitTransaction()
 
 {
+    //CPLDebug("SQLite", "%p->SoftCommitTransaction() : %d",
+    //         this, nSoftTransactionLevel);
+
     if( nSoftTransactionLevel <= 0 )
     {
-        CPLDebug( "OGR_SQLITE", "SoftCommit() with no transaction active." );
+        CPLAssert(FALSE);
         return OGRERR_FAILURE;
     }
 
+    OGRErr eErr = OGRERR_NONE;
     nSoftTransactionLevel--;
-
     if( nSoftTransactionLevel == 0 )
     {
-        int rc;
-        char *pszErrMsg;
-        
-#ifdef DEBUG
-        CPLDebug( "OGR_SQLITE", "COMMIT Transaction" );
-#endif
-
-        rc = sqlite3_exec( hDB, "COMMIT", NULL, NULL, &pszErrMsg );
-        if( rc != SQLITE_OK )
-        {
-            CPLError( CE_Failure, CPLE_AppDefined, 
-                      "COMMIT transaction failed: %s",
-                      pszErrMsg );
-            sqlite3_free( pszErrMsg );
-            return OGRERR_FAILURE;
-        }
+        eErr = DoTransactionCommand("COMMIT");
     }
 
-    return OGRERR_NONE;
+    return eErr;
 }
 
 /************************************************************************/
-/*                            SoftRollback()                            */
+/*                  SoftRollbackTransaction()                           */
 /*                                                                      */
-/*      Force a rollback of the current transaction if there is one,    */
-/*      even if we are nested several levels deep.                      */
+/*      Do a rollback of the current transaction if we are at the 1st   */
+/*      level                                                           */
 /************************************************************************/
 
-OGRErr OGRSQLiteDataSource::SoftRollback()
+OGRErr OGRSQLiteBaseDataSource::SoftRollbackTransaction()
 
 {
+    //CPLDebug("SQLite", "%p->SoftRollbackTransaction() : %d",
+    //         this, nSoftTransactionLevel);
+
     if( nSoftTransactionLevel <= 0 )
     {
-        CPLDebug( "OGR_SQLITE", "SoftRollback() with no transaction active." );
+        CPLAssert(FALSE);
         return OGRERR_FAILURE;
     }
 
-    nSoftTransactionLevel = 0;
+    OGRErr eErr = OGRERR_NONE;
+    nSoftTransactionLevel--;
+    if( nSoftTransactionLevel == 0 )
+    {
+        eErr = DoTransactionCommand("ROLLBACK");
+    }
 
+    return eErr;
+}
+
+/************************************************************************/
+/*                          DoTransactionCommand()                      */
+/************************************************************************/
+
+OGRErr OGRSQLiteBaseDataSource::DoTransactionCommand(const char* pszCommand)
+
+{
     int rc;
     char *pszErrMsg;
-    
+
 #ifdef DEBUG
-    CPLDebug( "OGR_SQLITE", "ROLLBACK Transaction" );
+    CPLDebug( "OGR_SQLITE", "%s Transaction", pszCommand );
 #endif
 
-    rc = sqlite3_exec( hDB, "ROLLBACK", NULL, NULL, &pszErrMsg );
+    rc = sqlite3_exec( hDB, pszCommand, NULL, NULL, &pszErrMsg );
     if( rc != SQLITE_OK )
     {
+        nSoftTransactionLevel--;
         CPLError( CE_Failure, CPLE_AppDefined, 
-                  "ROLLBACK transaction failed: %s",
-                  pszErrMsg );
+                  "%s transaction failed: %s",
+                  pszCommand, pszErrMsg );
         sqlite3_free( pszErrMsg );
         return OGRERR_FAILURE;
     }
 
-    for(int i = 0; i < nLayers; i++)
-        papoLayers[i]->InvalidateCachedFeatureCountAndExtent();
-
     return OGRERR_NONE;
-}
-
-/************************************************************************/
-/*                        FlushSoftTransaction()                        */
-/*                                                                      */
-/*      Force the unwinding of any active transaction, and it's         */
-/*      commit.                                                         */
-/************************************************************************/
-
-OGRErr OGRSQLiteDataSource::FlushSoftTransaction()
-
-{
-    if( nSoftTransactionLevel <= 0 )
-        return OGRERR_NONE;
-
-    nSoftTransactionLevel = 1;
-
-    return SoftCommit();
 }
 
 /************************************************************************/

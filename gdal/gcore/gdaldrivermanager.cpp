@@ -180,7 +180,7 @@ GDALDriverManager::~GDALDriverManager()
         }
     } while(bHasDroppedRef);
 
-    /* Now let's destroy the dataset pool. Nobody shoud use it afterwards */
+    /* Now let's destroy the dataset pool. Nobody should use it afterwards */
     /* if people have well released their dependent datasets above */
     GDALDatasetPoolForceDestroy();
 
@@ -447,7 +447,8 @@ int GDALDriverManager::RegisterDriver( GDALDriver * poDriver )
     }
     
     if( poDriver->GetMetadataItem( GDAL_DMD_OPENOPTIONLIST ) != NULL &&
-        poDriver->pfnIdentify == NULL )
+        poDriver->pfnIdentify == NULL &&
+        !EQUALN(poDriver->GetDescription(), "Interlis", strlen("Interlis")) )
     {
         CPLDebug("GDAL", "Driver %s that defines GDAL_DMD_OPENOPTIONLIST must also "
                  "implement Identify(), so that it can be used",

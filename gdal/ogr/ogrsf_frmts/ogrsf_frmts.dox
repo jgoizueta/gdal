@@ -39,10 +39,7 @@
   \brief Open a file / data source with one of the registered drivers.
 
   This function loops through all the drivers registered with the driver
-  manager trying each until one succeeds with the given data source.  This
-  function is static.  Applications don't normally need to use any other
-  OGRSFDriverRegistrar function, not do they normally need to have
-  a pointer to an OGRSFDriverRegistrar instance.
+  manager trying each until one succeeds with the given data source.
 
   If this function fails, CPLGetLastErrorMsg() can be used to check if there
   is an error message explaining why.
@@ -50,6 +47,11 @@
   For drivers supporting the VSI virtual file API, it is possible to open
   a file in a .zip archive (see VSIInstallZipFileHandler()), in a .tar/.tar.gz/.tgz archive
   (see VSIInstallTarFileHandler()) or on a HTTP / FTP server (see VSIInstallCurlFileHandler())
+
+  NOTE: Starting with GDAL 2.0, it is *NOT* safe to cast the returned handle to
+  OGRDataSource*. If a C++ object is needed, the handle should be cast to GDALDataset*.
+  Similarly, the returned OGRSFDriverH handle should be cast to GDALDriver*, and
+  *NOT* OGRSFDriver*.
 
   @deprecated Use GDALOpenEx() in GDAL 2.0
 
@@ -60,7 +62,7 @@
          pointer to the driver which was used to open the data source.
 
   @return NULL on error or if the pass name is not supported by this driver,
-  otherwise an handle to an OGRDataSource.  This OGRDataSource should be
+  otherwise an handle to a GDALDataset.  This GDALDataset should be
   closed by deleting the object when it is no longer needed.
 
   <b>Example:</b>
@@ -100,6 +102,9 @@
 
   \brief Fetch the indicated driver.
 
+  NOTE: Starting with GDAL 2.0, it is *NOT* safe to cast the returned handle to
+  OGRSFDriver*. If a C++ object is needed, the handle should be cast to GDALDriver*.
+
   @deprecated Use GDALGetDriver() in GDAL 2.0
 
   @param iDriver the driver index, from 0 to GetDriverCount()-1.
@@ -112,6 +117,9 @@
   \fn OGRSFDriverH OGRGetDriverByName( const char *pszName );
 
   \brief Fetch the indicated driver.
+
+  NOTE: Starting with GDAL 2.0, it is *NOT* safe to cast the returned handle to
+  OGRSFDriver*. If a C++ object is needed, the handle should be cast to GDALDriver*.
 
   @deprecated Use GDALGetDriverByName() in GDAL 2.0
 
@@ -156,6 +164,11 @@
 
   \brief Attempt to open file with this driver. 
 
+  NOTE: Starting with GDAL 2.0, it is *NOT* safe to cast the returned handle to
+  OGRDataSource*. If a C++ object is needed, the handle should be cast to GDALDataset*.
+  Similarly, the returned OGRSFDriverH handle should be cast to GDALDriver*, and
+  *NOT* OGRSFDriver*.
+
   @deprecated Use GDALOpenEx() in GDAL 2.0
 
   @param hDriver handle to the driver that is used to open file.
@@ -164,7 +177,7 @@
   default).
 
   @return NULL on error or if the pass name is not supported by this driver,
-  otherwise an handle to an OGRDataSource.  This OGRDataSource should be
+  otherwise an handle to a GDALDataset.  This GDALDataset should be
   closed by deleting the object when it is no longer needed.
 
 */
@@ -564,6 +577,9 @@ essentially a convenient alias.
 
 \brief Returns the driver that the dataset was opened with. 
 
+NOTE: Starting with GDAL 2.0, it is *NOT* safe to cast the returned handle to
+OGRSFDriver*. If a C++ object is needed, the handle should be cast to GDALDriver*.
+
 @deprecated Use GDALGetDatasetDriver() in GDAL 2.0
 
 @param hDS handle to the datasource
@@ -697,6 +713,15 @@ by the OGRSFDriverManager.
  This method implements sequential access to the features of a layer.  The
  ResetReading() method can be used to start at the beginning again.  
 
+ Features returned by GetNextFeature() may or may not be affected by concurrent
+ modifications depending on drivers. A guaranteed way of seing modifications in
+ effect is to call ResetReading() on layers where GetNextFeature() has been called,
+ before reading again.
+ Structural changes in layers (field addition, deletion, ...) when a read is in
+ progress may or may not be possible depending on drivers.
+ If a transaction is committed/aborted, the current sequential reading may or may not be
+ valid after that operation and a call to ResetReading() might be needed.
+
  This method is the same as the C function OGR_L_GetNextFeature().
 
  @return a feature, or NULL if no more features are available. 
@@ -720,6 +745,15 @@ by the OGRSFDriverManager.
  This function implements sequential access to the features of a layer.
  The OGR_L_ResetReading() function can be used to start at the beginning 
  again.
+
+ Features returned by OGR_GetNextFeature() may or may not be affected by concurrent
+ modifications depending on drivers. A guaranteed way of seing modifications in
+ effect is to call OGR_L_ResetReading() on layers where OGR_GetNextFeature() has been called,
+ before reading again.
+ Structural changes in layers (field addition, deletion, ...) when a read is in
+ progress may or may not be possible depending on drivers.
+ If a transaction is committed/aborted, the current sequential reading may or may not be
+ valid after that operation and a call to OGR_L_ResetReading() might be needed.
 
  This function is the same as the C++ method OGRLayer::GetNextFeature().
 
@@ -1486,7 +1520,7 @@ by the OGRSFDriverManager.
  @param poFeature the feature to write.
 
  @return OGRERR_NONE if the operation works, otherwise an appropriate error
- code.
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
 
 */
 
@@ -1505,7 +1539,7 @@ by the OGRSFDriverManager.
  @param poFeature the feature to write.
 
  @return OGRERR_NONE if the operation works, otherwise an appropriate error
- code.
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
  @since GDAL 2.0
 
 */
@@ -1528,7 +1562,7 @@ by the OGRSFDriverManager.
  @param hFeat the feature to write.
 
  @return OGRERR_NONE if the operation works, otherwise an appropriate error
- code.
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
 
 */
 
@@ -1614,7 +1648,8 @@ by the OGRSFDriverManager.
 
  @param nFID the feature id to be deleted from the layer 
 
- @return OGRERR_NONE on success.
+ @return OGRERR_NONE if the operation works, otherwise an appropriate error
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
 
 */
 
@@ -1635,8 +1670,8 @@ by the OGRSFDriverManager.
  @param hLayer handle to the layer
  @param nFID the feature id to be deleted from the layer 
 
- @return OGRERR_NONE on success.
-
+ @return OGRERR_NONE if the operation works, otherwise an appropriate error
+ code (e.g OGRERR_NON_EXISTING_FEATURE if the feature does not exist).
 
 */
 
@@ -2413,6 +2448,11 @@ form depending on the limitations of the format driver.
  If starting the transaction fails, will return 
  OGRERR_FAILURE. Datasources which do not support transactions will 
  always return OGRERR_NONE. 
+
+ Note: as of GDAL 2.0, use of this API is discouraged when the dataset offers
+ dataset level transaction with GDALDataset::StartTransaction(). The reason is
+ that most drivers can only offer transactions at dataset level, and not layer level.
+ Very few drivers really support transactions at layer scope.
  
  This function is the same as the C++ method OGRLayer::StartTransaction().
 

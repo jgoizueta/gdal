@@ -90,7 +90,7 @@ OGRPGDumpDataSource::~OGRPGDumpDataSource()
 
     if (fp)
     {
-        Commit();
+        LogCommit();
         VSIFCloseL(fp);
         fp = NULL;
     }
@@ -102,10 +102,10 @@ OGRPGDumpDataSource::~OGRPGDumpDataSource()
 }
 
 /************************************************************************/
-/*                         StartTransaction()                           */
+/*                         LogStartTransaction()                        */
 /************************************************************************/
 
-void OGRPGDumpDataSource::StartTransaction()
+void OGRPGDumpDataSource::LogStartTransaction()
 {
     if (bInTransaction)
         return;
@@ -114,10 +114,10 @@ void OGRPGDumpDataSource::StartTransaction()
 }
 
 /************************************************************************/
-/*                              Commit()                                */
+/*                             LogCommit()                              */
 /************************************************************************/
 
-void OGRPGDumpDataSource::Commit()
+void OGRPGDumpDataSource::LogCommit()
 {
     EndCopy();
 
@@ -128,10 +128,10 @@ void OGRPGDumpDataSource::Commit()
 }
 
 /************************************************************************/
-/*                            LaunderName()                             */
+/*                         OGRPGCommonLaunderName()                     */
 /************************************************************************/
 
-char *OGRPGDumpDataSource::LaunderName( const char *pszSrcName )
+char *OGRPGCommonLaunderName( const char *pszSrcName, const char* pszDebugPrefix )
 
 {
     char    *pszSafeName = CPLStrdup( pszSrcName );
@@ -144,7 +144,7 @@ char *OGRPGDumpDataSource::LaunderName( const char *pszSrcName )
     }
 
     if( strcmp(pszSrcName,pszSafeName) != 0 )
-        CPLDebug("PG","LaunderName('%s') -> '%s'", 
+        CPLDebug(pszDebugPrefix,"LaunderName('%s') -> '%s'", 
                  pszSrcName, pszSafeName);
 
     return pszSafeName;
@@ -176,7 +176,7 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
     {
         if( CSLFetchBoolean(papszOptions,"LAUNDER", TRUE) )
         {
-            char* pszLaunderedFid = LaunderName(pszFIDColumnNameIn);
+            char* pszLaunderedFid = OGRPGCommonLaunderName(pszFIDColumnNameIn, "PGDump");
             osFIDColumnName = pszLaunderedFid;
             osFIDColumnNameEscaped = OGRPGDumpEscapeColumnName(osFIDColumnName);
             CPLFree(pszLaunderedFid);
@@ -232,7 +232,7 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
       pszSchemaName[length] = '\0';
 
       if( CSLFetchBoolean(papszOptions,"LAUNDER", TRUE) )
-          pszTableName = LaunderName( pszDotPos + 1 ); //skip "."
+          pszTableName = OGRPGCommonLaunderName( pszDotPos + 1, "PGDump" ); //skip "."
       else
           pszTableName = CPLStrdup( pszDotPos + 1 ); //skip "."
     }
@@ -240,12 +240,12 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
     {
       pszSchemaName = NULL;
       if( CSLFetchBoolean(papszOptions,"LAUNDER", TRUE) )
-          pszTableName = LaunderName( pszLayerName ); //skip "."
+          pszTableName = OGRPGCommonLaunderName( pszLayerName, "PGDump" ); //skip "."
       else
           pszTableName = CPLStrdup( pszLayerName ); //skip "."
     }
 
-    Commit();
+    LogCommit();
 
 /* -------------------------------------------------------------------- */
 /*      Set the default schema for the layers.                          */
@@ -385,7 +385,7 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
     }
 
 
-    StartTransaction();
+    LogStartTransaction();
 
 /* -------------------------------------------------------------------- */
 /*      Create a basic table with the FID.  Also include the            */
@@ -395,8 +395,7 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
     const char* pszSerialType = bFID64 ? "BIGSERIAL": "SERIAL";
     
     CPLString osCreateTable;
-    int bTemporary = CSLFetchNameValue( papszOptions, "TEMPORARY" ) != NULL &&
-                     CSLTestBoolean(CSLFetchNameValue( papszOptions, "TEMPORARY" ));
+    int bTemporary = CSLFetchBoolean( papszOptions, "TEMPORARY", FALSE );
     if (bTemporary)
     {
         CPLFree(pszSchemaName);
@@ -404,7 +403,9 @@ OGRPGDumpDataSource::ICreateLayer( const char * pszLayerName,
         osCreateTable.Printf("CREATE TEMPORARY TABLE \"%s\"", pszTableName);
     }
     else
-        osCreateTable.Printf("CREATE TABLE \"%s\".\"%s\"", pszSchemaName, pszTableName);
+        osCreateTable.Printf("CREATE TABLE%s \"%s\".\"%s\"",
+                             CSLFetchBoolean( papszOptions, "UNLOGGED", FALSE ) ? " UNLOGGED": "",
+                             pszSchemaName, pszTableName);
 
     if( !bHavePostGIS )
     {

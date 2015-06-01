@@ -138,7 +138,7 @@ OGRShapeLayer::OGRShapeLayer( OGRShapeDataSource* poDSIn,
     
     const char* pszShapeEncoding = NULL;
     pszShapeEncoding = CSLFetchNameValue(poDS->GetOpenOptions(), "ENCODING");
-    if( pszShapeEncoding == NULL )
+    if( pszShapeEncoding == NULL && osEncoding == "")
         pszShapeEncoding = CSLFetchNameValue( papszCreateOptions, "ENCODING" );
     if( pszShapeEncoding == NULL )
         pszShapeEncoding = CPLGetConfigOption( "SHAPE_ENCODING", NULL );
@@ -172,6 +172,7 @@ OGRShapeLayer::OGRShapeLayer( OGRShapeDataSource* poDSIn,
     else if( bSRSSetIn && poSRSIn != NULL )
         poSRSIn->Release();
     SetDescription( poFeatureDefn->GetName() );
+    bRewindOnWrite = CSLTestBoolean(CPLGetConfigOption( "SHAPE_REWIND_ON_WRITE", "YES" ));
 }
 
 /************************************************************************/
@@ -864,10 +865,7 @@ OGRErr OGRShapeLayer::ISetFeature( OGRFeature *poFeature )
         || (hSHP != NULL && nFID >= hSHP->nRecords)
         || (hDBF != NULL && nFID >= hDBF->nRecords) )
     {
-        CPLError( CE_Failure, CPLE_AppDefined,
-                  "Attempt to set shape with feature id (" CPL_FRMT_GIB ") which does "
-                  "not exist.", nFID );
-        return OGRERR_FAILURE;
+        return OGRERR_NON_EXISTING_FEATURE;
     }
 
     bHeaderDirty = TRUE;
@@ -883,7 +881,8 @@ OGRErr OGRShapeLayer::ISetFeature( OGRFeature *poFeature )
     }
 
     OGRErr eErr = SHPWriteOGRFeature( hSHP, hDBF, poFeatureDefn, poFeature,
-                               osEncoding, &bTruncationWarningEmitted );
+                                      osEncoding, &bTruncationWarningEmitted,
+                                      bRewindOnWrite );
 
     if( hSHP != NULL )
     {
@@ -919,10 +918,7 @@ OGRErr OGRShapeLayer::DeleteFeature( GIntBig nFID )
         || (hSHP != NULL && nFID >= hSHP->nRecords)
         || (hDBF != NULL && nFID >= hDBF->nRecords) )
     {
-        CPLError( CE_Failure, CPLE_AppDefined, 
-                  "Attempt to delete shape with feature id (" CPL_FRMT_GIB ") which does "
-                  "not exist.", nFID );
-        return OGRERR_FAILURE;
+        return OGRERR_NON_EXISTING_FEATURE;
     }
 
     if( !hDBF )
@@ -936,10 +932,7 @@ OGRErr OGRShapeLayer::DeleteFeature( GIntBig nFID )
 
     if( DBFIsRecordDeleted( hDBF, (int)nFID ) )
     {
-        CPLError( CE_Failure, CPLE_AppDefined, 
-                  "Attempt to delete shape with feature id (" CPL_FRMT_GIB "), but it is marked deleted already.",
-                  nFID );
-        return OGRERR_FAILURE;
+        return OGRERR_NON_EXISTING_FEATURE;
     }
 
     if( !DBFMarkRecordDeleted( hDBF, (int)nFID, TRUE ) )
@@ -1049,7 +1042,8 @@ OGRErr OGRShapeLayer::ICreateFeature( OGRFeature *poFeature )
     }
     
     eErr = SHPWriteOGRFeature( hSHP, hDBF, poFeatureDefn, poFeature, 
-                               osEncoding, &bTruncationWarningEmitted );
+                               osEncoding, &bTruncationWarningEmitted,
+                               bRewindOnWrite );
 
     if( hSHP != NULL )
         nTotalShapeCount = hSHP->nRecords;
@@ -2335,10 +2329,12 @@ OGRErr OGRShapeLayer::Repack()
 /* -------------------------------------------------------------------- */
 /*      Create a new dbf file, matching the old.                        */
 /* -------------------------------------------------------------------- */
-    int bMustReopenDBF = ( hDBF != NULL );
+    int bMustReopenDBF = FALSE;
 
     if( hDBF != NULL && nDeleteCount > 0 )
     {
+        bMustReopenDBF = TRUE;
+
         CPLString oTempFile(CPLFormFilename(osDirname, osBasename, NULL));
         oTempFile += "_packed.dbf";
 

@@ -138,6 +138,7 @@ void OGRSQLiteTableLayer::CreateSpatialIndexIfNecessary()
     {
         for(int iGeomCol = 0; iGeomCol < poFeatureDefn->GetGeomFieldCount(); iGeomCol ++)
             CreateSpatialIndex(iGeomCol);
+        bDeferredSpatialIndexCreation = FALSE;
     }
 }
 
@@ -1889,7 +1890,7 @@ OGRErr OGRSQLiteTableLayer::AddColumnAncientMethod( OGRFieldDefn& oField)
 
     if( rc == SQLITE_OK )
     {
-        poDS->SoftCommit();
+        poDS->SoftCommitTransaction();
     }
     else
     {
@@ -1899,7 +1900,7 @@ OGRErr OGRSQLiteTableLayer::AddColumnAncientMethod( OGRFieldDefn& oField)
                   pszErrMsg );
         sqlite3_free( pszErrMsg );
 
-        poDS->SoftRollback();
+        poDS->SoftRollbackTransaction();
 
         return OGRERR_FAILURE;
     }
@@ -2000,7 +2001,7 @@ OGRErr OGRSQLiteTableLayer::RecreateTable(const char* pszFieldListForSelect,
 
     if( rc == SQLITE_OK )
     {
-        poDS->SoftCommit();
+        poDS->SoftCommitTransaction();
 
         return OGRERR_NONE;
     }
@@ -2012,7 +2013,7 @@ OGRErr OGRSQLiteTableLayer::RecreateTable(const char* pszFieldListForSelect,
                   pszErrMsg );
         sqlite3_free( pszErrMsg );
 
-        poDS->SoftRollback();
+        poDS->SoftRollbackTransaction();
 
         return OGRERR_FAILURE;
     }
@@ -2449,14 +2450,10 @@ OGRErr OGRSQLiteTableLayer::BindValues( OGRFeature *poFeature,
 
                 case OFTDateTime:
                 {
-                    int nYear, nMonth, nDay, nHour, nMinute, nSecond, nTZ;
-                    poFeature->GetFieldAsDateTime(iField, &nYear, &nMonth, &nDay,
-                                                &nHour, &nMinute, &nSecond, &nTZ);
-                    char szBuffer[64];
-                    sprintf(szBuffer, "%04d-%02d-%02dT%02d:%02d:%02d",
-                            nYear, nMonth, nDay, nHour, nMinute, nSecond);
+                    char* pszStr = OGRGetXMLDateTime(poFeature->GetRawFieldRef(iField));
                     rc = sqlite3_bind_text(hStmt, nBindField++,
-                                           szBuffer, -1, SQLITE_TRANSIENT);
+                                           pszStr, -1, SQLITE_TRANSIENT);
+                    CPLFree(pszStr);
                     break;
                 }
 
@@ -2474,11 +2471,15 @@ OGRErr OGRSQLiteTableLayer::BindValues( OGRFeature *poFeature,
 
                 case OFTTime:
                 {
-                    int nYear, nMonth, nDay, nHour, nMinute, nSecond, nTZ;
+                    int nYear, nMonth, nDay, nHour, nMinute, nTZ;
+                    float fSecond;
                     poFeature->GetFieldAsDateTime(iField, &nYear, &nMonth, &nDay,
-                                                &nHour, &nMinute, &nSecond, &nTZ);
+                                                &nHour, &nMinute, &fSecond, &nTZ );
                     char szBuffer[64];
-                    sprintf(szBuffer, "%02d:%02d:%02d", nHour, nMinute, nSecond);
+                    if( OGR_GET_MS(fSecond) != 0 )
+                        sprintf(szBuffer, "%02d:%02d:%06.3f", nHour, nMinute, fSecond);
+                    else
+                        sprintf(szBuffer, "%02d:%02d:%02d", nHour, nMinute, (int)fSecond);
                     rc = sqlite3_bind_text(hStmt, nBindField++,
                                            szBuffer, -1, SQLITE_TRANSIENT);
                     break;
@@ -2697,23 +2698,27 @@ OGRErr OGRSQLiteTableLayer::ISetFeature( OGRFeature *poFeature )
 
     sqlite3_finalize( hUpdateStmt );
 
-    nFieldCount = poFeatureDefn->GetGeomFieldCount();
-    for( iField = 0; iField < nFieldCount; iField++ )
+    eErr = (sqlite3_changes(hDB) > 0) ? OGRERR_NONE : OGRERR_NON_EXISTING_FEATURE;
+    if( eErr == OGRERR_NONE )
     {
-        OGRSQLiteGeomFieldDefn* poGeomFieldDefn = 
-            poFeatureDefn->myGetGeomFieldDefn(iField);
-        OGRGeometry *poGeom = poFeature->GetGeomFieldRef(iField);
-        if( poGeomFieldDefn->bCachedExtentIsValid &&
-            poGeom != NULL && !poGeom->IsEmpty() )
+        nFieldCount = poFeatureDefn->GetGeomFieldCount();
+        for( iField = 0; iField < nFieldCount; iField++ )
         {
-            OGREnvelope sGeomEnvelope;
-            poGeom->getEnvelope(&sGeomEnvelope);
-            poGeomFieldDefn->oCachedExtent.Merge(sGeomEnvelope);
+            OGRSQLiteGeomFieldDefn* poGeomFieldDefn = 
+                poFeatureDefn->myGetGeomFieldDefn(iField);
+            OGRGeometry *poGeom = poFeature->GetGeomFieldRef(iField);
+            if( poGeomFieldDefn->bCachedExtentIsValid &&
+                poGeom != NULL && !poGeom->IsEmpty() )
+            {
+                OGREnvelope sGeomEnvelope;
+                poGeom->getEnvelope(&sGeomEnvelope);
+                poGeomFieldDefn->oCachedExtent.Merge(sGeomEnvelope);
+            }
         }
+        bStatisticsNeedsToBeFlushed = TRUE;
     }
-    bStatisticsNeedsToBeFlushed = TRUE;
 
-    return OGRERR_NONE;
+    return eErr;
 }
 
 /************************************************************************/
@@ -3186,9 +3191,8 @@ OGRErr OGRSQLiteTableLayer::DeleteFeature( GIntBig nFID )
         return OGRERR_FAILURE;
     }
 
-    int nChanged = sqlite3_changes( poDS->GetDB() );
-
-    if( nChanged == 1 )
+    OGRErr eErr = (sqlite3_changes(poDS->GetDB()) > 0) ? OGRERR_NONE : OGRERR_NON_EXISTING_FEATURE;
+    if( eErr == OGRERR_NONE )
     {
         int nFieldCount = poFeatureDefn->GetGeomFieldCount();
         for( int iField = 0; iField < nFieldCount; iField++ )
@@ -3201,7 +3205,7 @@ OGRErr OGRSQLiteTableLayer::DeleteFeature( GIntBig nFID )
         bStatisticsNeedsToBeFlushed = TRUE;
     }
 
-    return OGRERR_NONE;
+    return eErr;
 }
 
 /************************************************************************/
@@ -3381,11 +3385,8 @@ int OGRSQLiteTableLayer::HasSpatialIndex(int iGeomCol)
     if( iGeomCol < 0 || iGeomCol >= poFeatureDefn->GetGeomFieldCount() )
         return FALSE;
     OGRSQLiteGeomFieldDefn* poGeomFieldDefn = poFeatureDefn->myGetGeomFieldDefn(iGeomCol);    
-    if( bDeferredSpatialIndexCreation )
-    {
-        bDeferredSpatialIndexCreation = FALSE;
-        poGeomFieldDefn->bHasSpatialIndex = CreateSpatialIndex(iGeomCol);
-    }
+    
+    CreateSpatialIndexIfNecessary();
 
     return poGeomFieldDefn->bHasSpatialIndex;
 }

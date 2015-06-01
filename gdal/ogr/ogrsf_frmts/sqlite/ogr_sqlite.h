@@ -301,7 +301,7 @@ class OGRSQLiteLayer : public OGRLayer, public IOGRSQLiteGetSpatialWhere
 
     virtual int          IsTableLayer() { return FALSE; }
 
-    virtual int          HasSpatialIndex(int iGeomField) { return FALSE; }
+    virtual int          HasSpatialIndex(CPL_UNUSED int iGeomField) { return FALSE; }
 
     virtual int           HasFastSpatialFilter(CPL_UNUSED int iGeomCol) { return FALSE; }
     virtual CPLString     GetSpatialWhere(CPL_UNUSED int iGeomCol,
@@ -516,7 +516,7 @@ class OGRSQLiteViewLayer : public OGRSQLiteLayer
 
     virtual int         TestCapability( const char * );
 
-    virtual int          HasSpatialIndex(int iGeomField) { return bHasSpatialIndex; }
+    virtual int          HasSpatialIndex(CPL_UNUSED int iGeomField) { return bHasSpatialIndex; }
     virtual CPLString    GetSpatialWhere(int iGeomCol,
                                          OGRGeometry* poFilterGeom);
 };
@@ -691,6 +691,11 @@ class OGRSQLiteBaseDataSource : public GDALPamDataset
     void                FinishNewSpatialite();
 #endif
 
+    int                 bUserTransactionActive;
+    int                 nSoftTransactionLevel;
+    
+    OGRErr              DoTransactionCommand(const char* pszCommand);
+
   public:
                         OGRSQLiteBaseDataSource();
                         ~OGRSQLiteBaseDataSource();
@@ -705,6 +710,16 @@ class OGRSQLiteBaseDataSource : public GDALPamDataset
     void                SetEnvelopeForSQL(const CPLString& osSQL, const OGREnvelope& oEnvelope);
 
     virtual std::pair<OGRLayer*, IOGRSQLiteGetSpatialWhere*> GetLayerWithGetSpatialWhereByName( const char* pszName ) = 0;
+
+    virtual OGRErr      StartTransaction(int bForce = FALSE);
+    virtual OGRErr      CommitTransaction();
+    virtual OGRErr      RollbackTransaction();
+    
+    virtual int         TestCapability( const char * );
+
+    OGRErr              SoftStartTransaction();
+    OGRErr              SoftCommitTransaction();
+    OGRErr              SoftRollbackTransaction();
 };
 
 /************************************************************************/
@@ -716,13 +731,14 @@ class OGRSQLiteDataSource : public OGRSQLiteBaseDataSource
     OGRSQLiteLayer    **papoLayers;
     int                 nLayers;
 
-    int                 nSoftTransactionLevel;
-
     // We maintain a list of known SRID to reduce the number of trips to
     // the database to get SRSes. 
     int                 nKnownSRID;
     int                *panSRID;
     OGRSpatialReference **papoSRS;
+
+    char              **papszOpenOptions;
+
     void                AddSRIDToCache(int nId, OGRSpatialReference * poSRS );
 
     int                 bHaveGeometryColumns;
@@ -750,7 +766,7 @@ class OGRSQLiteDataSource : public OGRSQLiteBaseDataSource
                         OGRSQLiteDataSource();
                         ~OGRSQLiteDataSource();
 
-    int                 Open( const char *, int bUpdateIn );
+    int                 Open( const char *, int bUpdateIn, char** papszOpenOptions );
     int                 Create( const char *, char **papszOptions );
 
     int                 OpenTable( const char *pszTableName, 
@@ -780,12 +796,9 @@ class OGRSQLiteDataSource : public OGRSQLiteBaseDataSource
     virtual void        ReleaseResultSet( OGRLayer * poLayer );
 
     virtual void        FlushCache();
-
-    OGRErr              SoftStartTransaction();
-    OGRErr              SoftCommit();
-    OGRErr              SoftRollback();
     
-    OGRErr              FlushSoftTransaction();
+    virtual OGRErr      CommitTransaction();
+    virtual OGRErr      RollbackTransaction();
 
     char               *LaunderName( const char * );
     int                 FetchSRSId( OGRSpatialReference * poSRS );

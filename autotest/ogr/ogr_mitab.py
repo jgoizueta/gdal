@@ -524,6 +524,26 @@ def ogr_mitab_15():
         return 'fail'
     ds = None
 
+    # Test opening .mif without .mid even if there are declared attributes
+    ds = ogr.GetDriverByName('MapInfo File').CreateDataSource('/vsimem/nomid.mif')
+    lyr = ds.CreateLayer('empty')
+    lyr.CreateField(ogr.FieldDefn('ID', ogr.OFTInteger))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetField(0, 1)
+    f.SetGeometryDirectly(ogr.CreateGeometryFromWkt('POINT(1 2)'))
+    lyr.CreateFeature(f)
+    ds = None
+
+    gdal.Unlink('/vsimem/nomid.mid')
+    ds = ogr.Open('/vsimem/nomid.mif')
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    if f.IsFieldSet(0) or f.GetGeometryRef() is None:
+        gdaltest.post_reason('failure')
+        f.DumpReadable()
+        return 'fail'
+    gdal.Unlink('/vsimem/nomid.mif')
+
     return 'success'
 
 ###############################################################################
@@ -1071,11 +1091,8 @@ def ogr_mitab_26():
 
             if j == 1:
                 # Expected failure : already deleted feature
-                gdal.ErrorReset()
-                gdal.PushErrorHandler('CPLQuietErrorHandler')
                 ret = lyr.DeleteFeature(int(nb_features/2))
-                gdal.PopErrorHandler()
-                if ret == 0 or gdal.GetLastErrorMsg() == '':
+                if ret != ogr.OGRERR_NON_EXISTING_FEATURE:
                     print(j)
                     print(nb_features)
                     gdaltest.post_reason('fail')
@@ -1089,10 +1106,8 @@ def ogr_mitab_26():
                     return 'fail'
 
                 # Expected failure : illegal feature id
-                gdal.PushErrorHandler('CPLQuietErrorHandler')
                 ret = lyr.DeleteFeature(nb_features+1)
-                gdal.PopErrorHandler()
-                if ret == 0 or gdal.GetLastErrorMsg() == '':
+                if ret != ogr.OGRERR_NON_EXISTING_FEATURE:
                     print(j)
                     print(nb_features)
                     gdaltest.post_reason('fail')

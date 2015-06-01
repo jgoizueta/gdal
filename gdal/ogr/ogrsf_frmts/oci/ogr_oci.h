@@ -160,6 +160,8 @@ class CPL_DLL OGROCIStatement {
     OGRFeatureDefn *GetResultDefn() { return poDefn; }
 
     char       **SimpleFetchRow();
+    
+    int          GetAffectedRows() const { return nAffectedRows; }
 
   private:    
     OGROCISession *poSession;
@@ -173,6 +175,7 @@ class CPL_DLL OGROCIStatement {
 
     int           nRawColumnCount;
     int           *panFieldMap;
+    int           nAffectedRows;
 };
 
 /************************************************************************/
@@ -512,7 +515,8 @@ class OGROCIDataSource : public OGRDataSource
 
     OGROCISession      *GetSession() { return poSession; }
 
-    int                 Open( const char *, int bUpdate, int bTestOpen );
+    int                 Open( const char *, char** papszOpenOptions,
+                              int bUpdate, int bTestOpen );
     int                 OpenTable( const char *pszTableName, 
                                    int nSRID, int bUpdate, int bTestOpen );
 
@@ -541,24 +545,6 @@ class OGROCIDataSource : public OGRDataSource
 
     int                 FetchSRSId( OGRSpatialReference * poSRS );
     OGRSpatialReference *FetchSRS( int nSRID );
-};
-
-/************************************************************************/
-/*                             OGROCIDriver                             */
-/************************************************************************/
-
-class OGROCIDriver : public OGRSFDriver
-{
-  public:
-                ~OGROCIDriver();
-                
-    const char *GetName();
-    OGRDataSource *Open( const char *, int );
-
-    virtual OGRDataSource *CreateDataSource( const char *pszName,
-                                             char ** = NULL );
-    
-    int                 TestCapability( const char * );
 };
 
 /* -------------------------------------------------------------------- */

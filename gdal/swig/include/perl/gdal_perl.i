@@ -54,6 +54,7 @@ ALTERED_DESTROY(GDALMajorObjectShadow, GDALc, delete_MajorObject)
 ALTERED_DESTROY(GDALRasterAttributeTableShadow, GDALc, delete_RasterAttributeTable)
 
 /* remove unwanted name duplication */
+
 %rename (X) GCPX;
 %rename (Y) GCPY;
 %rename (Z) GCPZ;
@@ -62,9 +63,6 @@ ALTERED_DESTROY(GDALRasterAttributeTableShadow, GDALc, delete_RasterAttributeTab
 
 /* Make room for Perl interface */
 
-%rename (_GetDataTypeSize) GetDataTypeSize;
-%rename (_DataTypeIsComplex) DataTypeIsComplex;
-
 %rename (_GetDriver) GetDriver;
 
 %rename (_Open) Open;
@@ -72,6 +70,14 @@ ALTERED_DESTROY(GDALRasterAttributeTableShadow, GDALc, delete_RasterAttributeTab
 
 %rename (_OpenShared) OpenShared;
 %newobject _OpenShared;
+
+%rename (_BuildOverviews) BuildOverviews;
+
+%rename (_ReadRaster) ReadRaster;
+%rename (_WriteRaster) WriteRaster;
+
+%rename (_GetMaskFlags) GetMaskFlags;
+%rename (_CreateMaskBand) CreateMaskBand;
 
 /* those that need callback_data check: */
 
@@ -110,6 +116,7 @@ ALTERED_DESTROY(GDALRasterAttributeTableShadow, GDALc, delete_RasterAttributeTab
 
 package Geo::GDAL;
 use strict;
+use warnings;
 use Carp;
 use Encode;
 use Geo::GDAL::Const;
@@ -215,13 +222,13 @@ sub GetDataTypeSize {
     my $t = shift;
     my $t2 = $t;
     $t2 = $TYPE_STRING2INT{$t} if exists $TYPE_STRING2INT{$t};
-    croak "Unknown data type: '$t'." unless exists $TYPE_INT2STRING{$t2};
+    confess "Unknown data type: '$t'." unless exists $TYPE_INT2STRING{$t2};
     return _GetDataTypeSize($t2);
 }
 
 sub DataTypeValueRange {
     my $t = shift;
-    croak "Unknown data type: '$t'." unless exists $TYPE_STRING2INT{$t};
+    confess "Unknown data type: '$t'." unless exists $TYPE_STRING2INT{$t};
     # these values are from gdalrasterband.cpp
     return (0,255) if $t =~ /Byte/;
     return (0,65535) if $t =~/UInt16/;
@@ -236,14 +243,14 @@ sub DataTypeIsComplex {
     my $t = shift;
     my $t2 = $t;
     $t2 = $TYPE_STRING2INT{$t} if exists $TYPE_STRING2INT{$t};
-    croak "Unknown data type: '$t'." unless exists $TYPE_INT2STRING{$t2};
+    confess "Unknown data type: '$t'." unless exists $TYPE_INT2STRING{$t2};
     return _DataTypeIsComplex($t2);
 }
 
 sub PackCharacter {
     my $t = shift;
     $t = $TYPE_INT2STRING{$t} if exists $TYPE_INT2STRING{$t};
-    croak "Unknown data type: '$t'." unless exists $TYPE_STRING2INT{$t};
+    confess "Unknown data type: '$t'." unless exists $TYPE_STRING2INT{$t};
     my $is_big_endian = unpack("h*", pack("s", 1)) =~ /01/; # from Programming Perl
     return 'C' if $t =~ /^Byte$/;
     return ($is_big_endian ? 'n': 'v') if $t =~ /^UInt16$/;
@@ -254,25 +261,48 @@ sub PackCharacter {
     return 'd' if $t =~ /^Float64$/;
 }
 
+sub GetDriverNames {
+    my @names;
+    for my $i (0..GetDriverCount()-1) {
+        my $driver = _GetDriver($i);
+        my $md = $driver->GetMetadata;
+        next unless $md->{DCAP_RASTER} and $md->{DCAP_RASTER} eq 'YES';
+        push @names, _GetDriver($i)->Name;
+    }
+    return @names;
+}
+
 sub Drivers {
     my @drivers;
     for my $i (0..GetDriverCount()-1) {
+        my $driver = _GetDriver($i);
+        my $md = $driver->GetMetadata;
+        next unless $md->{DCAP_RASTER} and $md->{DCAP_RASTER} eq 'YES';
         push @drivers, _GetDriver($i);
     }
     return @drivers;
 }
 
 sub GetDriver {
-    my $driver = shift;
-    return _GetDriver($driver) if $driver =~ /^\d/;
-    return GetDriverByName($driver);
+    my($name) = @_;
+    $name = 0 unless defined $name;
+    my $driver;
+    $driver = _GetDriver($name) if $name =~ /^\d+$/; # is the name an index to driver list?
+    $driver = GetDriverByName("$name") unless $driver;
+    if ($driver) {
+        my $md = $driver->GetMetadata;
+        confess "Driver exists but does not have raster capabilities." 
+            unless $md->{DCAP_RASTER} and $md->{DCAP_RASTER} eq 'YES';
+        return $driver;
+    }
+    confess "Driver not found: '$name'. Maybe support for it was not built in?";
 }
 *Driver = *GetDriver;
 
 sub Open {
     my @p = @_;
     if (defined $p[1]) {
-        croak "Unknown access type: '$p[1]'." unless exists $Geo::GDAL::ACCESS_STRING2INT{$p[1]};
+        confess "Unknown access type: '$p[1]'." unless exists $Geo::GDAL::ACCESS_STRING2INT{$p[1]};
         $p[1] = $Geo::GDAL::ACCESS_STRING2INT{$p[1]};
     }
     return _Open(@p);
@@ -281,7 +311,7 @@ sub Open {
 sub OpenShared {
     my @p = @_;
     if (defined $p[1]) {
-        croak "Unknown access type: '$p[1]'." unless exists $Geo::GDAL::ACCESS_STRING2INT{$p[1]};
+        confess "Unknown access type: '$p[1]'." unless exists $Geo::GDAL::ACCESS_STRING2INT{$p[1]};
         $p[1] = $Geo::GDAL::ACCESS_STRING2INT{$p[1]};
     }
     return _OpenShared(@p);
@@ -326,12 +356,14 @@ sub SieveFilter {
 
 sub RegenerateOverviews {
     my @p = @_;
+    $p[2] = uc($p[2]) if $p[2]; # see overview.cpp:2030
     $p[4] = 1 if $p[3] and not defined $p[4];
     _RegenerateOverviews(@p);
 }
 
 sub RegenerateOverview {
     my @p = @_;
+    $p[2] = uc($p[2]) if $p[2]; # see overview.cpp:2030
     $p[4] = 1 if $p[3] and not defined $p[4];
     _RegenerateOverview(@p);
 }
@@ -340,7 +372,7 @@ sub ReprojectImage {
     my @p = @_;
     $p[8] = 1 if $p[7] and not defined $p[8];
     if (defined $p[4]) {
-        croak "Unknown data type: '$p[4]'." unless exists $Geo::GDAL::RESAMPLING_STRING2INT{$p[4]};
+        confess "Unknown data type: '$p[4]'." unless exists $Geo::GDAL::RESAMPLING_STRING2INT{$p[4]};
         $p[4] = $Geo::GDAL::RESAMPLING_STRING2INT{$p[4]};
     }
     return _ReprojectImage(@p);
@@ -348,17 +380,25 @@ sub ReprojectImage {
 
 sub AutoCreateWarpedVRT {
     my @p = @_;
+    for my $i (1..2) {
+        if (defined $p[$i] and ref($p[$i])) {
+            $p[$i] = $p[$i]->ExportToWkt;
+        }
+    }
     if (defined $p[3]) {
-        croak "Unknown data type: '$p[3]'." unless exists $Geo::GDAL::RESAMPLING_STRING2INT{$p[3]};
+        confess "Unknown data type: '$p[3]'." unless exists $Geo::GDAL::RESAMPLING_STRING2INT{$p[3]};
         $p[3] = $Geo::GDAL::RESAMPLING_STRING2INT{$p[3]};
     }
     return _AutoCreateWarpedVRT(@p);
 }
 
 
+
+
 package Geo::GDAL::MajorObject;
-use vars qw/@DOMAINS/;
 use strict;
+use warnings;
+use vars qw/@DOMAINS/;
 
 sub Domains {
     return @DOMAINS;
@@ -382,9 +422,10 @@ sub Metadata {
 
 
 package Geo::GDAL::Driver;
-use vars qw/@CAPABILITIES @DOMAINS/;
 use strict;
+use warnings;
 use Carp;
+use vars qw/@CAPABILITIES @DOMAINS/;
 for (keys %Geo::GDAL::Const::) {
     next if /TypeCount/;
     push(@CAPABILITIES, $1), next if /^DCAP_(\w+)/;
@@ -458,25 +499,48 @@ sub CreationOptionList {
 sub CreationDataTypes {
     my $self = shift;
     my $h = $self->GetMetadata;
-    return split /\s+/, $h->{DMD_CREATIONDATATYPES};
+    return split /\s+/, $h->{DMD_CREATIONDATATYPES} if $h->{DMD_CREATIONDATATYPES};
 }
 
-sub CreateDataset {
-    my @p = @_;
-    if (defined $p[5]) {
-        croak "Unknown data type: '$p[5]'." unless exists $Geo::GDAL::TYPE_STRING2INT{$p[5]};
-        $p[5] = $Geo::GDAL::TYPE_STRING2INT{$p[5]};
+sub Create {
+    my $self = shift;
+    my %defaults = ( Name => 'unnamed',
+                     Width => 256,
+                     Height => 256,
+                     Bands => 1,
+                     Type => 'Byte',
+                     Options => {} );
+    my %params;
+    if (@_ == 0) {
+    } elsif (ref($_[0]) eq 'HASH') {
+        %params = %{$_[0]};
+    } elsif (exists $defaults{$_[0]} and @_ % 2 == 0) {
+        %params = @_;
+    } else {
+        ($params{Name}, $params{Width}, $params{Height}, $params{Bands}, $params{Type}, $params{Options}) = @_;
     }
-    return _Create(@p);
+    for my $k (keys %params) {
+        carp "Create: unrecognized named parameter '$k'." unless exists $defaults{$k};
+    }
+    for my $k (keys %defaults) {
+        $params{$k} = $defaults{$k} unless defined $params{$k};
+    }
+    my $type;
+    confess "Unknown data type: '$params{Type}'." unless exists $Geo::GDAL::TYPE_STRING2INT{$params{Type}};
+    $type = $Geo::GDAL::TYPE_STRING2INT{$params{Type}};
+    return $self->_Create($params{Name}, $params{Width}, $params{Height}, $params{Bands}, $type, $params{Options});
 }
-*Create = *CreateDataset;
+*CreateDataset = *Create;
 *Copy = *CreateCopy;
+
+
 
 
 package Geo::GDAL::Dataset;
 use strict;
-use vars qw/%BANDS @DOMAINS/;
+use warnings;
 use Carp;
+use vars qw/%BANDS @DOMAINS/;
 @DOMAINS = qw/IMAGE_STRUCTURE SUBDATASETS GEOLOCATION/;
 
 sub Domains {
@@ -518,7 +582,7 @@ sub GetRasterBand {
 sub AddBand {
     my @p = @_;
     if (defined $p[1]) {
-        croak "Unknown data type: '$p[1]'." unless exists $Geo::GDAL::TYPE_STRING2INT{$p[1]};
+        confess "Unknown data type: '$p[1]'." unless exists $Geo::GDAL::TYPE_STRING2INT{$p[1]};
         $p[1] = $Geo::GDAL::TYPE_STRING2INT{$p[1]};
     }
     return _AddBand(@p);
@@ -530,35 +594,170 @@ sub Projection {
     GetProjection($self) if defined wantarray;
 }
 
+sub SpatialReference {
+    my($self, $sr) = @_;
+    SetProjection($self, $sr->As('WKT')) if defined $sr;
+    return Geo::OSR::SpatialReference->new(GetProjection($self)) if defined wantarray;
+}
+
 sub GeoTransform {
     my $self = shift;
-    SetGeoTransform($self, \@_) if @_ > 0;
+    eval {
+        if (@_ == 1) {
+            SetGeoTransform($self, $_[0]);
+        } elsif (@_ > 1) {
+            SetGeoTransform($self, \@_);
+        }
+    };
+    confess $@ if $@;
     return unless defined wantarray;
     my $t = GetGeoTransform($self);
-    return @$t;
+    if (wantarray) {
+        return @$t;
+    } else {
+        return Geo::GDAL::GeoTransform->new($t);
+    }
 }
 
 sub GCPs {
     my $self = shift;
     if (@_ > 0) {
         my $proj = pop @_;
+        $proj = $proj->Export('WKT') if $proj and ref($proj);
         SetGCPs($self, \@_, $proj);
     }
     return unless defined wantarray;
-    my $proj = GetGCPProjection($self);
+    my $proj = Geo::OSR::SpatialReference->new(GetGCPProjection($self));
     my $GCPs = GetGCPs($self);
     return (@$GCPs, $proj);
 }
 
+sub ReadRaster {
+    my $self = shift;
+    my ($width, $height) = $self->Size;
+    my ($type) = $self->Band->DataType;
+    my %d = (
+        XOFF => 0,
+        YOFF => 0,
+        XSIZE => $width,
+        YSIZE => $height,
+        BUFXSIZE => undef,
+        BUFYSIZE => undef,
+        BUFTYPE => $type,
+        BANDLIST => [1],
+        BUFPIXELSPACE => 0,
+        BUFLINESPACE => 0,
+        BUFBANDSPACE => 0,
+        RESAMPLEALG => 'NearestNeighbour',
+        PROGRESS => undef,
+        PROGRESSDATA => undef
+        );
+    my %p;
+    my $t;
+    if (defined $_[0]) {
+        $t = uc($_[0]); 
+        $t =~ s/_//g;
+    }
+    if (@_ == 0) {
+    } elsif (ref($_[0]) eq 'HASH') {
+        %p = %{$_[0]};
+    } elsif (@_ % 2 == 0 and (defined $t and exists $d{$t})) {
+        %p = @_;
+    } else {
+        ($p{xoff},$p{yoff},$p{xsize},$p{ysize},$p{buf_xsize},$p{buf_ysize},$p{buf_type},$p{band_list},$p{buf_pixel_space},$p{buf_line_space},$p{buf_band_space},$p{resample_alg},$p{progress},$p{progress_data}) = @_;
+    }
+    for (keys %p) {
+        my $u = uc($_);
+        $u =~ s/_//g;
+        carp "Unknown named parameter '$_'." unless exists $d{$u};
+        $p{$u} = $p{$_};
+    }
+    for (keys %d) {
+        $p{$_} = $d{$_} unless defined $p{$_};
+    }
+    confess "Unknown resampling algorithm: '$p{RESAMPLEALG}'." 
+        unless exists $Geo::GDAL::RIO_RESAMPLING_STRING2INT{$p{RESAMPLEALG}};
+    $p{RESAMPLEALG} = $Geo::GDAL::RIO_RESAMPLING_STRING2INT{$p{RESAMPLEALG}};
+    unless ($Geo::GDAL::TYPE_INT2STRING{$p{BUFTYPE}}) {
+        confess "Unknown data type: '$p{BUFTYPE}'." 
+            unless exists $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+        $p{BUFTYPE} = $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+    }
+    $self->_ReadRaster($p{XOFF},$p{YOFF},$p{XSIZE},$p{YSIZE},$p{BUFXSIZE},$p{BUFYSIZE},$p{BUFTYPE},$p{BANDLIST},$p{BUFPIXELSPACE},$p{BUFLINESPACE},$p{BUFBANDSPACE},$p{RESAMPLEALG},$p{PROGRESS},$p{PROGRESSDATA});
+}
+
+sub WriteRaster {
+    my $self = shift;
+    my ($width, $height) = $self->Size;
+    my ($type) = $self->Band->DataType;
+    my %d = (
+        XOFF => 0,
+        YOFF => 0,
+        XSIZE => $width,
+        YSIZE => $height,
+        BUF => undef,
+        BUFXSIZE => undef,
+        BUFYSIZE => undef,
+        BUFTYPE => $type,
+        BANDLIST => [1],
+        BUFPIXELSPACE => 0,
+        BUFLINESPACE => 0,
+        BUFBANDSPACE => 0
+        );
+    my %p;
+    my $t;
+    if (defined $_[0]) {
+        $t = uc($_[0]); 
+        $t =~ s/_//g;
+    }
+    if (@_ == 0) {
+    } elsif (ref($_[0]) eq 'HASH') {
+        %p = %{$_[0]};
+    } elsif (@_ % 2 == 0 and (defined $t and exists $d{$t})) {
+        %p = @_;
+    } else {
+        ($p{xoff},$p{yoff},$p{xsize},$p{ysize},$p{buf},$p{buf_xsize},$p{buf_ysize},$p{buf_type},$p{band_list},$p{buf_pixel_space},$p{buf_line_space},$p{buf_band_space}) = @_;
+    }
+    for (keys %p) {
+        my $u = uc($_);
+        $u =~ s/_//g;
+        carp "Unknown named parameter '$_'." unless exists $d{$u};
+        $p{$u} = $p{$_};
+    }
+    for (keys %d) {
+        $p{$_} = $d{$_} unless defined $p{$_};
+    }
+    unless ($Geo::GDAL::TYPE_INT2STRING{$p{BUFTYPE}}) {
+        confess "Unknown data type: '$p{BUFTYPE}'." 
+            unless exists $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+        $p{BUFTYPE} = $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+    }
+    $self->_WriteRaster($p{XOFF},$p{YOFF},$p{XSIZE},$p{YSIZE},$p{BUF},$p{BUFXSIZE},$p{BUFYSIZE},$p{BUFTYPE},$p{BANDLIST},$p{BUFPIXELSPACE},$p{BUFLINESPACE},$p{BUFBANDSPACE});
+}
+
+sub BuildOverviews {
+    my $self = shift;
+    my @p = @_;
+    $p[0] = uc($p[0]) if $p[0];
+    eval {
+        $self->_BuildOverviews(@p);
+    };
+    confess $@ if $@;
+}
+
+
+
 
 package Geo::GDAL::Band;
 use strict;
+use warnings;
 use POSIX;
 use Carp;
 use Scalar::Util 'blessed';
 use vars qw/
     @COLOR_INTERPRETATIONS
     %COLOR_INTERPRETATION_STRING2INT %COLOR_INTERPRETATION_INT2STRING @DOMAINS
+    %MASK_FLAGS
     /;
 for (keys %Geo::GDAL::Const::) {
     next if /TypeCount/;
@@ -570,9 +769,19 @@ for my $string (@COLOR_INTERPRETATIONS) {
     $COLOR_INTERPRETATION_INT2STRING{$int} = $string;
 }
 @DOMAINS = qw/IMAGE_STRUCTURE RESAMPLING/;
+%MASK_FLAGS = (AllValid => 1, PerDataset => 2, Alpha => 4, NoData => 8);
 
 sub Domains {
     return @DOMAINS;
+}
+
+sub ColorInterpretations {
+    return @COLOR_INTERPRETATIONS;
+}
+
+sub MaskFlags {
+    my @f = sort {$MASK_FLAGS{$a} <=> $MASK_FLAGS{$b}} keys %MASK_FLAGS;
+    return @f;
 }
 
 sub DESTROY {
@@ -606,6 +815,11 @@ sub DataType {
     return $Geo::GDAL::TYPE_INT2STRING{$self->{DataType}};
 }
 
+sub PackCharacter {
+    my $self = shift;
+    return Geo::GDAL::PackCharacter($self->DataType);
+}
+
 sub NoDataValue {
     my $self = shift;
     if (@_ > 0) {
@@ -625,6 +839,7 @@ sub Unit {
         $unit = '' unless defined $unit;
         SetUnitType($self, $unit);
     }
+    return unless defined wantarray;
     GetUnitType($self);
 }
 
@@ -632,7 +847,10 @@ sub ScaleAndOffset {
     my $self = shift;
     SetScale($self, $_[0]) if @_ > 0 and defined $_[0];
     SetOffset($self, $_[1]) if @_ > 1 and defined $_[1];
-    (GetScale($self), GetOffset($self));
+    return unless defined wantarray;
+    my $scale = GetScale($self);
+    my $offset = GetOffset($self);
+    return ($scale, $offset);
 }
 
 sub ReadTile {
@@ -664,7 +882,6 @@ sub WriteTile {
     my $ysize = @{$data};
     $ysize = $self->{YSize} - $yoff if $ysize > $self->{YSize} - $yoff;
     my $pc = Geo::GDAL::PackCharacter($self->{DataType});
-    my $w = $xsize * Geo::GDAL::GetDataTypeSize($self->{DataType})/8;
     for my $i (0..$ysize-1) {
         my $scanline = pack($pc."[$xsize]", @{$data->[$i]});
         $self->WriteRaster( $xoff, $yoff+$i, $xsize, 1, $scanline );
@@ -676,7 +893,7 @@ sub ColorInterpretation {
     if (defined $ci) {
         my $ci2 = $ci;
         $ci2 = $COLOR_INTERPRETATION_STRING2INT{$ci} if exists $COLOR_INTERPRETATION_STRING2INT{$ci};
-        croak "Unknown color interpretation: '$ci'." unless exists $COLOR_INTERPRETATION_INT2STRING{$ci2};
+        confess "Unknown color interpretation: '$ci'." unless exists $COLOR_INTERPRETATION_INT2STRING{$ci2};
         SetRasterColorInterpretation($self, $ci2);
         return $ci;
     } else {
@@ -704,7 +921,7 @@ sub AttributeTable {
     SetDefaultRAT($self, $_[0]) if @_ and defined $_[0];
     return unless defined wantarray;
     my $r = GetDefaultRAT($self);
-    $Geo::GDAL::RasterAttributeTable::BANDS{$r} = $self;
+    $Geo::GDAL::RasterAttributeTable::BANDS{$r} = $self if $r;
     return $r;
 }
 
@@ -740,17 +957,25 @@ sub Contours {
                     NoDataValue => undef,
                     IDField => -1,
                     ElevField => -1,
-                    callback => undef,
-                    callback_data => undef);
+                    Progress => undef,
+                    ProgressData => undef);
     my %params;
     if (!defined($_[0]) or (blessed($_[0]) and $_[0]->isa('Geo::OGR::DataSource'))) {
         ($params{DataSource}, $params{LayerConstructor},
          $params{ContourInterval}, $params{ContourBase},
          $params{FixedLevels}, $params{NoDataValue},
          $params{IDField}, $params{ElevField},
-         $params{callback}, $params{callback_data}) = @_;
+         $params{Progress}, $params{ProgressData}) = @_;
     } else {
         %params = @_;
+        if (exists $params{progress}) {
+            $params{Progress} = $params{progress};
+            delete $params{progress};
+        }
+        if (exists $params{progress_data}) {
+            $params{ProgressData} = $params{progress_data};
+            delete $params{progress_data};
+        }
     }
     for (keys %params) {
         carp "unknown parameter $_ in Geo::GDAL::Band::Contours" unless exists $defaults{$_};
@@ -775,27 +1000,177 @@ sub Contours {
     for ('IDField', 'ElevField') {
         $params{$_} = $schema->GetFieldIndex($params{$_}) unless $params{$_} =~ /^[+-]?\d+$/;
     }
-    $params{callback_data} = 1 if $params{callback} and not defined $params{callback_data};
+    $params{ProgressData} = 1 if $params{Progress} and not defined $params{ProgressData};
     ContourGenerate($self, $params{ContourInterval}, $params{ContourBase}, $params{FixedLevels},
                     $params{NoDataValue}, $layer, $params{IDField}, $params{ElevField},
-                    $params{callback}, $params{callback_data});
+                    $params{Progress}, $params{ProgressData});
     return $layer;
 }
 
 sub FillNodata {
+    my $self = shift;
+    my $mask = shift;
+    $mask = $self->GetMaskBand unless $mask;
     my @p = @_;
-    croak 'usage: Geo::GDAL::Band->FillNodata($mask)' unless blessed($p[1]) and $p[1]->isa('Geo::GDAL::Band');
-    $p[2] = 10 unless defined $p[2];
-    $p[3] = 0 unless defined $p[3];
-    $p[4] = undef unless defined $p[4];
-    $p[5] = undef unless defined $p[5];
-    $p[6] = undef unless defined $p[6];
-    Geo::GDAL::FillNodata(@p);
+    $p[0] = 10 unless defined $p[0];
+    $p[1] = 0 unless defined $p[1];
+    $p[2] = undef unless defined $p[2];
+    $p[3] = undef unless defined $p[3];
+    $p[4] = undef unless defined $p[1];
+    Geo::GDAL::FillNodata($self, $mask, @p);
 }
 *GetBandNumber = *GetBand;
 
+sub ReadRaster {
+    my $self = shift;
+    my ($width, $height) = $self->Size;
+    my ($type) = $self->DataType;
+    my %d = (
+        XOFF => 0,
+        YOFF => 0,
+        XSIZE => $width,
+        YSIZE => $height,
+        BUFXSIZE => undef,
+        BUFYSIZE => undef,
+        BUFTYPE => $type,
+        BUFPIXELSPACE => 0,
+        BUFLINESPACE => 0,
+        RESAMPLEALG => 'NearestNeighbour',
+        PROGRESS => undef,
+        PROGRESSDATA => undef
+        );
+    my %p;
+    my $t;
+    if (defined $_[0]) {
+        $t = uc($_[0]); 
+        $t =~ s/_//g;
+    }
+    if (@_ == 0) {
+    } elsif (ref($_[0]) eq 'HASH') {
+        %p = %{$_[0]};
+    } elsif (@_ % 2 == 0 and (defined $t and exists $d{$t})) {
+        %p = @_;
+    } else {
+        ($p{xoff},$p{yoff},$p{xsize},$p{ysize},$p{buf_xsize},$p{buf_ysize},$p{buf_type},$p{buf_pixel_space},$p{buf_line_space},$p{resample_alg},$p{progress},$p{progress_data}) = @_;
+    }
+    for (keys %p) {
+        my $u = uc($_);
+        $u =~ s/_//g;
+        carp "Unknown named parameter '$_'." unless exists $d{$u};
+        $p{$u} = $p{$_};
+    }
+    for (keys %d) {
+        $p{$_} = $d{$_} unless defined $p{$_};
+    }
+    confess "Unknown resampling algorithm: '$p{RESAMPLEALG}'." 
+        unless exists $Geo::GDAL::RIO_RESAMPLING_STRING2INT{$p{RESAMPLEALG}};
+    $p{RESAMPLEALG} = $Geo::GDAL::RIO_RESAMPLING_STRING2INT{$p{RESAMPLEALG}};
+    unless ($Geo::GDAL::TYPE_INT2STRING{$p{BUFTYPE}}) {
+        confess "Unknown data type: '$p{BUFTYPE}'." 
+            unless exists $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+        $p{BUFTYPE} = $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+    }
+    $self->_ReadRaster($p{XOFF},$p{YOFF},$p{XSIZE},$p{YSIZE},$p{BUFXSIZE},$p{BUFYSIZE},$p{BUFTYPE},$p{BUFPIXELSPACE},$p{BUFLINESPACE},$p{RESAMPLEALG},$p{PROGRESS},$p{PROGRESSDATA});
+}
+
+sub WriteRaster {
+    my $self = shift;
+    my ($width, $height) = $self->Size;
+    my ($type) = $self->DataType;
+    my %d = (
+        XOFF => 0,
+        YOFF => 0,
+        XSIZE => $width,
+        YSIZE => $height,
+        BUF => undef,
+        BUFXSIZE => undef,
+        BUFYSIZE => undef,
+        BUFTYPE => $type,
+        BUFPIXELSPACE => 0,
+        BUFLINESPACE => 0
+        );
+    my %p;
+    my $t;
+    if (defined $_[0]) {
+        $t = uc($_[0]); 
+        $t =~ s/_//g;
+    }
+    if (@_ == 0) {
+    } elsif (ref($_[0]) eq 'HASH') {
+        %p = %{$_[0]};
+    } elsif (@_ % 2 == 0 and (defined $t and exists $d{$t})) {
+        %p = @_;
+    } else {
+        ($p{xoff},$p{yoff},$p{xsize},$p{ysize},$p{buf},$p{buf_xsize},$p{buf_ysize},$p{buf_type},$p{buf_pixel_space},$p{buf_line_space}) = @_;
+    }
+    for (keys %p) {
+        my $u = uc($_);
+        $u =~ s/_//g;
+        carp "Unknown named parameter '$_'." unless exists $d{$u};
+        $p{$u} = $p{$_};
+    }
+    for (keys %d) {
+        $p{$_} = $d{$_} unless defined $p{$_};
+    }
+    unless ($Geo::GDAL::TYPE_INT2STRING{$p{BUFTYPE}}) {
+        confess "Unknown data type: '$p{BUFTYPE}'." 
+            unless exists $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+        $p{BUFTYPE} = $Geo::GDAL::TYPE_STRING2INT{$p{BUFTYPE}};
+    }
+    $self->_WriteRaster($p{XOFF},$p{YOFF},$p{XSIZE},$p{YSIZE},$p{BUF},$p{BUFXSIZE},$p{BUFYSIZE},$p{BUFTYPE},$p{BUFPIXELSPACE},$p{BUFLINESPACE});
+}
+
+sub GetMaskFlags {
+    my $self = shift;
+    my $f = $self->_GetMaskFlags;
+    my @f;
+    for my $flag (keys %MASK_FLAGS) {
+        push @f, $flag if $f & $MASK_FLAGS{$flag};
+    }
+    return wantarray ? @f : $f;
+}
+
+sub CreateMaskBand {
+    my $self = shift;
+    my $f = 0;
+    if (@_ and $_[0] =~ /^\d$/) {
+        $f = shift;
+    } else {
+        for my $flag (@_) {
+            carp "Unknown mask flag: '$flag'." unless $MASK_FLAGS{$flag};
+            $f |= $MASK_FLAGS{$flag};
+        }
+    }
+    $self->_CreateMaskBand($f);
+}
+
+# GetMaskBand should be redefined and the result should be put into 
+# %Geo::GDAL::Dataset::BANDS
+
+# GetOverview should be redefined and the result should be put into 
+# %Geo::GDAL::Dataset::BANDS
+
+sub RegenerateOverview {
+    my $self = shift;
+    #Geo::GDAL::Band overview, scalar resampling, subref callback, scalar callback_data
+    my @p = @_;
+    Geo::GDAL::RegenerateOverview($self, @p);
+}
+ 
+sub RegenerateOverviews {
+    my $self = shift;
+    #arrayref overviews, scalar resampling, subref callback, scalar callback_data
+    my @p = @_;
+    Geo::GDAL::RegenerateOverviews($self, @p);
+}
+
+
+
+
 package Geo::GDAL::ColorTable;
 use strict;
+use warnings;
+use Carp;
 use vars qw/
     %PALETTE_INTERPRETATION_STRING2INT %PALETTE_INTERPRETATION_INT2STRING
     /;
@@ -804,21 +1179,38 @@ for my $string (qw/Gray RGB CMYK HLS/) {
     $PALETTE_INTERPRETATION_STRING2INT{$string} = $int;
     $PALETTE_INTERPRETATION_INT2STRING{$int} = $string;
 }
+%}
 
-sub create {
+%feature("shadow") GDALColorTableShadow(GDALPaletteInterp palette = GPI_RGB)
+%{
+use Carp;
+sub new {
     my($pkg, $pi) = @_;
     $pi = $PALETTE_INTERPRETATION_STRING2INT{$pi} if defined $pi and exists $PALETTE_INTERPRETATION_STRING2INT{$pi};
     my $self = Geo::GDALc::new_ColorTable($pi);
     bless $self, $pkg if defined($self);
 }
+%}
 
+%perlcode %{
 sub GetPaletteInterpretation {
     my $self = shift;
     return $PALETTE_INTERPRETATION_INT2STRING{GetPaletteInterpretation($self)};
 }
 
 sub SetColorEntry {
-    @_ == 3 ? _SetColorEntry(@_) : _SetColorEntry(@_[0..1], [@_[2..5]]);
+    my $self = shift;
+    my $index = shift;
+    my $color;
+    if (ref($_[0]) eq 'ARRAY') {
+        $color = shift;
+    } else {
+        $color = [@_];
+    }
+    eval {
+        $self->_SetColorEntry($index, $color);
+    };
+    confess $@ if $@;
 }
 
 sub ColorEntry {
@@ -847,8 +1239,11 @@ sub ColorTable {
 *ColorEntries = *ColorTable;
 
 
+
+
 package Geo::GDAL::RasterAttributeTable;
 use strict;
+use warnings;
 use Carp;
 use vars qw/ %BANDS
     @FIELD_TYPES @FIELD_USAGES
@@ -919,8 +1314,8 @@ sub Columns {
 
 sub CreateColumn {
     my($self, $name, $type, $usage) = @_;
-    croak "Unknown RAT column type: '$type'." unless exists $FIELD_TYPE_STRING2INT{$type};
-    croak "Unknown RAT column usage: '$usage'." unless exists $FIELD_USAGE_STRING2INT{$usage};
+    confess "Unknown RAT column type: '$type'." unless exists $FIELD_TYPE_STRING2INT{$type};
+    confess "Unknown RAT column usage: '$usage'." unless exists $FIELD_USAGE_STRING2INT{$usage};
     for my $color (qw/Red Green Blue Alpha/) {
         carp "RAT column type will be 'Integer' for usage '$color'." if $usage eq $color and $type ne 'Integer';
     }
@@ -944,6 +1339,205 @@ sub LinearBinning {
     return $a[0] ? ($a[1], $a[2]) : ();
 }
 
+
+
+
+package Geo::GDAL::GCP;
+
+*swig_Pixel_get = *Geo::GDALc::GCP_Column_get;
+*swig_Pixel_set = *Geo::GDALc::GCP_Column_set;
+*swig_Line_get = *Geo::GDALc::GCP_Row_get;
+*swig_Line_set = *Geo::GDALc::GCP_Row_set;
+
+
+
+package Geo::GDAL::VSIF;
+use strict;
+use warnings;
+use Carp;
+
+sub Open {
+    my ($path, $mode) = @_;
+    my $self = Geo::GDAL::VSIFOpenL($path, $mode);
+    bless $self, 'Geo::GDAL::VSIF';
+}
+
+sub Write {
+    my ($self, $data) = @_;
+    Geo::GDAL::VSIFWriteL($data, $self);
+}
+
+sub Close {
+    my ($self, $data) = @_;
+    eval {
+        Geo::GDAL::VSIFCloseL($self);
+    };
+    if ($@) {
+        confess "Cannot close file: $@.";
+    }
+}
+
+sub Read {
+    my ($self, $count) = @_;
+    Geo::GDAL::VSIFReadL($count, $self);
+}
+
+sub Seek {
+    my ($self, $offset, $whence) = @_;
+    Geo::GDAL::VSIFSeekL($self, $offset, $whence);
+}
+
+sub Tell {
+    my ($self) = @_;
+    Geo::GDAL::VSIFTellL($self);
+}
+
+sub Truncate {
+    my ($self, $new_size) = @_;
+    eval {
+        Geo::GDAL::VSIFTruncateL($self, $new_size);
+    };
+    if ($@) {
+        confess "Cannot truncate file: $@.";
+    }
+}
+
+sub MkDir {
+    my ($path) = @_;
+    my $mode = 0; # unused in CPL
+    eval {
+        Geo::GDAL::Mkdir($path, $mode);
+    };
+    if ($@) {
+        confess "Cannot make directory \"$path\": $@.";
+    }
+}
+*Mkdir = *MkDir;
+
+sub ReadDir {
+    my ($path) = @_;
+    Geo::GDAL::ReadDir($path);
+}
+
+sub ReadDirRecursive {
+    my ($path) = @_;
+    Geo::GDAL::ReadDirRecursive($path);
+}
+
+sub Rename {
+    my ($old, $new) = @_;
+    eval {
+        Geo::GDAL::Rename($old, $new);
+    };
+    if ($@) {
+        confess "Cannot rename file \"$old\": $@.";
+    }
+}
+
+sub RmDir {
+    my ($dirname, $recursive) = @_;
+    eval {
+        if (!$recursive) {
+            Geo::GDAL::Rmdir($dirname);
+        } else {
+            for my $f (ReadDir($dirname)) {
+                next if $f eq '..' or $f eq '.';
+                my @s = Stat($dirname.'/'.$f);
+                if ($s[0] eq 'f') {
+                    Unlink($dirname.'/'.$f);
+                } elsif ($s[0] eq 'd') {
+                    Rmdir($dirname.'/'.$f, 1);
+                    Rmdir($dirname.'/'.$f);
+                }
+            }
+            RmDir($dirname);
+        }
+    };
+    if ($@) {
+        my $r = $recursive ? ' recursively' : '';
+        confess "Cannot remove directory \"$dirname\"$r: $@.";
+    }
+}
+*Rmdir = *RmDir;
+
+sub Stat {
+    my ($path) = @_;
+    eval {
+        Geo::GDAL::Stat($path);
+    };
+    if ($@) {
+        confess "Cannot stat file \"$path\": $@.";
+    }
+}
+
+sub Unlink {
+    my ($filename) = @_;
+    eval {
+        Geo::GDAL::Unlink($filename);
+    };
+    if ($@) {
+        confess "Cannot unlink file \"$filename\": $@.";
+    }
+}
+
+
+
+
+package Geo::GDAL::GeoTransform;
+use strict;
+use warnings;
+use Carp;
+
+sub new {
+    my $class = shift;
+    my $self;
+    if (@_ == 0) {
+        $self = [0,1,0,0,0,1];
+    } elsif (@_ == 1) {
+        $self = $_[0];
+    } else {
+        my @a = @_;
+        $self = \@a;
+    }
+    bless $self, $class;
+    return $self;
+}
+
+sub FromGCPs {
+    my @GCPs;
+    my $ApproxOK = 1;
+    if (ref($_[0]) eq 'ARRAY') {
+        @GCPs = @{$_[0]};
+        $ApproxOK = $_[1] if defined $_[1];
+    } else {
+        @GCPs = @_;
+        $ApproxOK = pop @GCPs if !ref($GCPs[$#GCPs]);
+    }
+    my $self = Geo::GDAL::GCPsToGeoTransform(\@GCPs, $ApproxOK);
+    bless $self, 'Geo::GDAL::GetTransform';
+    return $self;
+}
+
+sub Apply {
+    my ($self, $columns, $rows) = @_;
+    my (@x, @y);
+    for my $i (0..$#$columns) {
+        ($x[$i], $y[$i]) = 
+            Geo::GDAL::ApplyGeoTransform($self, $columns->[$i], $rows->[$i]);
+    }
+    return (\@x, \@y);
+}
+
+sub Inv {
+    my $self = shift;
+    my @inv = Geo::GDAL::InvGeoTransform($self);
+    unless (defined wantarray) {
+        @$self = @inv;
+    } else {
+        return new(@inv);
+    }
+}
+
 %}
 
 %{
@@ -956,14 +1550,14 @@ typedef void OGRLayerShadow;
                            int nFixedLevelCount, double *padfFixedLevels,
                            int bUseNoData, double dfNoDataValue,
                            OGRLayerShadow *hLayer, int iIDField, int iElevField,
-                           GDALProgressFunc callback = NULL,
-                           void* callback_data = NULL) {
+                           GDALProgressFunc progress = NULL,
+                           void* progress_data = NULL) {
         return GDALContourGenerate( self, dfContourInterval, dfContourBase,
                                     nFixedLevelCount, padfFixedLevels,
                                     bUseNoData, dfNoDataValue,
                                     hLayer, iIDField, iElevField,
-                                    callback,
-                                    callback_data );
+                                    progress,
+                                    progress_data );
     }
     %clear (int nFixedLevelCount, double *padfFixedLevels);
     %clear (int bUseNoData, double dfNoDataValue);

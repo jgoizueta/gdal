@@ -238,8 +238,7 @@ if (0) {
 
 gdal_tests();
 
-$src = Geo::OSR::SpatialReference->new();
-$src->ImportFromEPSG(2392);
+$src = Geo::OSR::SpatialReference->new(EPSG => 2392);
 
 $xml = $src->ExportToXML();
 $a = Geo::GDAL::ParseXMLString($xml);
@@ -249,10 +248,10 @@ ok(is_deeply($a, $b), "xml parsing");
 
 my @tmp = sort keys %available_driver;
 
-print STDERR "\nGDAL version: ",Geo::GDAL::VersionInfo,"\n";
-print STDERR "Unexpected failures:\n",@fails,"\n" if @fails;
-print STDERR "Available drivers were ",join(', ',@tmp),"\n";
-print STDERR "Drivers used in tests were: ",join(', ',@tested_drivers),"\n";
+#print STDERR "\nGDAL version: ",Geo::GDAL::VersionInfo,"\n";
+#print STDERR "Unexpected failures:\n",@fails,"\n" if @fails;
+#print STDERR "Available drivers were ",join(', ',@tmp),"\n";
+#print STDERR "Drivers used in tests were: ",join(', ',@tested_drivers),"\n";
 
 system "rm -rf tmp_ds_*" unless $^O eq 'MSWin32';
 
@@ -303,6 +302,8 @@ sub gdal_tests {
 	    mytest('skipped: does not work?',undef,$name,'dataset create');
 	    next;
 	}
+
+        next unless $driver->{ShortName} eq 'MEM';
 
 	push @tested_drivers,$name;
 	
@@ -375,8 +376,7 @@ sub gdal_tests {
 		
 	    } else 
 	    {
-		#my $colortable = Geo::GDAL::ColorTable->create('RGB');
-		my $colortable = Geo::GDAL::ColorTable->new($Geo::GDAL::Constc::GPI_Gray);
+		my $colortable = Geo::GDAL::ColorTable->new('Gray');
 		my @rgba = (255,0,0,255);
 		$colortable->SetColorEntry(0, \@rgba);
 		$band->ColorTable($colortable);

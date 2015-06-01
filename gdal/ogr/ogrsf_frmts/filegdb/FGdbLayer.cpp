@@ -661,7 +661,7 @@ OGRErr FGdbLayer::GetRow( EnumRows& enumRows, Row& row, GIntBig nFID )
     }
 
     if (hr != S_OK)
-        return OGRERR_FAILURE; //none found - but no failure
+        return OGRERR_NON_EXISTING_FEATURE; //none found - but no failure
 
     return OGRERR_NONE;
 }
@@ -682,8 +682,9 @@ OGRErr FGdbLayer::DeleteFeature( GIntBig nFID )
 
     EndBulkLoad();
 
-    if (GetRow(enumRows, row, nFID) != OGRERR_NONE)
-        return OGRERR_FAILURE;
+    OGRErr eErr = GetRow(enumRows, row, nFID);
+    if( eErr != OGRERR_NONE)
+        return eErr;
 
     if (FAILED(hr = m_pTable->Delete(row)))
     {
@@ -717,8 +718,9 @@ OGRErr FGdbLayer::ISetFeature( OGRFeature* poFeature )
 
     EndBulkLoad();
 
-    if (GetRow(enumRows, row, poFeature->GetFID()) != OGRERR_NONE)
-        return OGRERR_FAILURE;
+    OGRErr eErr = GetRow(enumRows, row, poFeature->GetFID());
+    if( eErr != OGRERR_NONE)
+        return eErr;
 
     /* Populate the row with the feature content */
     if (PopulateRowWithFeature(row, poFeature) != OGRERR_NONE)
@@ -1674,6 +1676,9 @@ bool FGdbLayer::Create(FGdbDataSource* pParentDataSource,
 
     m_papszOptions = CSLDuplicate(papszOptions);
     m_bCreateMultipatch = CSLTestBoolean(CSLFetchNameValueDef(m_papszOptions, "CREATE_MULTIPATCH", "NO"));
+    
+    // Default to YES here assuming ogr2ogr scenario
+    m_bBulkLoadAllowed = CSLTestBoolean(CPLGetConfigOption("FGDB_BULK_LOAD", "YES"));
 
     /* Store the new FGDB Table pointer and set up the OGRFeatureDefn */
     return FGdbLayer::Initialize(pParentDataSource, table, wtable_path, L"Table");
@@ -1923,10 +1928,12 @@ bool FGdbLayer::ParseGeometryDef(CPLXMLNode* psRoot)
 /************************************************************************/
 
 bool FGdbLayer::ParseSpatialReference(CPLXMLNode* psSpatialRefNode,
-                                      string* pOutWkt, string* pOutWKID, string* pOutLatestWKID)
+                                      string* pOutWkt, string* pOutWKID,
+                                      string* pOutLatestWKID)
 {
     *pOutWkt = "";
     *pOutWKID = "";
+    *pOutLatestWKID = "";
 
     CPLXMLNode* psSRItemNode;
 
@@ -1943,6 +1950,10 @@ bool FGdbLayer::ParseSpatialReference(CPLXMLNode* psSpatialRefNode,
             char* pszUnescaped = CPLUnescapeString(psSRItemNode->psChild->pszValue, NULL, CPLES_XML);
             *pOutWKID = pszUnescaped;
             CPLFree(pszUnescaped);
+
+            // Needed with FileGDB v1.4 with layers with empty SRS
+            if( *pOutWKID == "0" )
+                *pOutWKID = "";
         }
         /* The concept of LatestWKID is explained in http://resources.arcgis.com/en/help/arcgis-rest-api/index.html#//02r3000000n1000000 */
         else if( psSRItemNode->eType == CXT_Element &&
@@ -2855,3 +2866,4 @@ int FGdbLayer::TestCapability( const char* pszCap )
     else 
         return FALSE;
 }
+

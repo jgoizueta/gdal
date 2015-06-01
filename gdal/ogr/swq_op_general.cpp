@@ -572,10 +572,45 @@ swq_expr_node *SWQGeneralEvaluator( swq_expr_node *node,
         switch( (swq_op) node->nOperation )
         {
           case SWQ_EQ:
-            poRet->int_value = 
-                strcasecmp(sub_node_values[0]->string_value,
-                           sub_node_values[1]->string_value) == 0;
+          {
+            /* When comparing timestamps, the +00 at the end might be discarded */
+            /* if the other member has no explicit timezone */
+            if( (sub_node_values[0]->field_type == SWQ_TIMESTAMP ||
+                 sub_node_values[0]->field_type == SWQ_STRING) &&
+                (sub_node_values[1]->field_type == SWQ_TIMESTAMP ||
+                 sub_node_values[1]->field_type == SWQ_STRING) &&
+                strlen(sub_node_values[0]->string_value) > 3 &&
+                strlen(sub_node_values[1]->string_value) > 3 &&
+                (strcmp(sub_node_values[0]->string_value + strlen(sub_node_values[0]->string_value)-3, "+00") == 0 &&
+                 sub_node_values[1]->string_value[strlen(sub_node_values[1]->string_value)-3] == ':') )
+            {
+                poRet->int_value = 
+                    EQUALN(sub_node_values[0]->string_value,
+                           sub_node_values[1]->string_value,
+                           strlen(sub_node_values[1]->string_value));
+            }
+            else if( (sub_node_values[0]->field_type == SWQ_TIMESTAMP ||
+                      sub_node_values[0]->field_type == SWQ_STRING) &&
+                     (sub_node_values[1]->field_type == SWQ_TIMESTAMP ||
+                      sub_node_values[1]->field_type == SWQ_STRING) &&
+                     strlen(sub_node_values[0]->string_value) > 3 &&
+                     strlen(sub_node_values[1]->string_value) > 3 &&
+                     (sub_node_values[0]->string_value[strlen(sub_node_values[0]->string_value)-3] == ':')  &&
+                      strcmp(sub_node_values[1]->string_value + strlen(sub_node_values[1]->string_value)-3, "+00") == 0)
+            {
+                poRet->int_value = 
+                    EQUALN(sub_node_values[0]->string_value,
+                           sub_node_values[1]->string_value,
+                           strlen(sub_node_values[0]->string_value));
+            }
+            else
+            {
+                poRet->int_value = 
+                    strcasecmp(sub_node_values[0]->string_value,
+                            sub_node_values[1]->string_value) == 0;
+            }
             break;
+          }
 
           case SWQ_NE:
             poRet->int_value = 
@@ -916,7 +951,8 @@ static int SWQCheckSubExprAreNotGeometries( swq_expr_node *poNode )
 /*      circumstances.                                                  */
 /************************************************************************/
 
-swq_field_type SWQGeneralChecker( swq_expr_node *poNode )
+swq_field_type SWQGeneralChecker( swq_expr_node *poNode,
+                                  int bAllowMismatchTypeOnFieldComparison  )
 
 {									
     swq_field_type eRetType = SWQ_ERROR;
@@ -1074,6 +1110,37 @@ swq_field_type SWQGeneralChecker( swq_expr_node *poNode )
 
             if( eArgType != eThisArgType )
             {
+                // Conveniency for join. We allow comparing numeric columns
+                // and string columns, by casting string columns to numeric
+                if( bAllowMismatchTypeOnFieldComparison &&
+                    poNode->nSubExprCount == 2 &&
+                    poNode->nOperation == SWQ_EQ &&
+                    poNode->papoSubExpr[0]->eNodeType == SNT_COLUMN &&
+                    poNode->papoSubExpr[i]->eNodeType == SNT_COLUMN &&
+                    eArgType == SWQ_FLOAT && eThisArgType == SWQ_STRING )
+                {
+                    swq_expr_node* poNewNode = new swq_expr_node(SWQ_CAST);
+                    poNewNode->PushSubExpression(poNode->papoSubExpr[i]);
+                    poNewNode->PushSubExpression(new swq_expr_node("FLOAT"));
+                    SWQCastChecker(poNewNode, FALSE);
+                    poNode->papoSubExpr[i] = poNewNode;
+                    break;
+                }
+                if( bAllowMismatchTypeOnFieldComparison &&
+                    poNode->nSubExprCount == 2 &&
+                    poNode->nOperation == SWQ_EQ &&
+                    poNode->papoSubExpr[0]->eNodeType == SNT_COLUMN &&
+                    poNode->papoSubExpr[i]->eNodeType == SNT_COLUMN &&
+                    eThisArgType == SWQ_FLOAT && eArgType == SWQ_STRING )
+                {
+                    swq_expr_node* poNewNode = new swq_expr_node(SWQ_CAST);
+                    poNewNode->PushSubExpression(poNode->papoSubExpr[0]);
+                    poNewNode->PushSubExpression(new swq_expr_node("FLOAT"));
+                    SWQCastChecker(poNewNode, FALSE);
+                    poNode->papoSubExpr[0] = poNewNode;
+                    break;
+                }
+
                 const swq_operation *poOp = 
                     swq_op_registrar::GetOperator((swq_op)poNode->nOperation);
                 
@@ -1283,7 +1350,8 @@ swq_expr_node *SWQCastEvaluator( swq_expr_node *node,
 /*                           SWQCastChecker()                           */
 /************************************************************************/
 
-swq_field_type SWQCastChecker( swq_expr_node *poNode )
+swq_field_type SWQCastChecker( swq_expr_node *poNode,
+                               CPL_UNUSED int bAllowMismatchTypeOnFieldComparison )
 
 {									
     swq_field_type eType = SWQ_ERROR;

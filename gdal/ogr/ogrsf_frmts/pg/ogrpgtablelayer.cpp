@@ -212,7 +212,7 @@ OGRPGTableLayer::~OGRPGTableLayer()
 
 {
     if( bDifferedCreation ) RunDifferedCreationIfNecessary();
-    if( bCopyActive ) EndCopy();
+    if ( bCopyActive ) EndCopy();
     CPLFree( pszSqlTableName );
     CPLFree( pszTableName );
     CPLFree( pszSqlGeomParentTableName );
@@ -269,8 +269,6 @@ int OGRPGTableLayer::ReadTableDefinition()
         return bTableDefinitionValid;
     bTableDefinitionValid = FALSE;
 
-    poDS->FlushSoftTransaction();
-
     CPLString osSchemaClause;
     osSchemaClause.Printf("AND n.nspname=%s",
                               OGRPGEscapeString(hPGConn, pszSchemaName).c_str());
@@ -280,6 +278,16 @@ int OGRPGTableLayer::ReadTableDefinition()
         pszTypnameEqualsAnyClause = "ANY(SELECT '{int2, int4, int8, serial, bigserial}')";
     else
         pszTypnameEqualsAnyClause = "ANY(ARRAY['int2','int4','int8','serial','bigserial'])";
+    
+    const char* pszAttnumEqualAnyIndkey;
+    if( poDS->sPostgreSQLVersion.nMajor > 8 || (
+        poDS->sPostgreSQLVersion.nMajor == 8 && poDS->sPostgreSQLVersion.nMinor >= 2) )
+        pszAttnumEqualAnyIndkey = "a.attnum = ANY(i.indkey)";
+    else
+        pszAttnumEqualAnyIndkey = "(i.indkey[0]=a.attnum OR i.indkey[1]=a.attnum OR i.indkey[2]=a.attnum "
+              "OR i.indkey[3]=a.attnum OR i.indkey[4]=a.attnum OR i.indkey[5]=a.attnum "
+              "OR i.indkey[6]=a.attnum OR i.indkey[7]=a.attnum OR i.indkey[8]=a.attnum "
+              "OR i.indkey[9]=a.attnum)";
 
     CPLString osEscapedTableNameSingleQuote = OGRPGEscapeString(hPGConn, pszTableName);
     const char* pszEscapedTableNameSingleQuote = osEscapedTableNameSingleQuote.c_str();
@@ -292,11 +300,9 @@ int OGRPGTableLayer::ReadTableDefinition()
               "AND a.atttypid = t.oid AND c.relnamespace = n.oid "
               "AND c.oid = i.indrelid AND i.indisprimary = 't' "
               "AND t.typname !~ '^geom' AND c.relname = %s "
-              "AND (i.indkey[0]=a.attnum OR i.indkey[1]=a.attnum OR i.indkey[2]=a.attnum "
-              "OR i.indkey[3]=a.attnum OR i.indkey[4]=a.attnum OR i.indkey[5]=a.attnum "
-              "OR i.indkey[6]=a.attnum OR i.indkey[7]=a.attnum OR i.indkey[8]=a.attnum "
-              "OR i.indkey[9]=a.attnum) %s ORDER BY a.attnum",
-              pszTypnameEqualsAnyClause, pszEscapedTableNameSingleQuote, osSchemaClause.c_str() );
+              "AND %s %s ORDER BY a.attnum",
+              pszTypnameEqualsAnyClause, pszEscapedTableNameSingleQuote,
+              pszAttnumEqualAnyIndkey, osSchemaClause.c_str() );
      
     hResult = OGRPG_PQexec(hPGConn, osCommand.c_str() );
 
@@ -335,33 +341,19 @@ int OGRPGTableLayer::ReadTableDefinition()
 /* -------------------------------------------------------------------- */
 /*      Fire off commands to get back the columns of the table.          */
 /* -------------------------------------------------------------------- */
-    hResult = OGRPG_PQexec(hPGConn, "BEGIN");
+    osCommand.Printf(
+                "SELECT DISTINCT a.attname, t.typname, a.attlen,"
+                "       format_type(a.atttypid,a.atttypmod), a.attnum, a.attnotnull, a.atthasdef "
+                "FROM pg_class c, pg_attribute a, pg_type t, pg_namespace n "
+                "WHERE c.relname = %s "
+                "AND a.attnum > 0 AND a.attrelid = c.oid "
+                "AND a.atttypid = t.oid "
+                "AND c.relnamespace=n.oid "
+                "%s "
+                "ORDER BY a.attnum",
+                pszEscapedTableNameSingleQuote, osSchemaClause.c_str());
 
-    if( hResult && PQresultStatus(hResult) == PGRES_COMMAND_OK )
-    {
-        OGRPGClearResult( hResult );
-
-        osCommand.Printf(
-                 "DECLARE mycursor CURSOR for "
-                 "SELECT DISTINCT a.attname, t.typname, a.attlen,"
-                 "       format_type(a.atttypid,a.atttypmod), a.attnum, a.attnotnull, a.atthasdef "
-                 "FROM pg_class c, pg_attribute a, pg_type t, pg_namespace n "
-                 "WHERE c.relname = %s "
-                 "AND a.attnum > 0 AND a.attrelid = c.oid "
-                 "AND a.atttypid = t.oid "
-                 "AND c.relnamespace=n.oid "
-                 "%s "
-                 "ORDER BY a.attnum",
-                 pszEscapedTableNameSingleQuote, osSchemaClause.c_str());
-
-        hResult = OGRPG_PQexec(hPGConn, osCommand.c_str() );
-    }
-
-    if( hResult && PQresultStatus(hResult) == PGRES_COMMAND_OK )
-    {
-        OGRPGClearResult( hResult );
-        hResult = OGRPG_PQexec(hPGConn, "FETCH ALL in mycursor" );
-    }
+    hResult = OGRPG_PQexec(hPGConn, osCommand.c_str() );
 
     if( !hResult || PQresultStatus(hResult) != PGRES_TUPLES_OK )
     {
@@ -374,12 +366,6 @@ int OGRPGTableLayer::ReadTableDefinition()
 
     if( PQntuples(hResult) == 0 )
     {
-        OGRPGClearResult( hResult );
-
-        hResult = OGRPG_PQexec(hPGConn, "CLOSE mycursor");
-        OGRPGClearResult( hResult );
-
-        hResult = OGRPG_PQexec(hPGConn, "COMMIT");
         OGRPGClearResult( hResult );
 
         CPLDebug( "PG",
@@ -465,9 +451,6 @@ int OGRPGTableLayer::ReadTableDefinition()
 
     OGRPGClearResult( hResult );
 
-    hResult = OGRPG_PQexec(hPGConn, "CLOSE mycursor");
-    OGRPGClearResult( hResult );
-
     if( bHasDefault )
     {
         osCommand.Printf(
@@ -504,9 +487,6 @@ int OGRPGTableLayer::ReadTableDefinition()
 
         OGRPGClearResult( hResult );
     }
-
-    hResult = OGRPG_PQexec(hPGConn, "COMMIT");
-    OGRPGClearResult( hResult );
 
     bTableDefinitionValid = TRUE;
 
@@ -691,7 +671,8 @@ void OGRPGTableLayer::BuildWhere()
     if( poFeatureDefn->GetGeomFieldCount() != 0 )
         poGeomFieldDefn = poFeatureDefn->myGetGeomFieldDefn(m_iGeomFieldFilter);
 
-    if( m_poFilterGeom != NULL && poGeomFieldDefn != NULL && (
+    if( m_poFilterGeom != NULL && poGeomFieldDefn != NULL &&
+        poDS->sPostGISVersion.nMajor >= 0 && (
             poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY ||
             poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY) )
     {
@@ -767,7 +748,7 @@ void OGRPGTableLayer::ResetReading()
     bInResetReading = TRUE;
 
     if( bDifferedCreation ) RunDifferedCreationIfNecessary();
-    if( bCopyActive ) EndCopy();
+    poDS->EndCopy();
     bUseCopyByDefault = FALSE;
 
     BuildFullQueryStatement();
@@ -786,7 +767,10 @@ OGRFeature *OGRPGTableLayer::GetNextFeature()
 {
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return NULL;
-    if( bCopyActive ) EndCopy();
+    poDS->EndCopy();
+
+    if( pszQueryStatement == NULL )
+        ResetReading();
 
     if( pszQueryStatement == NULL )
         ResetReading();
@@ -857,7 +841,7 @@ CPLString OGRPGTableLayer::BuildFields()
 
         if( poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY )
         {
-            if ( poDS->bUseBinaryCursor )
+            if ( poDS->sPostGISVersion.nMajor < 0 || poDS->bUseBinaryCursor )
             {
                 osFieldList += osEscapedGeom;
             }
@@ -1010,7 +994,7 @@ OGRErr OGRPGTableLayer::DeleteFeature( GIntBig nFID )
 
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return OGRERR_FAILURE;
-    if( bCopyActive ) EndCopy();
+    poDS->EndCopy();
     bAutoFIDOnCreateViaCopy = FALSE;
 
 /* -------------------------------------------------------------------- */
@@ -1038,10 +1022,6 @@ OGRErr OGRPGTableLayer::DeleteFeature( GIntBig nFID )
 /* -------------------------------------------------------------------- */
     OGRErr eErr;
 
-    eErr = poDS->SoftStartTransaction();
-    if( eErr != OGRERR_NONE )
-        return eErr;
-
     hResult = OGRPG_PQexec(hPGConn, osCommand);
 
     if( PQresultStatus(hResult) != PGRES_COMMAND_OK )
@@ -1050,17 +1030,17 @@ OGRErr OGRPGTableLayer::DeleteFeature( GIntBig nFID )
                   "DeleteFeature() DELETE statement failed.\n%s",
                   PQerrorMessage(hPGConn) );
 
-        OGRPGClearResult( hResult );
-
-        poDS->SoftRollback();
         eErr = OGRERR_FAILURE;
     }
     else
     {
-        OGRPGClearResult( hResult );
-
-        eErr = poDS->SoftCommit();
+        if( EQUAL(PQcmdStatus(hResult), "DELETE 0") )
+            eErr = OGRERR_NON_EXISTING_FEATURE;
+        else
+            eErr = OGRERR_NONE;
     }
+
+    OGRPGClearResult( hResult );
 
     return eErr;
 }
@@ -1093,7 +1073,7 @@ OGRErr OGRPGTableLayer::ISetFeature( OGRFeature *poFeature )
 
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return OGRERR_FAILURE;
-    if( bCopyActive ) EndCopy();
+    poDS->EndCopy();
 
     if( NULL == poFeature )
     {
@@ -1128,12 +1108,6 @@ OGRErr OGRPGTableLayer::ISetFeature( OGRFeature *poFeature )
                         "Inconsistant values of FID and field of same name");
             return CE_Failure;
         }
-    }
-
-    eErr = poDS->SoftStartTransaction();
-    if( eErr != OGRERR_NONE )
-    {
-        return eErr;
     }
 
 /* -------------------------------------------------------------------- */
@@ -1289,14 +1263,17 @@ OGRErr OGRPGTableLayer::ISetFeature( OGRFeature *poFeature )
 
         OGRPGClearResult( hResult );
 
-        poDS->SoftRollback();
-
         return OGRERR_FAILURE;
     }
 
+    if( EQUAL(PQcmdStatus(hResult), "UPDATE 0") )
+        eErr = OGRERR_NON_EXISTING_FEATURE;
+    else
+        eErr = OGRERR_NONE;
+
     OGRPGClearResult( hResult );
 
-    return poDS->SoftCommit();
+    return eErr;
 }
 
 /************************************************************************/
@@ -1353,6 +1330,8 @@ OGRErr OGRPGTableLayer::ICreateFeature( OGRFeature *poFeature )
         (GIntBig)(int)poFeature->GetFID() != poFeature->GetFID() &&
         GetMetadataItem(OLMD_FID64) == NULL )
     {
+        poDS->EndCopy();
+
         CPLString osCommand;
         osCommand.Printf( "ALTER TABLE %s ALTER COLUMN %s TYPE INT8",
                         pszSqlTableName,
@@ -1417,7 +1396,6 @@ OGRErr OGRPGTableLayer::ICreateFeature( OGRFeature *poFeature )
         }
         if( bHasDefaultValue )
         {
-            EndCopy();
             eErr = CreateFeatureViaInsert( poFeature );
         }
         else
@@ -1425,7 +1403,11 @@ OGRErr OGRPGTableLayer::ICreateFeature( OGRFeature *poFeature )
             int bFIDSet = (pszFIDColumn != NULL && poFeature->GetFID() != OGRNullFID);
             if( bCopyActive && bFIDSet != bFIDColumnInCopyFields )
             {
-                EndCopy();
+                eErr = CreateFeatureViaInsert( poFeature );
+            }
+            else if( !bCopyActive && poFeatureDefn->GetFieldCount() == 0 &&
+                     poFeatureDefn->GetGeomFieldCount() == 0 && !bFIDSet )
+            {
                 eErr = CreateFeatureViaInsert( poFeature );
             }
             else
@@ -1437,7 +1419,6 @@ OGRErr OGRPGTableLayer::ICreateFeature( OGRFeature *poFeature )
                     /* try to copy FID values from features. Otherwise, we will not */
                     /* do and assume that the FID column is an autoincremented column. */
                     bFIDColumnInCopyFields = bFIDSet;
-                    StartCopy();
                 }
 
                 eErr = CreateFeatureViaCopy( poFeature );
@@ -1564,15 +1545,10 @@ OGRErr OGRPGTableLayer::CreateFeatureViaInsert( OGRFeature *poFeature )
     CPLString           osCommand;
     int                 i;
     int                 bNeedComma = FALSE;
-    OGRErr              eErr;
-
-    eErr = poDS->SoftStartTransaction();
-    if( eErr != OGRERR_NONE )
-    {
-        return eErr;
-    }
 
     int bEmptyInsert = FALSE;
+
+    poDS->EndCopy();
 
 /* -------------------------------------------------------------------- */
 /*      Form the INSERT command.                                        */
@@ -1785,14 +1761,12 @@ OGRErr OGRPGTableLayer::CreateFeatureViaInsert( OGRFeature *poFeature )
 
         OGRPGClearResult( hResult );
 
-        poDS->SoftRollback();
-
         return OGRERR_FAILURE;
     }
 
     OGRPGClearResult( hResult );
 
-    return poDS->SoftCommit();
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
@@ -1804,6 +1778,9 @@ OGRErr OGRPGTableLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
     PGconn              *hPGConn = poDS->GetPGConn();
     CPLString            osCommand;
     int                  i;
+
+    /* Tell the datasource we are now planning to copy data */
+    poDS->StartCopy( this ); 
 
     /* First process geometry */
     for( i = 0; i < poFeatureDefn->GetGeomFieldCount(); i++ )
@@ -1861,7 +1838,9 @@ OGRErr OGRPGTableLayer::CreateFeatureViaCopy( OGRFeature *poFeature )
     /* This is for postgresql  7.4 and higher */
 #if !defined(PG_PRE74)
     int copyResult = PQputCopyData(hPGConn, osCommand.c_str(), strlen(osCommand.c_str()));
-    //CPLDebug("PG", "PQputCopyData(%s)", osCommand.c_str());
+#ifdef DEBUG_VERBOSE
+    CPLDebug("PG", "PQputCopyData(%s)", osCommand.c_str());
+#endif
 
     switch (copyResult)
     {
@@ -1927,8 +1906,9 @@ int OGRPGTableLayer::TestCapability( const char * pszCap )
         if( poFeatureDefn->GetGeomFieldCount() > 0 )
             poGeomFieldDefn = poFeatureDefn->myGetGeomFieldDefn(m_iGeomFieldFilter);
         return poGeomFieldDefn == NULL ||
-               poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY ||
-               poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY;
+               (poDS->sPostGISVersion.nMajor >= 0 &&
+                (poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY ||
+                 poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY));
     }
 
     else if( EQUAL(pszCap,OLCFastSpatialFilter) )
@@ -1937,8 +1917,9 @@ int OGRPGTableLayer::TestCapability( const char * pszCap )
         if( poFeatureDefn->GetGeomFieldCount() > 0 )
             poGeomFieldDefn = poFeatureDefn->myGetGeomFieldDefn(m_iGeomFieldFilter);
         return poGeomFieldDefn == NULL ||
-               poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY ||
-               poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY;
+               (poDS->sPostGISVersion.nMajor >= 0 &&
+               (poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY ||
+                poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOGRAPHY));
     }
 
     else if( EQUAL(pszCap,OLCTransactions) )
@@ -1950,6 +1931,7 @@ int OGRPGTableLayer::TestCapability( const char * pszCap )
         if( poFeatureDefn->GetGeomFieldCount() > 0 )
             poGeomFieldDefn = poFeatureDefn->myGetGeomFieldDefn(0);
         return poGeomFieldDefn != NULL &&
+               poDS->sPostGISVersion.nMajor >= 0 &&
                poGeomFieldDefn->ePostgisType == GEOM_TYPE_GEOMETRY;
     }
 
@@ -2002,7 +1984,7 @@ OGRErr OGRPGTableLayer::CreateField( OGRFieldDefn *poFieldIn, int bApproxOK )
 /* -------------------------------------------------------------------- */
     if( bLaunderColumnNames )
     {
-        char    *pszSafeName = poDS->LaunderName( oField.GetNameRef() );
+        char    *pszSafeName = OGRPGCommonLaunderName( oField.GetNameRef(), "PG" );
 
         oField.SetName( pszSafeName );
         CPLFree( pszSafeName );
@@ -2051,9 +2033,7 @@ OGRErr OGRPGTableLayer::CreateField( OGRFieldDefn *poFieldIn, int bApproxOK )
     }
     else
     {
-        poDS->FlushSoftTransaction();
-        hResult = OGRPG_PQexec(hPGConn, "BEGIN");
-        OGRPGClearResult( hResult );
+        poDS->EndCopy();
 
         osCommand.Printf( "ALTER TABLE %s ADD COLUMN %s %s",
                         pszSqlTableName, OGRPGEscapeColumnName(oField.GetNameRef()).c_str(),
@@ -2070,15 +2050,9 @@ OGRErr OGRPGTableLayer::CreateField( OGRFieldDefn *poFieldIn, int bApproxOK )
 
             OGRPGClearResult( hResult );
 
-            hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-            OGRPGClearResult( hResult );
-
             return OGRERR_FAILURE;
         }
 
-        OGRPGClearResult( hResult );
-
-        hResult = OGRPG_PQexec(hPGConn, "COMMIT");
         OGRPGClearResult( hResult );
     }
 
@@ -2207,7 +2181,7 @@ OGRErr OGRPGTableLayer::CreateGeomField( OGRGeomFieldDefn *poGeomFieldIn,
 /* -------------------------------------------------------------------- */
     if( bLaunderColumnNames )
     {
-        char    *pszSafeName = poDS->LaunderName( poGeomField->GetNameRef() );
+        char    *pszSafeName = OGRPGCommonLaunderName( poGeomField->GetNameRef(), "PG" );
 
         poGeomField->SetName( pszSafeName );
         CPLFree( pszSafeName );
@@ -2239,7 +2213,7 @@ OGRErr OGRPGTableLayer::CreateGeomField( OGRGeomFieldDefn *poGeomFieldIn,
 /* -------------------------------------------------------------------- */
     if( !bDifferedCreation )
     {
-        poDS->FlushSoftTransaction();
+        poDS->EndCopy();
 
         if( RunAddGeometryColumn(poGeomField) != OGRERR_NONE )
         {
@@ -2293,11 +2267,7 @@ OGRErr OGRPGTableLayer::DeleteField( int iField )
 
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return OGRERR_FAILURE;
-
-    poDS->FlushSoftTransaction();
-
-    hResult = OGRPG_PQexec(hPGConn, "BEGIN");
-    OGRPGClearResult( hResult );
+    poDS->EndCopy();
 
     osCommand.Printf( "ALTER TABLE %s DROP COLUMN %s",
                       pszSqlTableName,
@@ -2312,15 +2282,9 @@ OGRErr OGRPGTableLayer::DeleteField( int iField )
 
         OGRPGClearResult( hResult );
 
-        hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-        OGRPGClearResult( hResult );
-
         return OGRERR_FAILURE;
     }
 
-    OGRPGClearResult( hResult );
-
-    hResult = OGRPG_PQexec(hPGConn, "COMMIT");
     OGRPGClearResult( hResult );
 
     return poFeatureDefn->DeleteFieldDefn( iField );
@@ -2355,14 +2319,12 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
 
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return OGRERR_FAILURE;
+    poDS->EndCopy();
 
     OGRFieldDefn       *poFieldDefn = poFeatureDefn->GetFieldDefn(iField);
     OGRFieldDefn        oField( poNewFieldDefn );
 
-    poDS->FlushSoftTransaction();
-
-    hResult = OGRPG_PQexec(hPGConn, "BEGIN");
-    OGRPGClearResult( hResult );
+    poDS->SoftStartTransaction();
 
     if (!(nFlags & ALTER_TYPE_FLAG))
         oField.SetType(poFieldDefn->GetType());
@@ -2381,8 +2343,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
                                                        TRUE);
         if (osFieldType.size() == 0)
         {
-            hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-            OGRPGClearResult( hResult );
+            poDS->SoftRollbackTransaction();
 
             return OGRERR_FAILURE;
         }
@@ -2402,8 +2363,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
 
             OGRPGClearResult( hResult );
 
-            hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-            OGRPGClearResult( hResult );
+            poDS->SoftRollbackTransaction();
 
             return OGRERR_FAILURE;
         }
@@ -2434,8 +2394,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
 
             OGRPGClearResult( hResult );
 
-            hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-            OGRPGClearResult( hResult );
+            poDS->SoftRollbackTransaction();
 
             return OGRERR_FAILURE;
         }
@@ -2470,8 +2429,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
 
             OGRPGClearResult( hResult );
 
-            hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-            OGRPGClearResult( hResult );
+            poDS->SoftRollbackTransaction();
 
             return OGRERR_FAILURE;
         }
@@ -2482,7 +2440,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
     {
         if (bLaunderColumnNames)
         {
-            char    *pszSafeName = poDS->LaunderName( oField.GetNameRef() );
+            char    *pszSafeName = OGRPGCommonLaunderName( oField.GetNameRef(), "PG" );
             oField.SetName( pszSafeName );
             CPLFree( pszSafeName );
         }
@@ -2510,8 +2468,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
 
                 OGRPGClearResult( hResult );
 
-                hResult = OGRPG_PQexec( hPGConn, "ROLLBACK" );
-                OGRPGClearResult( hResult );
+                poDS->SoftRollbackTransaction();
 
                 return OGRERR_FAILURE;
             }
@@ -2519,8 +2476,7 @@ OGRErr OGRPGTableLayer::AlterFieldDefn( int iField, OGRFieldDefn* poNewFieldDefn
         }
     }
 
-    hResult = OGRPG_PQexec(hPGConn, "COMMIT");
-    OGRPGClearResult( hResult );
+    poDS->SoftCommitTransaction();
 
     if (nFlags & ALTER_NAME_FLAG)
         poFieldDefn->SetName(oField.GetNameRef());
@@ -2553,11 +2509,6 @@ OGRFeature *OGRPGTableLayer::GetFeature( GIntBig nFeatureId )
         return OGRLayer::GetFeature( nFeatureId );
 
 /* -------------------------------------------------------------------- */
-/*      Discard any existing resultset.                                 */
-/* -------------------------------------------------------------------- */
-    ResetReading();
-
-/* -------------------------------------------------------------------- */
 /*      Issue query for a single record.                                */
 /* -------------------------------------------------------------------- */
     OGRFeature  *poFeature = NULL;
@@ -2566,7 +2517,7 @@ OGRFeature *OGRPGTableLayer::GetFeature( GIntBig nFeatureId )
     CPLString    osFieldList = BuildFields();
     CPLString    osCommand;
 
-    poDS->FlushSoftTransaction();
+    poDS->EndCopy();
     poDS->SoftStartTransaction();
 
     osCommand.Printf(
@@ -2589,14 +2540,22 @@ OGRFeature *OGRPGTableLayer::GetFeature( GIntBig nFeatureId )
             int nRows = PQntuples(hResult);
             if (nRows > 0)
             {
-                hCursorResult = hResult;
-                CreateMapFromFieldNameToIndex();
-                poFeature = RecordToFeature( 0 );
+                int* panTempMapFieldNameToIndex = NULL;
+                int* panTempMapFieldNameToGeomIndex = NULL;
+                CreateMapFromFieldNameToIndex(hResult,
+                                              poFeatureDefn,
+                                              panTempMapFieldNameToIndex,
+                                              panTempMapFieldNameToGeomIndex);
+                poFeature = RecordToFeature(hResult,
+                                            panTempMapFieldNameToIndex,
+                                            panTempMapFieldNameToGeomIndex,
+                                            0 );
+                CPLFree(panTempMapFieldNameToIndex);
+                CPLFree(panTempMapFieldNameToGeomIndex);
                 if( poFeature && iFIDAsRegularColumnIndex >= 0 )
                 {
                     poFeature->SetField(iFIDAsRegularColumnIndex, poFeature->GetFID());
                 }
-                hCursorResult = NULL;
 
                 if (nRows > 1)
                 {
@@ -2626,7 +2585,7 @@ OGRFeature *OGRPGTableLayer::GetFeature( GIntBig nFeatureId )
     hResult = OGRPG_PQexec(hPGConn, "CLOSE getfeaturecursor");
     OGRPGClearResult( hResult );
 
-    poDS->FlushSoftTransaction();
+    poDS->SoftCommitTransaction();
 
     return poFeature;
 }
@@ -2640,7 +2599,7 @@ GIntBig OGRPGTableLayer::GetFeatureCount( int bForce )
 {
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return 0;
-    if( bCopyActive ) EndCopy();
+    poDS->EndCopy();
 
     if( TestCapability(OLCFastFeatureCount) == FALSE )
         return OGRPGLayer::GetFeatureCount( bForce );
@@ -2707,7 +2666,8 @@ void OGRPGTableLayer::ResolveSRID(OGRPGGeomFieldDefn* poGFldDefn)
     /* With PostGIS 2.0, SRID = 0 can also mean that there's no constraint */
     /* so we need to fetch from values */
     /* We assume that all geometry of this column have identical SRID */
-    if( nSRSId <= 0 && poGFldDefn->ePostgisType == GEOM_TYPE_GEOMETRY )
+    if( nSRSId <= 0 && poGFldDefn->ePostgisType == GEOM_TYPE_GEOMETRY &&
+        poDS->sPostGISVersion.nMajor >= 0 )
     {
         CPLString osGetSRID;
 
@@ -2746,8 +2706,7 @@ void OGRPGTableLayer::ResolveSRID(OGRPGGeomFieldDefn* poGFldDefn)
 OGRErr OGRPGTableLayer::StartCopy()
 
 {
-    /* Tell the datasource we are now planning to copy data */
-    poDS->StartCopy( this ); 
+    /*CPLDebug("PG", "OGRPGDataSource(%p)::StartCopy(%p)", poDS, this);*/
 
     CPLString osFields = BuildCopyFields();
 
@@ -2784,6 +2743,7 @@ OGRErr OGRPGTableLayer::EndCopy()
 {
     if( !bCopyActive )
         return OGRERR_NONE;
+    /*CPLDebug("PG", "OGRPGDataSource(%p)::EndCopy(%p)", poDS, this);*/
 
     /* This method is called from the datasource when
        a COPY operation is ended */
@@ -2989,7 +2949,7 @@ OGRErr OGRPGTableLayer::GetExtent( int iGeomField, OGREnvelope *psExtent, int bF
 
     if( bDifferedCreation && RunDifferedCreationIfNecessary() != OGRERR_NONE )
         return OGRERR_FAILURE;
-    if( bCopyActive ) EndCopy();
+    poDS->EndCopy();
 
     OGRPGGeomFieldDefn* poGeomFieldDefn =
         poFeatureDefn->myGetGeomFieldDefn(iGeomField);
@@ -3046,6 +3006,8 @@ OGRErr OGRPGTableLayer::RunDifferedCreationIfNecessary()
     if( !bDifferedCreation )
         return OGRERR_NONE;
     bDifferedCreation = FALSE;
+
+    poDS->EndCopy();
 
     int i;
 

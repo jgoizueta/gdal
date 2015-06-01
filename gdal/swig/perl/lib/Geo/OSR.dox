@@ -1,4 +1,5 @@
 ## @class Geo::OSR
+# @brief Base class for projection related classes.
 
 ## @cmethod @Projections()
 # @return list of known projections.
@@ -26,6 +27,7 @@
 
 ## @cmethod \@GetProjectionMethods()
 # @deprecated Use Geo::OSR::Projections.
+#
 # @return reference to an array of possible projection methods
 
 ## @cmethod @GetProjectionMethodParameterList($projection)
@@ -39,14 +41,10 @@
 
 
 ## @class Geo::OSR::SpatialReference
-# @brief A spatial reference system
+# @brief A spatial reference system.
 #
 # <a href="http://www.gdal.org/ogr/classOGRSpatialReference.html">Documentation
 # of the underlying C++ class at www.gdal.org</a>
-
-## @cmethod Geo::OSR::SpatialReference new($wkt = undef)
-# @param wkt well known text
-# @return a new Geo::OSR::SpatialReference object
 
 ## @ignore ImportFromEPSGA
 ## @ignore ImportFromERM
@@ -60,7 +58,7 @@
 ## @ignore ImportFromXML
 ## @ignore ImportFromUrl
 
-## @cmethod Geo::OSR::SpatialReference create(%params)
+## @cmethod Geo::OSR::SpatialReference new(%params)
 # Create a new spatial reference object using a named parameter. This
 # constructor recognizes the following key words (alternative in
 # parenthesis): WKT (Text), Proj4, ESRI, EPSG, EPSGA, PCI, USGS, GML
@@ -84,7 +82,7 @@
 #
 # Usage:
 # \code
-# $sr = Geo::OSR::SpatialReference->create( key => value );
+# $sr = Geo::OSR::SpatialReference->new( key => value );
 # \endcode
 # @return a new Geo::OSR::SpatialReference object
 
@@ -108,6 +106,7 @@
 ## @method Export($format)
 # Export the spatial reference to a selected format.
 # @note a.k.a. As
+#
 # @param format One of the following. The return value is explained
 # after the format. Other arguments are explained in parenthesis.
 # - WKT (Text): Well Known Text string
@@ -320,6 +319,7 @@
 
 
 ## @class Geo::OSR::CoordinateTransformation
+# @brief An object for transforming from one projection to another.
 
 ## @cmethod Geo::OSR::CoordinateTransformation new($src, $dst)
 # @param src a Geo::OSR::SpatialReference object

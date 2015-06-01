@@ -157,6 +157,7 @@ typedef enum
 #include <iostream>
 using namespace std;
 
+#include "gdal.h"
 #include "ogr_api.h"
 #include "ogr_p.h"
 #include "ogr_core.h"
@@ -305,6 +306,8 @@ typedef void retGetPoints;
 %constant char *ODsCDeleteLayer        = "DeleteLayer";
 %constant char *ODsCCreateGeomFieldAfterCreateLayer  = "CreateGeomFieldAfterCreateLayer";
 %constant char *ODsCCurveGeometries    = "CurveGeometries";
+%constant char *ODsCTransactions       = "Transactions";
+%constant char *ODsCEmulatedTransactions = "EmulatedTransactions";
 
 %constant char *ODrCCreateDataSource   = "CreateDataSource";
 %constant char *ODrCDeleteDataSource   = "DeleteDataSource";
@@ -341,6 +344,8 @@ typedef int OGRErr;
 #define ODsCDeleteLayer        "DeleteLayer"
 #define ODsCCreateGeomFieldAfterCreateLayer   "CreateGeomFieldAfterCreateLayer"
 #define ODsCCurveGeometries    "CurveGeometries"
+#define ODsCTransactions       "Transactions"
+#define ODsCEmulatedTransactions "EmulatedTransactions"
 
 #define ODrCCreateDataSource   "CreateDataSource"
 #define ODrCDeleteDataSource   "DeleteDataSource"
@@ -349,7 +354,7 @@ typedef int OGRErr;
 
 #endif
 
-#if defined(SWIGCSHARP) || defined(SWIGJAVA)
+#if defined(SWIGCSHARP) || defined(SWIGJAVA) || defined(SWIGPYTHON)
 
 #define OGRERR_NONE                0
 #define OGRERR_NOT_ENOUGH_DATA     1    /* not enough data to deserialize */
@@ -359,6 +364,8 @@ typedef int OGRErr;
 #define OGRERR_CORRUPT_DATA        5
 #define OGRERR_FAILURE             6
 #define OGRERR_UNSUPPORTED_SRS     7
+#define OGRERR_INVALID_HANDLE      8
+#define OGRERR_NON_EXISTING_FEATURE 9
 
 #endif
 
@@ -637,6 +644,10 @@ public:
     return OGR_DS_SyncToDisk(self);
   }
   
+  void FlushCache() {
+    GDALFlushCache( self );
+  }
+
   /* Note that datasources own their layers */
 #ifndef SWIGJAVA
   %feature( "kwargs" ) CreateLayer;
@@ -714,6 +725,23 @@ public:
         OGR_DS_SetStyleTable(self, (OGRStyleTableH) table);
   }
 
+#ifndef SWIGJAVA
+  %feature( "kwargs" ) StartTransaction;
+#endif
+  OGRErr StartTransaction(int force = FALSE)
+  {
+    return GDALDatasetStartTransaction(self, force);
+  }
+
+  OGRErr CommitTransaction()
+  {
+    return GDALDatasetCommitTransaction(self);
+  }
+
+  OGRErr RollbackTransaction()
+  {
+    return GDALDatasetRollbackTransaction(self);
+  }
 } /* %extend */
 
 
@@ -1264,14 +1292,16 @@ public:
   /* ------------------------------------------- */  
 
   %apply (int *OUTPUT) {(int *)};
+  %apply (float *OUTPUT) {(float *)};
   void GetFieldAsDateTime(int id, int *pnYear, int *pnMonth, int *pnDay,
-			  int *pnHour, int *pnMinute, int *pnSecond,
+			  int *pnHour, int *pnMinute, float *pfSecond,
 			  int *pnTZFlag) {
-      OGR_F_GetFieldAsDateTime(self, id, pnYear, pnMonth, pnDay,
-			       pnHour, pnMinute, pnSecond,
+      OGR_F_GetFieldAsDateTimeEx(self, id, pnYear, pnMonth, pnDay,
+			       pnHour, pnMinute, pfSecond,
 			       pnTZFlag);
   }
   %clear (int *);
+  %clear (float *);
 
 #if defined(SWIGJAVA)
   retIntArray GetFieldAsIntegerList(int id, int *nLen, const int **pList) {
@@ -1496,22 +1526,22 @@ public:
 #endif
   
   void SetField( int id, int year, int month, int day,
-                             int hour, int minute, int second, 
+                             int hour, int minute, float second, 
                              int tzflag ) {
-    OGR_F_SetFieldDateTime(self, id, year, month, day,
+    OGR_F_SetFieldDateTimeEx(self, id, year, month, day,
                              hour, minute, second, 
                              tzflag);
   }
 
 #ifndef SWIGPERL  
   void SetField(const char* name, int year, int month, int day,
-                             int hour, int minute, int second, 
+                             int hour, int minute, float second, 
                              int tzflag ) {
       int i = OGR_F_GetFieldIndex(self, name);
       if (i == -1)
 	  CPLError(CE_Failure, 1, "No such field: '%s'", name);
       else
-	  OGR_F_SetFieldDateTime(self, i, year, month, day,
+	  OGR_F_SetFieldDateTimeEx(self, i, year, month, day,
 				 hour, minute, second, 
 				 tzflag);
   }
@@ -1592,18 +1622,20 @@ public:
 
   /* ---- GetFieldType ------------------------- */  
   OGRFieldType GetFieldType(int id) {
-    return (OGRFieldType) OGR_Fld_GetType( OGR_F_GetFieldDefnRef( self, id));
+      OGRFieldDefnH fd = OGR_F_GetFieldDefnRef( self,  id );
+      if (fd)
+          return (OGRFieldType) OGR_Fld_GetType( fd );
+      else
+          return (OGRFieldType)0;
   }
   
   OGRFieldType GetFieldType(const char* name) {
       int i = OGR_F_GetFieldIndex(self, name);
       if (i == -1) {
-	  CPLError(CE_Failure, 1, "No such field: '%s'", name);
-	  return (OGRFieldType)0;
+          CPLError(CE_Failure, 1, "No such field: '%s'", name);
+          return (OGRFieldType)0;
       } else
-	  return (OGRFieldType) OGR_Fld_GetType( 
-	      OGR_F_GetFieldDefnRef( self,  i )
-	      );
+          return (OGRFieldType) OGR_Fld_GetType( OGR_F_GetFieldDefnRef( self, i ) );
   }
   /* ------------------------------------------- */  
   

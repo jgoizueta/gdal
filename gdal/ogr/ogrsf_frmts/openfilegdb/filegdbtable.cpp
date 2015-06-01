@@ -111,12 +111,16 @@ void FileGDBTable::Init()
     osObjectIdColName = "";
     nChSaved = -1;
     pabyTablXBlockMap = NULL;
+    nCountBlocksBeforeIBlockIdx = 0;
+    nCountBlocksBeforeIBlockValue = 0;
     bHasReadGDBIndexes = FALSE;
     nOffsetFieldDesc = 0;
     nFieldDescLength = 0;
     nTablxOffsetSize = 0;
     anFeatureOffsets.resize(0);
     nOffsetHeaderEnd = 0;
+    bHasDeletedFeaturesListed = FALSE;
+    bIsDeleted = FALSE;
 }
 
 /************************************************************************/
@@ -445,10 +449,17 @@ int FileGDBTable::IsLikelyFeatureAtOffset(vsi_l_offset nOffset,
 /*                      GuessFeatureLocations()                         */
 /************************************************************************/
 
+#define MARK_DELETED(x)  ((x) | (((GIntBig)1) << 63))
+#define IS_DELETED(x)    (((x) & (((GIntBig)1) << 63)) != 0)
+#define GET_OFFSET(x)    ((x) & ~(((GIntBig)1) << 63))
+
 int FileGDBTable::GuessFeatureLocations()
 {
     VSIFSeekL(fpTable, 0, SEEK_END);
     nFileSize = VSIFTellL(fpTable);
+    
+    int bReportDeletedFeatures =
+        CSLTestBoolean(CPLGetConfigOption("OPENFILEGDB_REPORT_DELETED_FEATURES", "NO"));
 
     vsi_l_offset nOffset = 40 + nFieldDescLength;
     
@@ -489,8 +500,16 @@ int FileGDBTable::GuessFeatureLocations()
                      nOffset, nSize);*/
             if( bDeletedRecord )
             {
-                nInvalidRecords ++;
-                anFeatureOffsets.push_back(0);
+                if( bReportDeletedFeatures )
+                {
+                    bHasDeletedFeaturesListed = TRUE;
+                    anFeatureOffsets.push_back(MARK_DELETED(nOffset));
+                }
+                else
+                {
+                    nInvalidRecords ++;
+                    anFeatureOffsets.push_back(0);
+                }
             }
             else
                 anFeatureOffsets.push_back(nOffset);
@@ -500,10 +519,13 @@ int FileGDBTable::GuessFeatureLocations()
     nTotalRecordCount = (int) anFeatureOffsets.size();
     if( nTotalRecordCount - nInvalidRecords > nValidRecordCount )
     {
-        CPLError(CE_Warning, CPLE_AppDefined,
-                 "More features found (%d) than declared number of valid features (%d). "
-                 "So deleted features will likely be reported.",
-                 nTotalRecordCount - nInvalidRecords, nValidRecordCount);
+        if( !bHasDeletedFeaturesListed )
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                    "More features found (%d) than declared number of valid features (%d). "
+                    "So deleted features will likely be reported.",
+                    nTotalRecordCount - nInvalidRecords, nValidRecordCount);
+        }
         nValidRecordCount = nTotalRecordCount - nInvalidRecords;
     }
 
@@ -965,6 +987,10 @@ int FileGDBTable::Open(const char* pszFilename,
                 READ_DOUBLE(poField->dfYMax);
 
                 /* Purely empiric logic ! */
+                /* Well, it seems that in practice there are 1 or 3 doubles */
+                /* here. When there are 3, the first one is zmin and the second */
+                /* one is zmax */
+                int nCountDoubles = 0;
                 while( TRUE )
                 {
                     returnErrorIf(nRemaining < 5 );
@@ -976,6 +1002,7 @@ int FileGDBTable::Open(const char* pszFilename,
                         pabyIter += 5;
                         nRemaining -= 5;
                         returnErrorIf(nRemaining < (GUInt32)(nToSkip * 8) );
+                        nCountDoubles += nToSkip;
                         pabyIter += nToSkip * 8;
                         nRemaining -= nToSkip * 8;
                         break;
@@ -985,8 +1012,11 @@ int FileGDBTable::Open(const char* pszFilename,
                         returnErrorIf(nRemaining < 8 );
                         pabyIter += 8;
                         nRemaining -= 8;
+                        nCountDoubles ++;
                     }
                 }
+                if( nCountDoubles == 3 )
+                    poField->bHas3D = TRUE;
             }
         }
 
@@ -1078,8 +1108,12 @@ vsi_l_offset FileGDBTable::GetOffsetInTableForRow(int iRow)
     const int errorRetValue = 0;
     returnErrorIf(iRow < 0 || iRow >= nTotalRecordCount );
 
+    bIsDeleted = FALSE;
     if( fpTableX == NULL )
-        return anFeatureOffsets[iRow];
+    {
+        bIsDeleted = IS_DELETED(anFeatureOffsets[iRow]);
+        return GET_OFFSET(anFeatureOffsets[iRow]);
+    }
 
     if( pabyTablXBlockMap != NULL )
     {
@@ -1090,8 +1124,22 @@ vsi_l_offset FileGDBTable::GetOffsetInTableForRow(int iRow)
         if( TEST_BIT(pabyTablXBlockMap, iBlock) == 0 )
             return 0;
 
-        for(int i=0;i<iBlock;i++)
-            nCountBlocksBefore += TEST_BIT(pabyTablXBlockMap, i) != 0;
+        // In case of sequential reading, optimization to avoid recomputing
+        // the number of blocks since the beginning of the map
+        if( iBlock >= nCountBlocksBeforeIBlockIdx )
+        {
+            nCountBlocksBefore = nCountBlocksBeforeIBlockValue;
+            for(int i=nCountBlocksBeforeIBlockIdx;i<iBlock;i++)
+                nCountBlocksBefore += TEST_BIT(pabyTablXBlockMap, i) != 0;
+        }
+        else
+        {
+            nCountBlocksBefore = 0;
+            for(int i=0;i<iBlock;i++)
+                nCountBlocksBefore += TEST_BIT(pabyTablXBlockMap, i) != 0;
+        }
+        nCountBlocksBeforeIBlockIdx = iBlock;
+        nCountBlocksBeforeIBlockValue = nCountBlocksBefore;
         int iCorrectedRow = nCountBlocksBefore * 1024 + (iRow % 1024);
         VSIFSeekL(fpTableX, 16 + nTablxOffsetSize * iCorrectedRow, SEEK_SET);
     }
@@ -1123,6 +1171,46 @@ vsi_l_offset FileGDBTable::GetOffsetInTableForRow(int iRow)
 }
 
 /************************************************************************/
+/*                      GetAndSelectNextNonEmptyRow()                   */
+/************************************************************************/
+
+int FileGDBTable::GetAndSelectNextNonEmptyRow(int iRow)
+{
+    const int errorRetValue = -1;
+    returnErrorAndCleanupIf(iRow < 0 || iRow >= nTotalRecordCount, nCurRow = -1 );
+
+    while( iRow < nTotalRecordCount )
+    {
+        if( pabyTablXBlockMap != NULL && (iRow % 1024) == 0 )
+        {
+            int iBlock = iRow / 1024;
+            if( TEST_BIT(pabyTablXBlockMap, iBlock) == 0 )
+            {
+                int nBlocks = (nTotalRecordCount+1023)/1024;
+                do
+                {
+                    iBlock ++;
+                }
+                while( iBlock < nBlocks &&
+                    TEST_BIT(pabyTablXBlockMap, iBlock) == 0 );
+
+                iRow = iBlock * 1024;
+                if( iRow >= nTotalRecordCount )
+                    return -1;
+            }
+        }
+
+        if( SelectRow(iRow) )
+            return iRow;
+        if( HasGotError() )
+            return -1;
+        iRow ++;
+    }
+
+    return -1;
+}
+
+/************************************************************************/
 /*                            SelectRow()                               */
 /************************************************************************/
 
@@ -1146,6 +1234,11 @@ int FileGDBTable::SelectRow(int iRow)
                 VSIFReadL(abyBuffer, 4, 1, fpTable) != 1, nCurRow = -1 );
 
         nRowBlobLength = GetUInt32(abyBuffer, 0);
+        if( bIsDeleted )
+        {
+            nRowBlobLength = (GUInt32)(-(int)nRowBlobLength);
+        }
+
         if( !(apoFields.size() == 0 && nRowBlobLength == 0) )
         {
             /* CPLDebug("OpenFileGDB", "nRowBlobLength = %u", nRowBlobLength); */
@@ -1211,8 +1304,9 @@ int FileGDBDoubleDateToOGRDate(double dfVal, OGRField* psField)
     psField->Date.Day = (GByte)brokendowntime.tm_mday;
     psField->Date.Hour = (GByte)brokendowntime.tm_hour;
     psField->Date.Minute = (GByte)brokendowntime.tm_min;
-    psField->Date.Second = (GByte)brokendowntime.tm_sec;
+    psField->Date.Second = (float)brokendowntime.tm_sec;
     psField->Date.TZFlag = 0;
+    psField->Date.Reserved = 0;
 
     return TRUE;
 }
@@ -1932,7 +2026,7 @@ FileGDBGeomField::FileGDBGeomField(FileGDBTable* poParent) :
     dfXOrigin(0.0), dfYOrigin(0.0), dfXYScale(0.0), dfMOrigin(0.0),
     dfMScale(0.0), dfZOrigin(0.0), dfZScale(0.0), dfXYTolerance(0.0),
     dfMTolerance(0.0), dfZTolerance(0.0), dfXMin(0.0), dfYMin(0.0),
-    dfXMax(0.0), dfYMax(0.0)
+    dfXMax(0.0), dfYMax(0.0), bHas3D(FALSE)
 {
 }
 

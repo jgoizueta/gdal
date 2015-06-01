@@ -2074,22 +2074,26 @@ def test_ogr2ogr_53():
         return 'skip'
 
     f = open('tmp/test_ogr2ogr_53.csv', 'wt')
-    f.write('id,i64,WKT\n')
-    f.write('1,123456789012,"POINT(0 0)"\n')
+    f.write('id,i64,b,WKT\n')
+    f.write('1,123456789012,true,"POINT(0 0)"\n')
     f.close()
     f = open('tmp/test_ogr2ogr_53.csvt', 'wt')
-    f.write('Integer,Integer64,String\n')
+    f.write('Integer,Integer64,Integer(Boolean),String\n')
     f.close()
 
     # Default behaviour with a driver that declares GDAL_DMD_CREATIONFIELDDATATYPES
-    gdaltest.runexternal(test_cli_utilities.get_ogr2ogr_path() + ' -f KML tmp/test_ogr2ogr_53.kml tmp/test_ogr2ogr_53.csv')
+    gdaltest.runexternal(test_cli_utilities.get_ogr2ogr_path() + ' -f KML tmp/test_ogr2ogr_53.kml tmp/test_ogr2ogr_53.csv -mapFieldType "Integer(Boolean)=String"')
     
     f = open('tmp/test_ogr2ogr_53.kml', 'rt')
     content = f.read()
     f.close()
 
-    if content.find('<SimpleField name="i64" type="float"></SimpleField>') < 0 or \
-       content.find('<SimpleData name="i64">123456789012</SimpleData>') < 0:
+    if content.find('<SimpleField name="id" type="int"></SimpleField>') < 0 or \
+       content.find('<SimpleData name="id">1</SimpleData>') < 0 or \
+       content.find('<SimpleField name="i64" type="float"></SimpleField>') < 0 or \
+       content.find('<SimpleData name="i64">123456789012</SimpleData>') < 0 or \
+       content.find('<SimpleField name="b" type="string"></SimpleField>') < 0 or \
+       content.find('<SimpleData name="b">1</SimpleData>') < 0:
         gdaltest.post_reason('fail')
         print(content)
         return 'fail'
@@ -2359,6 +2363,110 @@ def test_ogr2ogr_57():
 
     return 'success'
 
+###############################################################################
+# Test datasource transactions
+
+def test_ogr2ogr_58():
+    if test_cli_utilities.get_ogr2ogr_path() is None:
+        return 'skip'
+    if ogr.GetDriverByName('SQLite') is None:
+        return 'skip'
+
+    gdaltest.runexternal(test_cli_utilities.get_ogr2ogr_path() + ' -gt 3 -f SQLite tmp/test_ogr2ogr_58.sqlite ../ogr/data/poly.shp')
+
+    ds = ogr.Open('tmp/test_ogr2ogr_58.sqlite')
+    lyr = ds.GetLayer(0)
+    if lyr.GetFeatureCount() != 10:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    ogr.GetDriverByName('SQLite').DeleteDataSource('tmp/test_ogr2ogr_58.sqlite')
+
+    return 'success'
+
+###############################################################################
+# Test metadata support
+
+def test_ogr2ogr_59():
+    if test_cli_utilities.get_ogr2ogr_path() is None:
+        return 'skip'
+    if ogr.GetDriverByName('GPKG') is None:
+        return 'skip'
+
+    ds = ogr.GetDriverByName('GPKG').CreateDataSource('tmp/test_ogr2ogr_59_src.gpkg')
+    ds.SetMetadataItem('FOO', 'BAR')
+    ds.SetMetadataItem('BAR', 'BAZ', 'another_domain')
+    lyr = ds.CreateLayer('mylayer')
+    lyr.SetMetadataItem('lyr_FOO', 'lyr_BAR')
+    lyr.SetMetadataItem('lyr_BAR', 'lyr_BAZ', 'lyr_another_domain')
+    ds = None
+
+    gdaltest.runexternal(test_cli_utilities.get_ogr2ogr_path() + ' -f GPKG tmp/test_ogr2ogr_59_dest.gpkg tmp/test_ogr2ogr_59_src.gpkg -mo BAZ=BAW')
+
+    ds = ogr.Open('tmp/test_ogr2ogr_59_dest.gpkg')
+    if ds.GetMetadata() != { 'FOO': 'BAR', 'BAZ': 'BAW' }:
+        gdaltest.post_reason('fail')
+        print(ds.GetMetadata())
+        return 'fail'
+    if ds.GetMetadata('another_domain') != { 'BAR': 'BAZ' }:
+        gdaltest.post_reason('fail')
+        print(ds.GetMetadata())
+        return 'fail'
+    lyr = ds.GetLayer(0)
+    if lyr.GetMetadata() != { 'lyr_FOO': 'lyr_BAR' }:
+        gdaltest.post_reason('fail')
+        print(lyr.GetMetadata())
+        return 'fail'
+    if lyr.GetMetadata('lyr_another_domain') != { 'lyr_BAR': 'lyr_BAZ' }:
+        gdaltest.post_reason('fail')
+        print(lyr.GetMetadata())
+        return 'fail'
+    ds = None
+
+    ogr.GetDriverByName('GPKG').DeleteDataSource('tmp/test_ogr2ogr_59_dest.gpkg')
+
+    gdaltest.runexternal(test_cli_utilities.get_ogr2ogr_path() + ' -f GPKG tmp/test_ogr2ogr_59_dest.gpkg tmp/test_ogr2ogr_59_src.gpkg -nomd')
+    ds = ogr.Open('tmp/test_ogr2ogr_59_dest.gpkg')
+    if ds.GetMetadata() != {}:
+        gdaltest.post_reason('fail')
+        print(ds.GetMetadata())
+        return 'fail'
+    lyr = ds.GetLayer(0)
+    if lyr.GetMetadata() != {}:
+        gdaltest.post_reason('fail')
+        print(lyr.GetMetadata())
+        return 'fail'
+    ds = None
+
+    ogr.GetDriverByName('GPKG').DeleteDataSource('tmp/test_ogr2ogr_59_dest.gpkg')
+
+    ogr.GetDriverByName('GPKG').DeleteDataSource('tmp/test_ogr2ogr_59_src.gpkg')
+
+    return 'success'
+
+###############################################################################
+# Test forced datasource transactions
+
+def test_ogr2ogr_60():
+    if test_cli_utilities.get_ogr2ogr_path() is None:
+        return 'skip'
+    if ogr.GetDriverByName('FileGDB') is None:
+        return 'skip'
+
+    gdaltest.runexternal(test_cli_utilities.get_ogr2ogr_path() + ' -ds_transaction -f FileGDB tmp/test_ogr2ogr_60.gdb ../ogr/data/poly.shp -mapFieldType Integer64=Integer')
+
+    ds = ogr.Open('tmp/test_ogr2ogr_60.gdb')
+    lyr = ds.GetLayer(0)
+    if lyr.GetFeatureCount() != 10:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    ogr.GetDriverByName('FileGDB').DeleteDataSource('tmp/test_ogr2ogr_60.gdb')
+
+    return 'success'
+
 gdaltest_list = [
     test_ogr2ogr_1,
     test_ogr2ogr_2,
@@ -2418,6 +2526,9 @@ gdaltest_list = [
     test_ogr2ogr_55,
     test_ogr2ogr_56,
     test_ogr2ogr_57,
+    test_ogr2ogr_58,
+    test_ogr2ogr_59,
+    test_ogr2ogr_60
     ]
 
 if __name__ == '__main__':

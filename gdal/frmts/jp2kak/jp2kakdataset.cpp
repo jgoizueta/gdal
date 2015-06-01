@@ -257,7 +257,7 @@ public: // Member classes
 
         if( end_of_message && m_eErrClass == CE_Failure )
         {
-            throw new JP2KAKException();
+            throw JP2KAKException();
         }
     }
 
@@ -731,7 +731,7 @@ void JP2KAKRasterBand::ApplyPalette( jp2_palette oJP2Palette )
 
     if( oJP2Palette.get_num_luts() == 4 )
     {
-        oJP2Palette.get_lut( 2, pafLUT + nCount*3 );
+        oJP2Palette.get_lut( 3, pafLUT + nCount*3 );
     }
     else
     {
@@ -1429,7 +1429,25 @@ GDALDataset *JP2KAKDataset::Open( GDALOpenInfo * poOpenInfo )
                       " datasets.\n" );
             return NULL;
         }
-    
+
+/* -------------------------------------------------------------------- */
+/*      Vector layers                                                   */
+/* -------------------------------------------------------------------- */
+        if( poOpenInfo->nOpenFlags & GDAL_OF_VECTOR )
+        {
+            poDS->LoadVectorLayers(
+                CSLFetchBoolean(poOpenInfo->papszOpenOptions, "OPEN_REMOTE_GML", FALSE));
+
+            // If file opened in vector-only mode and there's no vector,
+            // return
+            if( (poOpenInfo->nOpenFlags & GDAL_OF_RASTER) == 0 &&
+                poDS->GetLayerCount() == 0 )
+            {
+                delete poDS;
+                return NULL;
+            }
+        }
+
         return( poDS );
     }
 
@@ -1973,9 +1991,10 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
 
     CPLAssert( !oTile.get_ycc() );
 
-    for( iLine = 0; iLine < nYSize; iLine += TILE_CHUNK_SIZE )
+    int bRet = TRUE;
+    for( iLine = 0; iLine < nYSize && bRet; iLine += TILE_CHUNK_SIZE )
     {
-        for (c=0; c < num_components; c++)
+        for (c=0; c < num_components && bRet; c++)
         {
             GDALRasterBand *poBand = poSrcDS->GetRasterBand( c+1 );
             int iSubline = 0;
@@ -1988,7 +2007,10 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
                                       nXOff, nYOff+iSubline, nXSize, 1, 
                                       (void *) pabyBuffer, nXSize, 1, eType,
                                       0, 0, NULL ) == CE_Failure )
-                    return FALSE;
+                {
+                    bRet = FALSE;
+                    break;
+                }
 
                 if( bReversible && eType == GDT_Byte )
                 {
@@ -2068,19 +2090,28 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
                                   / (double) (num_components * nYSize),
                                   NULL, pProgressData ) )
                 {
-                    return FALSE;
+                    bRet = FALSE;
+                    break;
                 }
             }
         }
+        if( !bRet )
+            break;
 
         if( oCodeStream.ready_for_flush() && bFlushEnabled )
         {
             CPLDebug( "JP2KAK", 
                       "Calling oCodeStream.flush() at line %d",
                       MIN(nYSize,iLine+TILE_CHUNK_SIZE) );
-            
-            oCodeStream.flush( layer_bytes, layer_count, NULL,
-                               true, bComseg );
+            try
+            {
+                oCodeStream.flush( layer_bytes, layer_count, NULL,
+                                   true, bComseg );
+            }
+            catch(...)
+            {
+                bRet = FALSE;
+            }
         }
         else if( bFlushEnabled )
             CPLDebug( "JP2KAK", 
@@ -2102,7 +2133,7 @@ JP2KAKCreateCopy_WriteTile( GDALDataset *poSrcDS, kdu_tile &oTile,
     if( poROIImage != NULL )
         delete poROIImage;
 
-    return TRUE;
+    return bRet;
 }
 
 /************************************************************************/
@@ -2207,6 +2238,7 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         CPLError( CE_Failure, CPLE_IllegalArg,
                   "QUALITY=%s is not a legal value in the range 0.01-100.",
                   CSLFetchNameValue(papszOptions,"QUALITY") );
+        CPLFree(layer_bytes);
         return NULL;
     }
 
@@ -2409,6 +2441,7 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
 
         poROIImage = new kdu_roi_rect(oCodeStream,region);
     }
+    CSLDestroy(papszROIDefs);
 
 /* -------------------------------------------------------------------- */
 /*      Set some particular parameters.                                 */
@@ -2456,7 +2489,24 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             CPLString osOpt;
 
             osOpt.Printf( "%s=%s", apszParms[iParm], pszValue );
-            oCodeStream.access_siz()->parse_string( osOpt );
+            try
+            {
+                oCodeStream.access_siz()->parse_string( osOpt );
+            }
+            catch( ... )
+            {
+                CPLFree(layer_bytes);
+                if( bIsJP2 )
+                {
+                    jp2_out.close();
+                    family.close();
+                }
+                else
+                {
+                    poOutputFile->close();
+                }
+                return NULL;
+            }
 
             CPLDebug( "JP2KAK", "parse_string(%s)", osOpt.c_str() );
         }
@@ -2592,7 +2642,8 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
                  || adfGeoTransform[3] != 0.0 
                  || adfGeoTransform[4] != 0.0 
                  || ABS(adfGeoTransform[5]) != 1.0))
-            || poSrcDS->GetGCPCount() > 0) )
+            || poSrcDS->GetGCPCount() > 0
+            || poSrcDS->GetMetadata("RPC") != NULL) )
     {
         GDALJP2Metadata oJP2MD;
 
@@ -2607,11 +2658,19 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
             oJP2MD.SetGeoTransform( adfGeoTransform );
         }
 
+        oJP2MD.SetRPCMD( poSrcDS->GetMetadata("RPC") );
+
         const char* pszAreaOrPoint = poSrcDS->GetMetadataItem(GDALMD_AREA_OR_POINT);
         oJP2MD.bPixelIsPoint = pszAreaOrPoint != NULL && EQUAL(pszAreaOrPoint, GDALMD_AOP_POINT);
 
         if( CSLFetchBoolean( papszOptions, "GMLJP2", TRUE ) )
-            JP2KAKWriteBox( &jp2_out, oJP2MD.CreateGMLJP2(nXSize,nYSize) );
+        {
+            const char* pszGMLJP2V2Def = CSLFetchNameValue( papszOptions, "GMLJP2V2_DEF" );
+            if( pszGMLJP2V2Def != NULL )
+                JP2KAKWriteBox( &jp2_out, oJP2MD.CreateGMLJP2V2(nXSize,nYSize,pszGMLJP2V2Def,poSrcDS) );
+            else
+                JP2KAKWriteBox( &jp2_out, oJP2MD.CreateGMLJP2(nXSize,nYSize) );
+        }
         if( CSLFetchBoolean( papszOptions, "GeoJP2", TRUE ) )
             JP2KAKWriteBox( &jp2_out, oJP2MD.CreateJP2GeoTIFF() );
     }
@@ -2733,7 +2792,7 @@ JP2KAKCreateCopy( const char * pszFilename, GDALDataset *poSrcDS,
         return NULL;
 
 /* -------------------------------------------------------------------- */
-/*      Re-open dataset, and copy any auxilary pam information.         */
+/*      Re-open dataset, and copy any auxiliary pam information.         */
 /* -------------------------------------------------------------------- */
     GDALOpenInfo oOpenInfo(pszFilename, GA_ReadOnly);
     GDALPamDataset *poDS = (GDALPamDataset*) JP2KAKDataset::Open(&oOpenInfo);
@@ -2762,6 +2821,7 @@ void GDALRegister_JP2KAK()
         
         poDriver->SetDescription( "JP2KAK" );
         poDriver->SetMetadataItem( GDAL_DCAP_RASTER, "YES" );
+        poDriver->SetMetadataItem( GDAL_DCAP_VECTOR, "YES" );
         poDriver->SetMetadataItem( GDAL_DMD_LONGNAME, 
                                    "JPEG-2000 (based on Kakadu " 
                                    KDU_CORE_VERSION ")" );
@@ -2777,6 +2837,7 @@ void GDALRegister_JP2KAK()
         poDriver->SetMetadataItem( GDAL_DMD_OPENOPTIONLIST, 
 "<OpenOptionList>"
 "   <Option name='1BIT_ALPHA_PROMOTION' type='boolean' description='Whether a 1-bit alpha channel should be promoted to 8-bit' default='YES'/>"
+"   <Option name='OPEN_REMOTE_GML' type='boolean' description='Whether to load remote vector layers referenced by a link in a GMLJP2 v2 box' default='NO'/>"
 "</OpenOptionList>" );
 
         poDriver->SetMetadataItem( GDAL_DMD_CREATIONOPTIONLIST, 
@@ -2786,6 +2847,7 @@ void GDALRegister_JP2KAK()
 "   <Option name='BLOCKYSIZE' type='int' description='Tile Height'/>"
 "   <Option name='GeoJP2' type='boolean' description='defaults to ON'/>"
 "   <Option name='GMLJP2' type='boolean' description='defaults to ON'/>"
+"   <Option name='GMLJP2V2_DEF' type='string' description='Definition file to describe how a GMLJP2 v2 box should be generated. If set to YES, a minimal instance will be created'/>"
 "   <Option name='LAYERS' type='integer'/>"
 "   <Option name='ROI' type='string'/>"
 "   <Option name='COMSEG' type='boolean' />"
@@ -2798,7 +2860,7 @@ void GDALRegister_JP2KAK()
 "   <Option name='ORGgen_plt' type='string'/>"
 "   <Option name='ORGgen_tlm' type='string'/>"
 "   <Option name='Qguard' type='integer'/>"
-"   <Option name='Sprofile' type='integer'/>"
+"   <Option name='Sprofile' type='string'/>"
 "   <Option name='Rshift' type='string'/>"
 "   <Option name='Rlevels' type='string'/>"
 "   <Option name='Rweight' type='string'/>"

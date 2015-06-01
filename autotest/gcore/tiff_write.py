@@ -620,6 +620,14 @@ def tiff_write_17():
     except:
         pass
 
+    # confirm there is no _rpc.txt file created by default.
+    try:
+        open('tmp/tm_17_RPC.TXT').read()
+        gdaltest.post_reason( 'unexpectedly found _RPC.TXT file' )
+        return 'fail'
+    except:
+        pass
+    
     # Open the dataset, and confirm the RPC data is still intact.
     ds = gdal.Open( 'tmp/tw_17.tif' )
     if not gdaltest.rpcs_equal(ds.GetMetadata('RPC'),rpc_md):
@@ -672,6 +680,14 @@ def tiff_write_18():
         gdaltest.post_reason( 'missing .RPB or .IMD file.' )
         return 'fail'
 
+    # confirm there is no _rpc.txt file created by default.
+    try:
+        open('tmp/tw_18_RPC.TXT').read()
+        gdaltest.post_reason( 'unexpectedly found _RPC.TXT file' )
+        return 'fail'
+    except:
+        pass
+    
     # Open the dataset, and confirm the RPC/IMD data is still intact.
     ds = gdal.Open( 'tmp/tw_18.tif' )
 
@@ -729,6 +745,110 @@ def tiff_write_18_disable_readdir():
     gdal.SetConfigOption('GDAL_DISABLE_READDIR_ON_OPEN', oldval)
     return ret
 
+###############################################################################
+# Test writing a TIFF with an _RPC.TXT
+
+def tiff_write_rpc_txt():
+
+    # Translate RPC controlled data to GeoTIFF.
+
+    ds_in = gdal.Open('data/rpc.vrt')
+
+    # Remove IMD before creating the TIFF to avoid creating an .IMD
+    # since .IMD + _RPC.TXT is an odd combination
+    # If the .IMD is found, we don't try reading _RPC.TXT
+    ds_in_without_imd = gdal.GetDriverByName('VRT').CreateCopy('', ds_in)
+    ds_in_without_imd.SetMetadata(None, 'IMD')
+
+    rpc_md = ds_in.GetMetadata('RPC')
+
+    ds = gdaltest.tiff_drv.CreateCopy( 'tmp/tiff_write_rpc_txt.tif', ds_in_without_imd,
+                         options = [ 'PROFILE=BASELINE', 'RPCTXT=YES' ] )
+
+    ds_in = None
+    ds = None
+
+    # Ensure there is no .aux.xml file which might hold the RPC.
+    try:
+        os.remove( 'tmp/tiff_write_rpc_txt.tif.aux.xml' )
+    except:
+        pass
+
+    # confirm there is no .RPB file created by default.
+    try:
+        open('tmp/tiff_write_rpc_txt.RPB').read()
+        gdaltest.post_reason( 'unexpectedly found .RPB file' )
+        return 'fail'
+    except:
+        pass
+    
+    try:
+        open('tmp/tiff_write_rpc_txt_RPC.TXT').read()
+    except:
+        gdaltest.post_reason( 'missing _RPC.TXT file.' )
+        return 'fail'
+
+    # Open the dataset, and confirm the RPC data is still intact.
+    ds = gdal.Open( 'tmp/tiff_write_rpc_txt.tif' )
+
+    if not gdaltest.rpcs_equal(ds.GetMetadata('RPC'),rpc_md):
+        return 'fail'
+
+    ds = None
+
+    gdaltest.tiff_drv.Delete( 'tmp/tiff_write_rpc_txt.tif' )
+
+    # Confirm _RPC.TXT file is cleaned up.  If not likely the
+    # file list functionality is not working properly.
+    try:
+        open('tmp/tiff_write_rpc_txt_RPC.TXT').read()
+        gdaltest.post_reason( '_RPC.TXT did not get cleaned up.' )
+        return 'fail'
+    except:
+        pass
+
+    return 'success'
+
+###############################################################################
+# Test writing a TIFF with an RPC in .aux.xml
+
+def tiff_write_rpc_in_pam():
+
+    ds_in = gdal.Open('data/rpc.vrt')
+    rpc_md = ds_in.GetMetadata('RPC')
+
+    ds = gdaltest.tiff_drv.CreateCopy( 'tmp/tiff_write_rpc_in_pam.tif', ds_in,
+                         options = [ 'PROFILE=BASELINE', 'RPB=NO' ] )
+
+    ds_in = None
+    ds = None
+
+    # Ensure there is a .aux.xml file which might hold the RPC.
+    try:
+        os.stat( 'tmp/tiff_write_rpc_in_pam.tif.aux.xml' )
+    except:
+        gdaltest.post_reason( 'missing .aux.xml file.' )
+        return 'fail'
+
+    # confirm there is no .RPB file created.
+    try:
+        open('tmp/tiff_write_rpc_txt.RPB').read()
+        gdaltest.post_reason( 'unexpectedly found .RPB file' )
+        return 'fail'
+    except:
+        pass
+
+    # Open the dataset, and confirm the RPC data is still intact.
+    ds = gdal.Open( 'tmp/tiff_write_rpc_in_pam.tif' )
+
+    if not gdaltest.rpcs_equal(ds.GetMetadata('RPC'),rpc_md):
+        return 'fail'
+
+    ds = None
+
+    gdaltest.tiff_drv.Delete( 'tmp/tiff_write_rpc_in_pam.tif' )
+
+    return 'success'
 ###############################################################################
 # Test the write of a pixel-interleaved image with NBITS = 7
 
@@ -5170,7 +5290,10 @@ def tiff_write_129():
                 ds = None
 
                 ds = gdal.Open('/vsimem/tiff_write_129.tif')
+                old_val = gdal.GetCacheMax()
+                gdal.SetCacheMax(0)
                 cs = ds.GetRasterBand(1).Checksum()
+                gdal.SetCacheMax(old_val)
                 ds = None
                 gdaltest.tiff_drv.Delete('/vsimem/tiff_write_129.tif')
                 
@@ -5642,7 +5765,79 @@ def tiff_write_134():
     gdaltest.tiff_drv.Delete('/vsimem/tiff_write_134.tif')
 
     return 'success'
+
+###############################################################################
+# Test clearing GCPs (#5945)
+
+def tiff_write_135():
+
+    # Simple clear
+    src_ds = gdal.Open( 'data/gcps.vrt' )
+    ds = gdaltest.tiff_drv.CreateCopy( '/vsimem/tiff_write_135.tif', src_ds )
+    ds = None
+
+    ds = gdal.Open( '/vsimem/tiff_write_135.tif', gdal.GA_Update )
+    ds.SetGCPs([], '')
+    ds = None
+
+    ds = gdal.Open('/vsimem/tiff_write_135.tif')
+    if len(ds.GetGCPs()) != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetGCPProjection() != '':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+    # Double clear
+    src_ds = gdal.Open( 'data/gcps.vrt' )
+    ds = gdaltest.tiff_drv.CreateCopy( '/vsimem/tiff_write_135.tif', src_ds )
+    ds = None
+
+    ds = gdal.Open( '/vsimem/tiff_write_135.tif', gdal.GA_Update )
+    ds.SetGCPs([], '')
+    ds.SetGCPs([], '')
+    ds = None
+
+    ds = gdal.Open('/vsimem/tiff_write_135.tif')
+    if len(ds.GetGCPs()) != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetGCPProjection() != '':
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
+
+
+    # Clear + set geotransform and new projection
+    src_ds = gdal.Open( 'data/gcps.vrt' )
+    ds = gdaltest.tiff_drv.CreateCopy( '/vsimem/tiff_write_135.tif', src_ds )
+    ds = None
+
+    ds = gdal.Open( '/vsimem/tiff_write_135.tif', gdal.GA_Update )
+    ds.SetGCPs([], '')
+    ds.SetGeoTransform([1,2,3,4,5,-6])
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput('EPSG:32601')
+    ds.SetProjection(srs.ExportToWkt())
+    ds = None
+
+    ds = gdal.Open('/vsimem/tiff_write_135.tif')
+    if len(ds.GetGCPs()) != 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetGeoTransform() != (1,2,3,4,5,-6):
+        gdaltest.post_reason('fail')
+        return 'fail'
+    if ds.GetProjectionRef().find('32601') < 0:
+        gdaltest.post_reason('fail')
+        return 'fail'
+    ds = None
     
+    gdal.Unlink('/vsimem/tiff_write_135.tif')
+
+    return 'success'
+
 ###############################################################################
 # Ask to run again tests with GDAL_API_PROXY=YES
 
@@ -5689,6 +5884,8 @@ gdaltest_list = [
     tiff_write_17_disable_readdir,
     tiff_write_18,
     tiff_write_18_disable_readdir,
+    tiff_write_rpc_txt,
+    tiff_write_rpc_in_pam,
     tiff_write_19,
     tiff_write_20,
     tiff_write_21,
@@ -5808,6 +6005,7 @@ gdaltest_list = [
     tiff_write_132,
     tiff_write_133,
     tiff_write_134,
+    tiff_write_135,
     #tiff_write_api_proxy,
     tiff_write_cleanup ]
 

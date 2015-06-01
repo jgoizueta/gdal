@@ -68,7 +68,6 @@ class OGROpenFileGDBLayer : public OGRLayer
     int               m_iCurFeat;
     std::string       m_osDefinition;
     std::string       m_osDocumentation;
-    std::string       m_osFIDName;
     OGRwkbGeometryType m_eGeomType;
     int               m_bValidLayerDefn;
     int               m_bEOF;
@@ -116,7 +115,7 @@ public:
   int                   HasIndexForField(const char* pszFieldName);
   FileGDBIterator*      BuildIndex(const char* pszFieldName,
                                    int bAscending,
-                                   swq_op op,
+                                   int op,
                                    swq_expr_node* poValue);
   SPIState              GetSpatialIndexState() const { return m_eSpatialIndexState; }
   int                   IsValidLayerDefn() { return BuildLayerDefinition(); }

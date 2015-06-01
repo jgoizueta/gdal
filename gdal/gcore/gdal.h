@@ -43,6 +43,7 @@
 #include "cpl_error.h"
 #include "cpl_progress.h"
 #include "cpl_virtualmem.h"
+#include "cpl_minixml.h"
 #include "ogr_api.h"
 #endif
 
@@ -117,6 +118,7 @@ typedef enum
     /*! Mode (selects the value which appears most often of all the sampled points) */
                                                         GRIORA_Mode = 6,
     /*! Gauss blurring */                               GRIORA_Gauss = 7
+    /* NOTE: values 8 to 12 are reserved for max,min,med,Q1,Q3 */
 } GDALRIOResampleAlg;
 
 /* NOTE to developers: only add members, and if so edit INIT_RASTERIO_EXTRA_ARG */
@@ -257,6 +259,12 @@ typedef GIntBig GSpacing;
 
 /** Extension handled by the driver. */
 #define GDAL_DMD_EXTENSION "DMD_EXTENSION"
+
+/** Connection prefix to provide as the file name of the the open function.
+ * Typically set for non-file based drivers. Generally used with open options.
+ * @since GDAL 2.0
+ */
+#define GDAL_DMD_CONNECTION_PREFIX "DMD_CONNECTION_PREFIX"
 
 /** List of (space separated) extensions handled by the driver.
  * @since GDAL 2.0
@@ -589,6 +597,9 @@ void   CPL_DLL GDALDatasetReleaseResultSet( GDALDatasetH, OGRLayerH );
 OGRStyleTableH CPL_DLL GDALDatasetGetStyleTable( GDALDatasetH );
 void   CPL_DLL GDALDatasetSetStyleTableDirectly( GDALDatasetH, OGRStyleTableH );
 void   CPL_DLL GDALDatasetSetStyleTable( GDALDatasetH, OGRStyleTableH );
+OGRErr CPL_DLL GDALDatasetStartTransaction(GDALDatasetH hDS, int bForce);
+OGRErr CPL_DLL GDALDatasetCommitTransaction(GDALDatasetH hDS);
+OGRErr CPL_DLL GDALDatasetRollbackTransaction(GDALDatasetH hDS);
 
 
 /* ==================================================================== */
@@ -697,20 +708,37 @@ CPLErr CPL_DLL CPL_STDCALL GDALGetRasterHistogram( GDALRasterBandH hBand,
                                        int nBuckets, int *panHistogram,
                                        int bIncludeOutOfRange, int bApproxOK,
                                        GDALProgressFunc pfnProgress,
+                                       void * pProgressData ) CPL_WARN_DEPRECATED("Use GDALGetRasterHistogramEx() instead");
+CPLErr CPL_DLL CPL_STDCALL GDALGetRasterHistogramEx( GDALRasterBandH hBand,
+                                       double dfMin, double dfMax,
+                                       int nBuckets, GUIntBig *panHistogram,
+                                       int bIncludeOutOfRange, int bApproxOK,
+                                       GDALProgressFunc pfnProgress,
                                        void * pProgressData );
 CPLErr CPL_DLL CPL_STDCALL GDALGetDefaultHistogram( GDALRasterBandH hBand,
                                        double *pdfMin, double *pdfMax,
                                        int *pnBuckets, int **ppanHistogram,
                                        int bForce,
                                        GDALProgressFunc pfnProgress,
+                                       void * pProgressData ) CPL_WARN_DEPRECATED("Use GDALGetDefaultHistogramEx() instead");
+CPLErr CPL_DLL CPL_STDCALL GDALGetDefaultHistogramEx( GDALRasterBandH hBand,
+                                       double *pdfMin, double *pdfMax,
+                                       int *pnBuckets, GUIntBig **ppanHistogram,
+                                       int bForce,
+                                       GDALProgressFunc pfnProgress,
                                        void * pProgressData );
 CPLErr CPL_DLL CPL_STDCALL GDALSetDefaultHistogram( GDALRasterBandH hBand,
                                        double dfMin, double dfMax,
-                                       int nBuckets, int *panHistogram );
+                                       int nBuckets, int *panHistogram ) CPL_WARN_DEPRECATED("Use GDALSetDefaultHistogramEx() instead");
+CPLErr CPL_DLL CPL_STDCALL GDALSetDefaultHistogramEx( GDALRasterBandH hBand,
+                                       double dfMin, double dfMax,
+                                       int nBuckets, GUIntBig *panHistogram );
 int CPL_DLL CPL_STDCALL
 GDALGetRandomRasterSample( GDALRasterBandH, int, float * );
 GDALRasterBandH CPL_DLL CPL_STDCALL
 GDALGetRasterSampleOverview( GDALRasterBandH, int );
+GDALRasterBandH CPL_DLL CPL_STDCALL
+GDALGetRasterSampleOverviewEx( GDALRasterBandH, GUIntBig );
 CPLErr CPL_DLL CPL_STDCALL GDALFillRaster( GDALRasterBandH hBand,
                           double dfRealValue, double dfImaginaryValue );
 CPLErr CPL_DLL CPL_STDCALL
@@ -783,16 +811,6 @@ int CPL_DLL CPL_STDCALL GDALLoadOziMapFile( const char *, double *, char **,
                                             int *, GDAL_GCP ** );
 int CPL_DLL CPL_STDCALL GDALReadOziMapFile( const char * ,  double *,
                                             char **, int *, GDAL_GCP ** );
-char CPL_DLL ** CPL_STDCALL GDALLoadRPBFile( const char *pszFilename, 
-                                             char **papszSiblingFiles );
-char CPL_DLL ** CPL_STDCALL GDALLoadRPCFile( const char *pszFilename, 
-                                             char **papszSiblingFiles );
-CPLErr CPL_DLL CPL_STDCALL GDALWriteRPBFile( const char *pszFilename, 
-                                             char **papszMD );
-char CPL_DLL ** CPL_STDCALL GDALLoadIMDFile( const char *pszFilename, 
-                                             char **papszSiblingFiles );
-CPLErr CPL_DLL CPL_STDCALL GDALWriteIMDFile( const char *pszFilename, 
-                                             char **papszMD );
 
 const char CPL_DLL * CPL_STDCALL GDALDecToDMS( double, const char *, int );
 double CPL_DLL CPL_STDCALL GDALPackedDMSToDec( double );
@@ -971,6 +989,9 @@ void CPL_DLL CPL_STDCALL GDALRATDumpReadable( GDALRasterAttributeTableH,
 GDALRasterAttributeTableH CPL_DLL CPL_STDCALL 
     GDALRATClone( GDALRasterAttributeTableH );
 
+void CPL_DLL* CPL_STDCALL 
+    GDALRATSerializeJSON( GDALRasterAttributeTableH );
+
 int CPL_DLL CPL_STDCALL GDALRATGetRowOfValue( GDALRasterAttributeTableH , double );
 
 
@@ -1057,6 +1078,12 @@ CPLVirtualMem CPL_DLL* GDALRasterBandGetTiledVirtualMem( GDALRasterBandH hBand,
                                                          int bSingleThreadUsage,
                                                          char **papszOptions );
 
+/* =================================================================== */
+/*      Misc API                                                        */
+/* ==================================================================== */
+
+CPLXMLNode CPL_DLL* GDALGetJPEG2000Structure(const char* pszFilename,
+                                             char** papszOptions);
 
 CPL_C_END
 

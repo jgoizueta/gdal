@@ -293,6 +293,7 @@ typedef int OGRErr;
 #define OGRERR_FAILURE             6
 #define OGRERR_UNSUPPORTED_SRS     7
 #define OGRERR_INVALID_HANDLE      8
+#define OGRERR_NON_EXISTING_FEATURE 9   /* added in GDAL 2.0 */
 
 typedef int     OGRBoolean;
 
@@ -612,11 +613,14 @@ typedef union {
         GByte   Day;
         GByte   Hour;
         GByte   Minute;
-        GByte   Second;
         GByte   TZFlag; /* 0=unknown, 1=localtime(ambiguous), 
                            100=GMT, 104=GMT+1, 80=GMT-5, etc */
+        GByte   Reserved; /* must be set to 0 */
+        float   Second; /* with millisecond accuracy. at the end of the structure, so as to keep it 12 bytes on 32 bit */
     } Date;
 } OGRField;
+
+#define OGR_GET_MS(floatingpoint_sec)   (int)(((floatingpoint_sec) - (int)(floatingpoint_sec)) * 1000 + 0.5)
 
 int CPL_DLL OGRParseDate( const char *pszInput, OGRField *psOutput, 
                           int nOptions );
@@ -646,6 +650,8 @@ int CPL_DLL OGRParseDate( const char *pszInput, OGRField *psOutput,
 #define ODsCDeleteLayer        "DeleteLayer"
 #define ODsCCreateGeomFieldAfterCreateLayer   "CreateGeomFieldAfterCreateLayer"
 #define ODsCCurveGeometries    "CurveGeometries"
+#define ODsCTransactions       "Transactions"
+#define ODsCEmulatedTransactions "EmulatedTransactions"
 
 #define ODrCCreateDataSource   "CreateDataSource"
 #define ODrCDeleteDataSource   "DeleteDataSource"

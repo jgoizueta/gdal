@@ -109,22 +109,26 @@ ECWRasterBand::ECWRasterBand( ECWDataset *poDS, int nBand, int iOverview,
     }else if (poDS->psFileInfo->eColorSpace == NCSCS_MULTIBAND ){
         eBandInterp = ECWGetColorInterpretationByName(poDS->psFileInfo->pBands[nBand-1].szDesc);
     }else if (poDS->psFileInfo->eColorSpace == NCSCS_sRGB){
-        if( nBand == 1 )
-            eBandInterp = GCI_RedBand;
-        else if( nBand == 2 )
-            eBandInterp = GCI_GreenBand;
-        else if( nBand == 3 )
-            eBandInterp = GCI_BlueBand;
-        else if (nBand == 4 )
+        eBandInterp = ECWGetColorInterpretationByName(poDS->psFileInfo->pBands[nBand-1].szDesc);
+        if( eBandInterp == GCI_Undefined )
         {
-            if (strcmp(poDS->psFileInfo->pBands[nBand-1].szDesc, NCS_BANDDESC_AllOpacity) == 0)
-                eBandInterp = GCI_AlphaBand;
+            if( nBand == 1 )
+                eBandInterp = GCI_RedBand;
+            else if( nBand == 2 )
+                eBandInterp = GCI_GreenBand;
+            else if( nBand == 3 )
+                eBandInterp = GCI_BlueBand;
+            else if (nBand == 4 )
+            {
+                if (strcmp(poDS->psFileInfo->pBands[nBand-1].szDesc, NCS_BANDDESC_AllOpacity) == 0)
+                    eBandInterp = GCI_AlphaBand;
+                else
+                    eBandInterp = GCI_Undefined;
+            }
             else
+            {
                 eBandInterp = GCI_Undefined;
-        }
-        else
-        {
-            eBandInterp = GCI_Undefined;
+            }
         }
     }
     else if( poDS->psFileInfo->eColorSpace == NCSCS_YCbCr )
@@ -273,7 +277,7 @@ CPLErr ECWRasterBand::AdviseRead( int nXOff, int nYOff, int nXSize, int nYSize,
 /************************************************************************/
 
 CPLErr ECWRasterBand::GetDefaultHistogram( double *pdfMin, double *pdfMax,
-    int *pnBuckets, int ** ppanHistogram,
+    int *pnBuckets, GUIntBig ** ppanHistogram,
     int bForce,
     GDALProgressFunc f, void *pProgressData)
 {
@@ -301,9 +305,9 @@ CPLErr ECWRasterBand::GetDefaultHistogram( double *pdfMin, double *pdfMax,
         NCSBandStats& bandStats = poGDS->pStatistics->BandsStats[nStatsBandIndex];
         if ( bandStats.Histogram != NULL && bandStats.nHistBucketCount > 0 ){
             *pnBuckets = bandStats.nHistBucketCount;
-            *ppanHistogram = (int *)VSIMalloc(bandStats.nHistBucketCount *sizeof(int));
+            *ppanHistogram = (GUIntBig *)VSIMalloc(bandStats.nHistBucketCount *sizeof(GUIntBig));
             for (size_t i = 0; i < bandStats.nHistBucketCount; i++){
-                (*ppanHistogram)[i] = (int) bandStats.Histogram[i];
+                (*ppanHistogram)[i] = (GUIntBig) bandStats.Histogram[i];
             }
             //JTO: this is not perfect as You can't tell who wrote the histogram !!! 
             //It will offset it unnecesarilly for files with hists not modified by GDAL. 
@@ -353,7 +357,7 @@ CPLErr ECWRasterBand::GetDefaultHistogram( double *pdfMin, double *pdfMax,
 /************************************************************************/
 
 CPLErr ECWRasterBand::SetDefaultHistogram( double dfMin, double dfMax,
-                                           int nBuckets, int *panHistogram )
+                                           int nBuckets, GUIntBig *panHistogram )
 {
     //Only version 3 supports saving statistics. 
     if (poGDS->psFileInfo->nFormatVersion < 3 || eBandInterp == GCI_AlphaBand){
@@ -363,7 +367,7 @@ CPLErr ECWRasterBand::SetDefaultHistogram( double dfMin, double dfMax,
     //determine if there are statistics in PAM file. 
     double dummy;
     int dummy_i;
-    int *dummy_histogram;
+    GUIntBig *dummy_histogram;
     bool hasPAMDefaultHistogram = GDALPamRasterBand::GetDefaultHistogram(&dummy, &dummy, &dummy_i, &dummy_histogram, FALSE, NULL, NULL) == CE_None;
     if (hasPAMDefaultHistogram){
         VSIFree(dummy_histogram);
@@ -2307,7 +2311,16 @@ CNCSJP2FileView *ECWDataset::OpenFileView( const char *pszDatasetName,
     bUsingCustomStream = FALSE;
     poFileView = new CNCSFile();
     //we always open in read only mode. This should be improved in the future.
-    oErr = poFileView->Open( (char *) pszDatasetName, bProgressive, false );
+    try
+    {
+        oErr = poFileView->Open( (char *) pszDatasetName, bProgressive, false );
+    }
+    catch(...)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Unexpected exception occured in ECW SDK");
+        delete poFileView;
+        return NULL;
+    }
     eErr = oErr.GetErrorNumber();
 
 /* -------------------------------------------------------------------- */
@@ -2717,7 +2730,25 @@ GDALDataset *ECWDataset::Open( GDALOpenInfo * poOpenInfo, int bIsJPEG2000 )
 /* -------------------------------------------------------------------- */
     poDS->SetDescription( osFilename );
     poDS->TryLoadXML();
-    
+
+/* -------------------------------------------------------------------- */
+/*      Vector layers                                                   */
+/* -------------------------------------------------------------------- */
+    if( bIsJPEG2000 && poOpenInfo->nOpenFlags & GDAL_OF_VECTOR )
+    {
+        poDS->LoadVectorLayers(
+            CSLFetchBoolean(poOpenInfo->papszOpenOptions, "OPEN_REMOTE_GML", FALSE));
+
+        // If file opened in vector-only mode and there's no vector,
+        // return
+        if( (poOpenInfo->nOpenFlags & GDAL_OF_RASTER) == 0 &&
+            poDS->GetLayerCount() == 0 )
+        {
+            delete poDS;
+            return NULL;
+        }
+    }
+
     return( poDS );
 }
 
@@ -3409,6 +3440,7 @@ void GDALRegister_JP2ECW()
         
         poDriver->SetDescription( "JP2ECW" );
         poDriver->SetMetadataItem( GDAL_DCAP_RASTER, "YES" );
+        poDriver->SetMetadataItem( GDAL_DCAP_VECTOR, "YES" );
 
         CPLString osLongName = "ERDAS JPEG2000 (SDK ";
 
@@ -3431,6 +3463,7 @@ void GDALRegister_JP2ECW()
         poDriver->SetMetadataItem( GDAL_DMD_OPENOPTIONLIST, 
 "<OpenOptionList>"
 "   <Option name='1BIT_ALPHA_PROMOTION' type='boolean' description='Whether a 1-bit alpha channel should be promoted to 8-bit' default='YES'/>"
+"   <Option name='OPEN_REMOTE_GML' type='boolean' description='Whether to load remote vector layers referenced by a link in a GMLJP2 v2 box' default='NO'/>"
 "</OpenOptionList>" );
 
 #ifdef HAVE_COMPRESS
@@ -3457,6 +3490,7 @@ void GDALRegister_JP2ECW()
 
 "   <Option name='GeoJP2' type='boolean' description='defaults to ON'/>"
 "   <Option name='GMLJP2' type='boolean' description='defaults to ON'/>"
+"   <Option name='GMLJP2V2_DEF' type='string' description='Definition file to describe how a GMLJP2 v2 box should be generated. If set to YES, a minimal instance will be created'/>"
 "   <Option name='PROFILE' type='string-select'>"
 "       <Value>BASELINE_0</Value>"
 "       <Value>BASELINE_1</Value>"
@@ -3480,6 +3514,8 @@ void GDALRegister_JP2ECW()
 "   <Option name='INCLUDE_EPH' type='boolean'/>"
 "   <Option name='DECOMPRESS_LAYERS' type='int'/>"
 "   <Option name='DECOMPRESS_RECONSTRUCTION_PARAMETER' type='float'/>"
+"   <Option name='WRITE_METADATA' type='boolean' description='Whether metadata should be written, in a dedicated JP2 XML box' default='NO'/>"
+"   <Option name='MAIN_MD_DOMAIN_ONLY' type='boolean' description='(Only if WRITE_METADATA=YES) Whether only metadata from the main domain should be written' default='NO'/>"
 "</CreationOptionList>" );
 #endif
 

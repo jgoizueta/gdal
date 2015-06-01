@@ -257,6 +257,9 @@ class OGRLayer;
 class OGRGeometry;
 class OGRSpatialReference;
 class OGRStyleTable;
+class swq_select;
+class swq_select_parse_options;
+typedef struct GDALSQLParseInfo GDALSQLParseInfo;
 
 #ifdef DETECT_OLD_IRASTERIO
 typedef void signature_changed;
@@ -300,7 +303,10 @@ class CPL_DLL GDALDataset : public GDALMajorObject
 
     int         nRefCount;
     int         bShared;
-    int         bIsInternal;
+    GByte       bIsInternal;
+    GByte       bSuppressOnClose;
+    GByte       bReserved1;
+    GByte       bReserved2;
 
                 GDALDataset(void);
 
@@ -408,6 +414,8 @@ class CPL_DLL GDALDataset : public GDALMajorObject
     int           GetShared();
     void          MarkAsShared();
     
+    void          MarkSuppressOnClose() { bSuppressOnClose = TRUE; }
+    
     char        **GetOpenOptions() { return papszOpenOptions; }
 
     static GDALDataset **GetOpenDatasets( int *pnDatasetCount );
@@ -420,9 +428,10 @@ class CPL_DLL GDALDataset : public GDALMajorObject
 private:
     CPLMutex        *m_hMutex;
 
-    OGRLayer*       BuildLayerFromSelectInfo(void* psSelectInfo,
+    OGRLayer*       BuildLayerFromSelectInfo(swq_select* psSelectInfo,
                                              OGRGeometry *poSpatialFilter,
-                                             const char *pszDialect);
+                                             const char *pszDialect,
+                                             swq_select_parse_options* poSelectParseOptions);
 
   public:
 
@@ -455,8 +464,20 @@ private:
     int                 GetSummaryRefCount() const;
     OGRErr              Release();
 
+    virtual OGRErr      StartTransaction(int bForce=FALSE);
+    virtual OGRErr      CommitTransaction();
+    virtual OGRErr      RollbackTransaction();
     
     static int          IsGenericSQLDialect(const char* pszDialect);
+    
+    // Semi-public methods. Only to be used by in-tree drivers.
+    GDALSQLParseInfo*   BuildParseInfo(swq_select* psSelectInfo,
+                                       swq_select_parse_options* poSelectParseOptions);
+    void                DestroyParseInfo(GDALSQLParseInfo* psParseInfo );
+    OGRLayer *          ExecuteSQL( const char *pszStatement,
+                                    OGRGeometry *poSpatialFilter,
+                                    const char *pszDialect,
+                                    swq_select_parse_options* poSelectParseOptions);
 
   protected:
 
@@ -536,7 +557,8 @@ class CPL_DLL GDALRasterBlock
     /// @return source raster band of the raster block.
     GDALRasterBand *GetBand() { return poBand; }
 
-    static int  FlushCacheBlock();
+    static void FlushDirtyBlocks();
+    static int  FlushCacheBlock(int bDirtyBlocksOnly = FALSE);
     static void Verify();
 
     static int  SafeLockBlock( GDALRasterBlock ** );
@@ -718,7 +740,7 @@ class CPL_DLL GDALRasterBand : public GDALMajorObject
     virtual int HasArbitraryOverviews();
     virtual int GetOverviewCount();
     virtual GDALRasterBand *GetOverview(int);
-    virtual GDALRasterBand *GetRasterSampleOverview( int );
+    virtual GDALRasterBand *GetRasterSampleOverview( GUIntBig );
     virtual CPLErr BuildOverviews( const char *, int, int *,
                                    GDALProgressFunc, void * );
 
@@ -727,16 +749,16 @@ class CPL_DLL GDALRasterBand : public GDALMajorObject
                                GDALDataType eDT, char **papszOptions );
 
     virtual CPLErr  GetHistogram( double dfMin, double dfMax,
-                          int nBuckets, int * panHistogram,
+                          int nBuckets, GUIntBig * panHistogram,
                           int bIncludeOutOfRange, int bApproxOK,
                           GDALProgressFunc, void *pProgressData );
 
     virtual CPLErr GetDefaultHistogram( double *pdfMin, double *pdfMax,
-                                        int *pnBuckets, int ** ppanHistogram,
+                                        int *pnBuckets, GUIntBig ** ppanHistogram,
                                         int bForce,
                                         GDALProgressFunc, void *pProgressData);
     virtual CPLErr SetDefaultHistogram( double dfMin, double dfMax,
-                                        int nBuckets, int *panHistogram );
+                                        int nBuckets, GUIntBig *panHistogram );
 
     virtual GDALRasterAttributeTable *GetDefaultRAT();
     virtual CPLErr SetDefaultRAT( const GDALRasterAttributeTable * );
@@ -1201,5 +1223,7 @@ CPL_C_END
 
 void GDALSerializeOpenOptionsToXML( CPLXMLNode* psParentNode, char** papszOpenOptions);
 char** GDALDeserializeOpenOptionsFromXML( CPLXMLNode* psParentNode );
+
+int GDALCanFileAcceptSidecarFile(const char* pszFilename);
 
 #endif /* ndef GDAL_PRIV_H_INCLUDED */

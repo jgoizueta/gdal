@@ -42,6 +42,8 @@
 CPL_CVSID("$Id$");
 
 static int bSkipFailures = FALSE;
+static int bLayerTransaction = -1;
+static int bForceTransaction = FALSE;
 static int nGroupTransactions = 20000;
 static GIntBig nFIDToFetch = OGRNullFID;
 
@@ -112,6 +114,7 @@ public:
     int bUnsetDefault;
     int bUnsetFid;
     int bPreserveFID;
+    int bCopyMD;
 
     TargetLayerInfo*            Setup(OGRLayer * poSrcLayer,
                                       const char *pszNewLayerName);
@@ -121,6 +124,7 @@ class LayerTranslator
 {
 public:
     GDALDataset *poSrcDS;
+    GDALDataset *poODS;
     int bTransform;
     int bWrapDateline;
     const char* pszDateLineOffset;
@@ -856,13 +860,37 @@ void ApplySpatialFilter(OGRLayer* poLayer, OGRGeometry* poSpatialFilter,
 /*                          GetFieldType()                              */
 /************************************************************************/
 
-int GetFieldType(const char* pszArg)
+int GetFieldType(const char* pszArg, int* pnSubFieldType)
 {
+    *pnSubFieldType = OFSTNone;
+    int nLengthBeforeParenthesis = strlen(pszArg);
+    const char* pszOpenParenthesis = strchr(pszArg, '(');
+    if( pszOpenParenthesis )
+        nLengthBeforeParenthesis = pszOpenParenthesis - pszArg;
     for( int iType = 0; iType <= (int) OFTMaxType; iType++ )
-     {
-         if( EQUAL(pszArg,OGRFieldDefn::GetFieldTypeName(
-                       (OGRFieldType)iType)) )
+    {
+         const char* pszFieldTypeName = OGRFieldDefn::GetFieldTypeName(
+                                                       (OGRFieldType)iType);
+         if( EQUALN(pszArg,pszFieldTypeName,nLengthBeforeParenthesis) &&
+             pszFieldTypeName[nLengthBeforeParenthesis] == '\0' )
          {
+             if( pszOpenParenthesis != NULL )
+             {
+                 *pnSubFieldType = -1;
+                 CPLString osArgSubType = pszOpenParenthesis + 1;
+                 if( osArgSubType.size() && osArgSubType[osArgSubType.size()-1] == ')' )
+                     osArgSubType.resize(osArgSubType.size()-1);
+                 for( int iSubType = 0; iSubType <= (int) OFSTMaxSubType; iSubType++ )
+                 {
+                     const char* pszFieldSubTypeName = OGRFieldDefn::GetFieldSubTypeName(
+                                                       (OGRFieldSubType)iSubType);
+                     if( EQUAL( pszFieldSubTypeName, osArgSubType ) )
+                     {
+                         *pnSubFieldType = iSubType;
+                         break;
+                     }
+                 }
+             }
              return iType;
          }
      }
@@ -875,7 +903,8 @@ int GetFieldType(const char* pszArg)
 
 static int IsFieldType(const char* pszArg)
 {
-    return GetFieldType(pszArg) >= 0;
+    int iSubType;
+    return GetFieldType(pszArg, &iSubType) >= 0 && iSubType >= 0;
 }
 
 /************************************************************************/
@@ -953,6 +982,8 @@ int main( int nArgc, char ** papszArgv )
     int          bUnsetDefault = FALSE;
     int          bUnsetFid = FALSE;
     int          bPreserveFID = FALSE;
+    int          bCopyMD = TRUE;
+    char       **papszMetadataOptions = NULL;
 
     int          nGCPCount = 0;
     GDAL_GCP    *pasGCPs = NULL;
@@ -1138,7 +1169,21 @@ int main( int nArgc, char ** papszArgv )
                  EQUAL(papszArgv[iArg],"-gt") )
         {
             CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(1);
-            nGroupTransactions = atoi(papszArgv[++iArg]);
+            ++iArg;
+            if( EQUAL(papszArgv[iArg], "unlimited") )
+                nGroupTransactions = -1;
+            else
+                nGroupTransactions = atoi(papszArgv[iArg]);
+        }
+        else if ( EQUAL(papszArgv[iArg],"-ds_transaction") )
+        {
+            bLayerTransaction = FALSE;
+            bForceTransaction = TRUE;
+        }
+        /* Undocumented. Just a provision. Default behaviour should be OK */
+        else if ( EQUAL(papszArgv[iArg],"-lyr_transaction") )
+        {
+            bLayerTransaction = TRUE;
         }
         else if( EQUAL(papszArgv[iArg],"-s_srs") )
         {
@@ -1228,31 +1273,9 @@ int main( int nArgc, char ** papszArgv )
                 }
                 else
                 {
-                    Usage(CPLSPrintf("Unhandled type for fieldtypeasstring option : %s",
+                    Usage(CPLSPrintf("Unhandled type for fieldTypeToString option : %s",
                             *iter));
                 }
-                iter ++;
-            }
-        }
-        else if( EQUAL(papszArgv[iArg],"-mapFieldType") )
-        {
-            CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(1);
-            papszMapFieldType =
-                    CSLTokenizeStringComplex(papszArgv[++iArg], " ,", 
-                                             FALSE, FALSE );
-            char** iter = papszMapFieldType;
-            while(*iter)
-            {
-                char* pszKey = NULL;
-                const char* pszValue = CPLParseNameValue(*iter, &pszKey);
-                if( pszKey && pszValue)
-                {
-                    if( !((IsFieldType(pszKey) || EQUAL(pszKey, "All")) && IsFieldType(pszValue)) )
-                    {
-                        Usage("Invalid value for -mapFieldType");
-                    }
-                }
-                CPLFree(pszKey);
                 iter ++;
             }
         }
@@ -1498,6 +1521,16 @@ int main( int nArgc, char ** papszArgv )
         {
             bUnsetFid = TRUE;
         }
+        else if( EQUAL(papszArgv[iArg],"-nomd") )
+        {
+            bCopyMD = FALSE;
+        }
+        else if( EQUAL(papszArgv[iArg],"-mo") )
+        {
+            CHECK_HAS_ENOUGH_ADDITIONAL_ARGS(1);
+            papszMetadataOptions = CSLAddString( papszMetadataOptions,
+                                                 papszArgv[++iArg] );
+        }
         else if( papszArgv[iArg][0] == '-' )
         {
             Usage(CPLSPrintf("Unknown option name '%s'", papszArgv[iArg]));
@@ -1722,6 +1755,11 @@ int main( int nArgc, char ** papszArgv )
                     pszFormat );
             exit( 1 );
         }
+        
+        if( papszDestOpenOptions != NULL )
+        {
+            fprintf(stderr, "-doo ignored when creating the output datasource.\n");
+        }
 
 /* -------------------------------------------------------------------- */
 /*      Special case to improve user experience when translating        */
@@ -1760,7 +1798,33 @@ int main( int nArgc, char ** papszArgv )
                     pszFormat, pszDestDataSource );
             exit( 1 );
         }
+        
+        if( bCopyMD )
+        {
+            char** papszDomains = poDS->GetMetadataDomainList();
+            for(char** papszIter = papszDomains; papszIter && *papszIter; ++papszIter )
+            {
+                char** papszMD = poDS->GetMetadata(*papszIter);
+                if( papszMD )
+                    poODS->SetMetadata(papszMD, *papszIter);
+            }
+            CSLDestroy(papszDomains);
+        }
+        for(char** papszIter = papszMetadataOptions; papszIter && *papszIter; ++papszIter )
+        {
+            char    *pszKey = NULL;
+            const char *pszValue;
+            pszValue = CPLParseNameValue( *papszIter, &pszKey );
+            if( pszKey )
+            {
+                poODS->SetMetadataItem(pszKey,pszValue);
+                CPLFree( pszKey );
+            }
+        }
     }
+
+    if( bLayerTransaction < 0 )
+        bLayerTransaction = !poODS->TestCapability(ODsCTransactions);
 
 /* -------------------------------------------------------------------- */
 /*      Parse the output SRS definition if possible.                    */
@@ -1847,9 +1911,11 @@ int main( int nArgc, char ** papszArgv )
     oSetup.bUnsetDefault = bUnsetDefault;
     oSetup.bUnsetFid = bUnsetFid;
     oSetup.bPreserveFID = bPreserveFID;
+    oSetup.bCopyMD = bCopyMD;
 
     LayerTranslator oTranslator;
     oTranslator.poSrcDS = poDS;
+    oTranslator.poODS = poODS;
     oTranslator.bTransform = bTransform;
     oTranslator.bWrapDateline = bWrapDateline;
     oTranslator.pszDateLineOffset = pszDateLineOffset;
@@ -1867,6 +1933,11 @@ int main( int nArgc, char ** papszArgv )
     oTranslator.bExplodeCollectionsIn = bExplodeCollections;
     oTranslator.nSrcFileSize = nSrcFileSize;
 
+    if( nGroupTransactions )
+    {
+        if( !bLayerTransaction )
+            poODS->StartTransaction(bForceTransaction);
+    }
 
 /* -------------------------------------------------------------------- */
 /*      Special case for -sql clause.  No source layers required.       */
@@ -2362,7 +2433,18 @@ int main( int nArgc, char ** papszArgv )
 /* -------------------------------------------------------------------- */
 
     poODS->SetStyleTable( poDS->GetStyleTable () );
-    
+
+    if( nGroupTransactions )
+    {
+        if( !bLayerTransaction )
+        {
+            if( nRetCode != 0 && !bSkipFailures )
+                poODS->RollbackTransaction();
+            else
+                poODS->CommitTransaction();
+        }
+    }
+
 /* -------------------------------------------------------------------- */
 /*      Close down.                                                     */
 /* -------------------------------------------------------------------- */
@@ -2394,6 +2476,7 @@ int main( int nArgc, char ** papszArgv )
     CSLDestroy( papszOpenOptions );
     CSLDestroy( papszDestOpenOptions );
     CSLDestroy( papszFieldTypesToString );
+    CSLDestroy( papszMetadataOptions );
     CPLFree( pszNewLayerName );
 
     OGRCleanupAll();
@@ -2433,7 +2516,7 @@ static void Usage(const char* pszAdditionalMsg, int bShort)
             "               [-dim 2|3|layer_dim] [layer [layer ...]]\n"
             "\n"
             "Advanced options :\n"
-            "               [-gt n]\n"
+            "               [-gt n] [-ds_transaction]\n"
             "               [[-oo NAME=VALUE] ...] [[-doo NAME=VALUE] ...]\n"
             "               [-clipsrc [xmin ymin xmax ymax]|WKT|datasource|spat_extent]\n"
             "               [-clipsrcsql sql_statement] [-clipsrclayer layer]\n"
@@ -2450,7 +2533,8 @@ static void Usage(const char* pszAdditionalMsg, int bShort)
             "               [-fieldmap identity | index1[,index2]*]\n"
             "               [-splitlistfields] [-maxsubfields val]\n"
             "               [-explodecollections] [-zfield field_name]\n"
-            "               [-gcp pixel line easting northing [elevation]]* [-order n | -tps]\n");
+            "               [-gcp pixel line easting northing [elevation]]* [-order n | -tps]\n"
+            "               [-nomd] [-mo \"META-TAG=VALUE\"]*\n");
 
     if (bShort)
     {
@@ -2486,7 +2570,7 @@ static void Usage(const char* pszAdditionalMsg, int bShort)
             " -sql statement: Execute given SQL statement and save result.\n"
             " -dialect value: select a dialect, usually OGRSQL to avoid native sql.\n"
             " -skipfailures: skip features or layers that fail to convert\n"
-            " -gt n: group n features per transaction (default 20000)\n"
+            " -gt n: group n features per transaction (default 20000). n can be set to unlimited\n"
             " -spat xmin ymin xmax ymax: spatial query extents\n"
             " -simplify tolerance: distance tolerance for simplification.\n"
             " -segmentize max_dist: maximum distance between 2 nodes.\n"
@@ -2681,27 +2765,47 @@ void DoFieldTypeConversion(GDALDataset* poDstDS, OGRFieldDefn& oFieldDefn,
                            int bForceNullable,
                            int bUnsetDefault)
 {
-    if (papszFieldTypesToString != NULL &&
-        (CSLFindString(papszFieldTypesToString, "All") != -1 ||
-            CSLFindString(papszFieldTypesToString,
-                        OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType())) != -1))
+    if (papszFieldTypesToString != NULL )
     {
-        oFieldDefn.SetSubType(OFSTNone);
-        oFieldDefn.SetType(OFTString);
+        CPLString osLookupString;
+        osLookupString.Printf("%s(%s)",
+                        OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType()),
+                        OGRFieldDefn::GetFieldSubTypeName(oFieldDefn.GetSubType()));
+                                  
+        int iIdx = CSLFindString(papszFieldTypesToString, osLookupString);
+        if( iIdx < 0 )
+            iIdx = CSLFindString(papszFieldTypesToString,
+                                        OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType()));
+        if( iIdx < 0 )
+            iIdx = CSLFindString(papszFieldTypesToString, "All");
+        if( iIdx >= 0 )
+        {
+            oFieldDefn.SetSubType(OFSTNone);
+            oFieldDefn.SetType(OFTString);
+        }
     }
     else if (papszMapFieldType != NULL)
     {
-        const char* pszType = CSLFetchNameValue(papszMapFieldType,
-            OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType()));
+        CPLString osLookupString;
+        osLookupString.Printf("%s(%s)",
+                        OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType()),
+                        OGRFieldDefn::GetFieldSubTypeName(oFieldDefn.GetSubType()));
+                                  
+        const char* pszType = CSLFetchNameValue(papszMapFieldType, osLookupString);
+        if( pszType == NULL )
+            pszType = CSLFetchNameValue(papszMapFieldType,
+                                        OGRFieldDefn::GetFieldTypeName(oFieldDefn.GetType()));
         if( pszType == NULL )
             pszType = CSLFetchNameValue(papszMapFieldType, "All");
         if( pszType != NULL )
         {
-            int iType = GetFieldType(pszType);
-            if( iType >= 0 )
+            int iSubType;
+            int iType = GetFieldType(pszType, &iSubType);
+            if( iType >= 0 && iSubType >= 0 )
             {
                 oFieldDefn.SetSubType(OFSTNone);
                 oFieldDefn.SetType((OGRFieldType)iType);
+                oFieldDefn.SetSubType((OGRFieldSubType)iSubType);
                 if( iType == OFTInteger )
                     oFieldDefn.SetWidth(0);
             }
@@ -2992,6 +3096,22 @@ TargetLayerInfo* SetupTargetLayer::Setup(OGRLayer* poSrcLayer,
 
         if( poDstLayer == NULL )
             return NULL;
+        
+        if( bCopyMD )
+        {
+            char** papszDomains = poSrcLayer->GetMetadataDomainList();
+            for(char** papszIter = papszDomains; papszIter && *papszIter; ++papszIter )
+            {
+                if( !EQUAL(*papszIter, "IMAGE_STRUCTURE") &&
+                    !EQUAL(*papszIter, "SUBDATASETS") )
+                {
+                    char** papszMD = poSrcLayer->GetMetadata(*papszIter);
+                    if( papszMD )
+                        poDstLayer->SetMetadata(papszMD, *papszIter);
+                }
+            }
+            CSLDestroy(papszDomains);
+        }
 
         if( anRequestedGeomFields.size() == 0 &&
             nSrcGeomFieldCount > 1 &&
@@ -3166,7 +3286,7 @@ TargetLayerInfo* SetupTargetLayer::Setup(OGRLayer* poSrcLayer,
             {
                 /* We must not ignore fields used in the -where expression (#4015) */
                 OGRFeatureQuery oFeatureQuery;
-                if ( oFeatureQuery.Compile( poSrcLayer->GetLayerDefn(), pszWHERE ) == OGRERR_NONE )
+                if ( oFeatureQuery.Compile( poSrcLayer->GetLayerDefn(), pszWHERE, FALSE, NULL ) == OGRERR_NONE )
                 {
                     papszWHEREUsedFields = oFeatureQuery.GetUsedFields();
                 }
@@ -3176,7 +3296,7 @@ TargetLayerInfo* SetupTargetLayer::Setup(OGRLayer* poSrcLayer,
                 }
             }
 
-            for(iSrcField=0;iSrcField<poSrcFDefn->GetFieldCount();iSrcField++)
+            for(iSrcField=0;bUseIgnoredFields && iSrcField<poSrcFDefn->GetFieldCount();iSrcField++)
             {
                 const char* pszFieldName =
                     poSrcFDefn->GetFieldDefn(iSrcField)->GetNameRef();
@@ -3595,20 +3715,17 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
     GIntBig      nFeaturesWritten = 0;
 
     if( nGroupTransactions )
-        poDstLayer->StartTransaction();
+    {
+        if( bLayerTransaction )
+            poDstLayer->StartTransaction();
+    }
 
     while( TRUE )
     {
         OGRFeature      *poDstFeature = NULL;
 
         if( nFIDToFetch != OGRNullFID )
-        {
-            // Only fetch feature on first pass.
-            if( nFeaturesInTransaction == 0 )
-                poFeature = poSrcLayer->GetFeature(nFIDToFetch);
-            else
-                poFeature = NULL;
-        }
+            poFeature = poSrcLayer->GetFeature(nFIDToFetch);
         else
             poFeature = poSrcLayer->GetNextFeature();
 
@@ -3638,21 +3755,13 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
                                         psInfo->iRequestedSrcGeomField);
             else
                 poSrcGeometry = poFeature->GetGeometryRef();
-            if (poSrcGeometry)
+            if (poSrcGeometry &&
+                OGR_GT_IsSubClassOf(poSrcGeometry->getGeometryType(), wkbGeometryCollection) )
             {
-                switch (wkbFlatten(poSrcGeometry->getGeometryType()))
-                {
-                    case wkbMultiPoint:
-                    case wkbMultiLineString:
-                    case wkbMultiPolygon:
-                    case wkbGeometryCollection:
-                        nParts = ((OGRGeometryCollection*)poSrcGeometry)->getNumGeometries();
-                        nIters = nParts;
-                        if (nIters == 0)
-                            nIters = 1;
-                    default:
-                        break;
-                }
+                nParts = ((OGRGeometryCollection*)poSrcGeometry)->getNumGeometries();
+                nIters = nParts;
+                if (nIters == 0)
+                    nIters = 1;
             }
         }
 
@@ -3660,8 +3769,16 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
         {
             if( ++nFeaturesInTransaction == nGroupTransactions )
             {
-                poDstLayer->CommitTransaction();
-                poDstLayer->StartTransaction();
+                if( bLayerTransaction )
+                {
+                    poDstLayer->CommitTransaction();
+                    poDstLayer->StartTransaction();
+                }
+                else
+                {
+                    poODS->CommitTransaction();
+                    poODS->StartTransaction(bForceTransaction);
+                }
                 nFeaturesInTransaction = 0;
             }
 
@@ -3686,7 +3803,12 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
             if( poDstFeature->SetFrom( poFeature, panMap, TRUE ) != OGRERR_NONE )
             {
                 if( nGroupTransactions )
-                    poDstLayer->CommitTransaction();
+                {
+                    if( bLayerTransaction )
+                    {
+                        poDstLayer->CommitTransaction();
+                    }
+                }
 
                 CPLError( CE_Failure, CPLE_AppDefined,
                         "Unable to translate feature " CPL_FRMT_GIB " from layer %s.\n",
@@ -3782,7 +3904,12 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
                     if( poReprojectedGeom == NULL )
                     {
                         if( nGroupTransactions )
-                            poDstLayer->CommitTransaction();
+                        {
+                            if( bLayerTransaction )
+                            {
+                                poDstLayer->CommitTransaction();
+                            }
+                        }
 
                         fprintf( stderr, "Failed to reproject feature %d (geometry probably out of source or destination SRS).\n",
                                 (int) poFeature->GetFID() );
@@ -3804,6 +3931,9 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
 
                 if (poClipDst)
                 {
+                    if( poDstGeometry == NULL )
+                        goto end_loop;
+
                     OGRGeometry* poClipped = poDstGeometry->Intersection(poClipDst);
                     if (poClipped == NULL || poClipped->IsEmpty())
                     {
@@ -3851,7 +3981,10 @@ int LayerTranslator::Translate( TargetLayerInfo* psInfo,
             else if( !bSkipFailures )
             {
                 if( nGroupTransactions )
-                    poDstLayer->RollbackTransaction();
+                {
+                    if( bLayerTransaction )
+                        poDstLayer->RollbackTransaction();
+                }
 
                 CPLError( CE_Failure, CPLE_AppDefined,
                         "Unable to write feature " CPL_FRMT_GIB " from layer %s.\n",
@@ -3904,10 +4037,18 @@ end_loop:
 
         if (pnReadFeatureCount)
             *pnReadFeatureCount = nCount;
+        
+        if( nFIDToFetch != OGRNullFID )
+            break;
     }
 
     if( nGroupTransactions )
-        poDstLayer->CommitTransaction();
+    {
+        if( bLayerTransaction )
+        {
+            poDstLayer->CommitTransaction();
+        }
+    }
 
     CPLDebug("OGR2OGR", CPL_FRMT_GIB " features written in layer '%s'",
              nFeaturesWritten, poDstLayer->GetName());

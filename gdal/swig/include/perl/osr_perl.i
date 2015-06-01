@@ -7,50 +7,52 @@
 %perlcode %{
 
 package Geo::OSR;
+use strict;
+use warnings;
 
 use vars qw /%PROJECTIONS %PARAMETERS %LINEAR_UNITS %ANGULAR_UNITS %DATUMS/;
 
 for (keys %Geo::OSR::) {
     if (/^SRS_PT_(\w+)/) {
-        $p = eval '$Geo::OSR::'.$_;
+        my $p = eval '$Geo::OSR::'.$_;
         $PROJECTIONS{$p} = 1;
     }
     elsif (/^SRS_PP_(\w+)/) {
-        $p = eval '$Geo::OSR::'.$_;
+        my $p = eval '$Geo::OSR::'.$_;
         $PARAMETERS{$p} = 1;
     }
     elsif (/^SRS_UL_(\w+)/) {
-        $p = eval '$Geo::OSR::'.$_;
+        my $p = eval '$Geo::OSR::'.$_;
         $LINEAR_UNITS{$p} = 1;
     }
     elsif (/^SRS_UA_(\w+)/) {
-        $p = eval '$Geo::OSR::'.$_;
+        my $p = eval '$Geo::OSR::'.$_;
         $ANGULAR_UNITS{$p} = 1;
     }
     elsif (/^SRS_DN_(\w+)/) {
-        $p = eval '$Geo::OSR::'.$_;
+        my $p = eval '$Geo::OSR::'.$_;
         $DATUMS{$p} = 1;
     }
 }
 
 sub Projections {
-    return sort keys %PROJECTIONS;
+    return keys %PROJECTIONS;
 }
 
 sub Parameters {
-    return sort keys %PARAMETERS;
+    return keys %PARAMETERS;
 }
 
 sub LinearUnits {
-    return sort keys %LINEAR_UNITS;
+    return keys %LINEAR_UNITS;
 }
 
 sub AngularUnits {
-    return sort keys %ANGULAR_UNITS;
+    return keys %ANGULAR_UNITS;
 }
 
 sub Datums {
-    return sort keys %DATUMS;
+    return keys %DATUMS;
 }
 
 sub RELEASE_PARENTS {
@@ -59,9 +61,14 @@ sub RELEASE_PARENTS {
 
 package Geo::OSR::SpatialReference;
 use strict;
+use warnings;
 use Carp;
+%}
 
-sub create {
+%feature("shadow") OSRSpatialReferenceShadow( char const * wkt = "" )
+%{
+use Carp;
+sub new {
     my $pkg = shift;
     my %param = @_;
     my $self = Geo::OSRc::new_SpatialReference();
@@ -88,19 +95,26 @@ sub create {
     } elsif ($param{URL}) {
         ImportFromUrl($self, $param{URL});
     } elsif ($param{ERMapper}) {
-        ImportFromERM($self, @{$param{ERMapper}} );
+        ImportFromERM($self, @{$param{ERMapper}});
     } elsif ($param{ERM}) {
-        ImportFromERM($self, @{$param{ERM}} );
+        ImportFromERM($self, @{$param{ERM}});
     } elsif ($param{MICoordSys}) {
-        ImportFromMICoordSys($self, $param{MICoordSys} );
+        ImportFromMICoordSys($self, $param{MICoordSys});
     } elsif ($param{MapInfoCS}) {
-        ImportFromMICoordSys($self, $param{MapInfoCS} );
+        ImportFromMICoordSys($self, $param{MapInfoCS});
+    } elsif ($param{WGS}) {
+        eval {
+            SetWellKnownGeogCS($self, 'WGS'.$param{WGS});
+        };
+        confess "$@" if $@;
     } else {
-        croak "unrecognized import format '@_' for Geo::OSR::SpatialReference";
+        confess "Unrecognized/missing parameters: @_.";
     }
     bless $self, $pkg if defined $self;
 }
+%}
 
+%perlcode %{
 sub Export {
     my $self = shift;
     my $format;
@@ -126,7 +140,7 @@ sub Export {
     } elsif ($format eq 'MICoordSys' or $format eq 'MapInfoCS') {
         return ExportToMICoordSys();
     } else {
-        croak "unrecognized export format '$format/@_' for Geo::OSR::SpatialReference.";
+        confess "Unrecognized export format.";
     }
 }
 *AsText = *ExportToWkt;
@@ -181,7 +195,7 @@ sub Set {
             SetProjCS($self, $params{CoordinateSystem});
         }
     } elsif ($params{Projection}) {
-        croak "Unknown projection '$params{Projection}'." unless exists $Geo::OSR::PROJECTIONS{$params{Projection}};
+        confess "Unknown projection." unless exists $Geo::OSR::PROJECTIONS{$params{Projection}};
         my @parameters = ();
         @parameters = @{$params{Parameters}} if ref($params{Parameters});
         if ($params{Projection} eq 'Albers_Conic_Equal_Area') {
@@ -280,7 +294,7 @@ sub Set {
             SetProjection($self, $params{Projection});
         }
     } else {
-        croak "Not enough information for a spatial reference object.";
+        confess "Not enough information for a spatial reference object.";
     }
 }
 
@@ -302,6 +316,7 @@ sub GetUTMZone {
 
 package Geo::OSR::CoordinateTransformation;
 use strict;
+use warnings;
 
 sub TransformPoints {
     my($self, $points) = @_;

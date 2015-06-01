@@ -400,7 +400,7 @@ class OGROSMDataSource : public OGRDataSource
                                        unsigned int* pnTags, OSMTag* pasTags,
                                        OSMInfo* psInfo );
 
-    int                 ParseConf();
+    int                 ParseConf(char** papszOpenOptions);
     int                 CreateTempDB();
     int                 SetDBOptions();
     int                 SetCacheSize();
@@ -419,8 +419,8 @@ class OGROSMDataSource : public OGRDataSource
                                  LonLat* pasLonLatPairs, int nPairs,
                                  OSMInfo* psInfo);
 
-    int                 StartTransaction();
-    int                 CommitTransaction();
+    int                 StartTransactionCacheDB();
+    int                 CommitTransactionCacheDB();
 
     int                 FindNode(GIntBig nID);
     void                ProcessWaysBatch();
@@ -465,7 +465,7 @@ class OGROSMDataSource : public OGRDataSource
     virtual void        ReleaseResultSet( OGRLayer * poLayer );
 
 
-    int                 Open ( const char* pszFilename );
+    int                 Open ( const char* pszFilename, char** papszOpenOptions );
 
     int                 ResetReading();
     int                 ParseNextChunk(int nIdxLayer);
