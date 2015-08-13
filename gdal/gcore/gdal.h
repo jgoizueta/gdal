@@ -103,7 +103,7 @@ typedef enum {
     /*! Write data */  GF_Write = 1
 } GDALRWFlag;
 
-/* NOTE: values are selected to be consistant with GDALResampleAlg of alg/gdalwarper.h */ 
+/* NOTE: values are selected to be consistent with GDALResampleAlg of alg/gdalwarper.h */ 
 /** RasterIO() resampling method.
   * @since GDAL 2.0
   */
@@ -312,6 +312,11 @@ typedef GIntBig GSpacing;
  */
 #define GDAL_DCAP_VECTOR     "DCAP_VECTOR"
 
+/** Capability set by a driver having vector capability.
+ * @since GDAL 2.1
+ */
+#define GDAL_DCAP_GNM         "DCAP_GNM"
+
 /** Capability set by a driver that can create fields with NOT NULL constraint. 
  * @since GDAL 2.0
  */
@@ -375,6 +380,14 @@ GDALDatasetH CPL_DLL CPL_STDCALL GDALOpenShared( const char *, GDALAccess ) CPL_
  * @since GDAL 2.0
  */
 #define     GDAL_OF_VECTOR          0x04
+
+
+/** Allow gnm drivers to be used.
+ * Used by GDALOpenEx().
+ * @since GDAL 2.1
+ */
+#define     GDAL_OF_GNM             0x08
+
 /* Some space for GDAL 3.0 new types ;-) */
 /*#define     GDAL_OF_OTHER_KIND1   0x08 */
 /*#define     GDAL_OF_OTHER_KIND2   0x10 */
@@ -401,6 +414,41 @@ GDALDatasetH CPL_DLL CPL_STDCALL GDALOpenShared( const char *, GDALAccess ) CPL_
  * @since GDAL 2.0
  */
 #define     GDAL_OF_INTERNAL        0x80
+
+/** Let GDAL decide if a array-based or hashset-based storage strategy for
+ * cached blocks must be used.
+ *
+ * GDAL_OF_DEFAULT_BLOCK_ACCESS, GDAL_OF_ARRAY_BLOCK_ACCESS and
+ * GDAL_OF_HASHSET_BLOCK_ACCESS are mutually exclusive. 
+ *
+ * Used by GDALOpenEx().
+ * @since GDAL 2.1
+ */
+#define     GDAL_OF_DEFAULT_BLOCK_ACCESS  0
+
+/** Use a array-based storage strategy for cached blocks.
+ *
+ * GDAL_OF_DEFAULT_BLOCK_ACCESS, GDAL_OF_ARRAY_BLOCK_ACCESS and
+ * GDAL_OF_HASHSET_BLOCK_ACCESS are mutually exclusive. 
+ *
+ * Used by GDALOpenEx().
+ * @since GDAL 2.1
+ */
+#define     GDAL_OF_ARRAY_BLOCK_ACCESS    0x100
+
+/** Use a hashset-based storage strategy for cached blocks.
+ *
+ * GDAL_OF_DEFAULT_BLOCK_ACCESS, GDAL_OF_ARRAY_BLOCK_ACCESS and
+ * GDAL_OF_HASHSET_BLOCK_ACCESS are mutually exclusive. 
+ *
+ * Used by GDALOpenEx().
+ * @since GDAL 2.1
+ */
+#define     GDAL_OF_HASHSET_BLOCK_ACCESS  0x200
+
+#define     GDAL_OF_RESERVED_1            0x300
+#define     GDAL_OF_BLOCK_ACCESS_MASK     0x300
+
 
 GDALDatasetH CPL_DLL CPL_STDCALL GDALOpenEx( const char* pszFilename,
                                              unsigned int nOpenFlags,
@@ -678,6 +726,7 @@ int CPL_DLL CPL_STDCALL GDALGetOverviewCount( GDALRasterBandH );
 GDALRasterBandH CPL_DLL CPL_STDCALL GDALGetOverview( GDALRasterBandH, int );
 double CPL_DLL CPL_STDCALL GDALGetRasterNoDataValue( GDALRasterBandH, int * );
 CPLErr CPL_DLL CPL_STDCALL GDALSetRasterNoDataValue( GDALRasterBandH, double );
+CPLErr CPL_DLL CPL_STDCALL GDALDeleteRasterNoDataValue( GDALRasterBandH );
 char CPL_DLL ** CPL_STDCALL GDALGetRasterCategoryNames( GDALRasterBandH );
 CPLErr CPL_DLL CPL_STDCALL GDALSetRasterCategoryNames( GDALRasterBandH, char ** );
 double CPL_DLL CPL_STDCALL GDALGetRasterMinimum( GDALRasterBandH, int *pbSuccess );
@@ -1077,6 +1126,15 @@ CPLVirtualMem CPL_DLL* GDALRasterBandGetTiledVirtualMem( GDALRasterBandH hBand,
                                                          size_t nCacheSize,
                                                          int bSingleThreadUsage,
                                                          char **papszOptions );
+
+/* ==================================================================== */
+/*      VRTPansharpenedDataset class.                                   */
+/* ==================================================================== */
+
+GDALDatasetH CPL_DLL GDALCreatePansharpenedVRT( const char* pszXML,
+                                            GDALRasterBandH hPanchroBand,
+                                            int nInputSpectralBands,
+                                            GDALRasterBandH* pahInputSpectralBands );
 
 /* =================================================================== */
 /*      Misc API                                                        */

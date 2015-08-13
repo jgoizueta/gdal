@@ -169,6 +169,18 @@ GIntBig GDALGetResponsiblePIDForCurrentThread()
 GDALDataset::GDALDataset()
 
 {
+    Init( CSLTestBoolean( 
+        CPLGetConfigOption( "GDAL_FORCE_CACHING", "NO") ) );
+}
+
+GDALDataset::GDALDataset(int bForceCachedIOIn)
+
+{
+    Init(bForceCachedIOIn);
+}
+
+void GDALDataset::Init(int bForceCachedIOIn)
+{
     poDriver = NULL;
     eAccess = GA_ReadOnly;
     nRasterXSize = 512;
@@ -176,23 +188,20 @@ GDALDataset::GDALDataset()
     nBands = 0;
     papoBands = NULL;
     nRefCount = 1;
+    nOpenFlags = 0;
     bShared = FALSE;
     bIsInternal = TRUE;
     bSuppressOnClose = FALSE;
-    bReserved1 = FALSE;
-    bReserved2 = FALSE;
     papszOpenOptions = NULL;
 
 /* -------------------------------------------------------------------- */
 /*      Set forced caching flag.                                        */
 /* -------------------------------------------------------------------- */
-    bForceCachedIO =  CSLTestBoolean( 
-        CPLGetConfigOption( "GDAL_FORCE_CACHING", "NO") );
+    bForceCachedIO = (GByte)bForceCachedIOIn;
     
     m_poStyleTable = NULL;
     m_hMutex = NULL;
 }
-
 
 /************************************************************************/
 /*                            ~GDALDataset()                            */
@@ -1477,9 +1486,10 @@ CPLErr GDALDataset::IBuildOverviews( const char *pszResampling,
 /************************************************************************/
 /*                             IRasterIO()                              */
 /*                                                                      */
-/*      The default implementation of IRasterIO() is to pass the        */
-/*      request off to each band objects rasterio methods with          */
-/*      appropriate arguments.                                          */
+/*      The default implementation of IRasterIO() is, in the general    */
+/*      case to pass the request off to each band objects rasterio      */
+/*      methods with appropriate arguments. In some cases, it might     */
+/*      choose instead the BlockBasedRasterIO() implementation.         */
 /************************************************************************/
 
 CPLErr GDALDataset::IRasterIO( GDALRWFlag eRWFlag,
@@ -1492,8 +1502,7 @@ CPLErr GDALDataset::IRasterIO( GDALRWFlag eRWFlag,
                                GDALRasterIOExtraArg* psExtraArg )
     
 {
-    int iBandIndex; 
-    CPLErr eErr = CE_None;
+
     const char* pszInterleave = NULL;
 
     CPLAssert( NULL != pData );
@@ -1508,7 +1517,90 @@ CPLErr GDALDataset::IRasterIO( GDALRWFlag eRWFlag,
                                    nPixelSpace, nLineSpace, nBandSpace,
                                    psExtraArg );
     }
+    
+    if( eRWFlag == GF_Read &&
+        (psExtraArg->eResampleAlg == GRIORA_Cubic ||
+         psExtraArg->eResampleAlg == GRIORA_CubicSpline ||
+         psExtraArg->eResampleAlg == GRIORA_Bilinear ||
+         psExtraArg->eResampleAlg == GRIORA_Lanczos) &&
+        !(nXSize == nBufXSize && nYSize == nBufYSize) && nBandCount > 1 )
+    {
+        
+        int bUseDatasetRasterIOResampled = TRUE;
+        GDALDataType eFirstBandDT = GDT_Unknown;
+        for(int i=0;i<nBandCount;i++)
+        {
+            GDALRasterBand* poBand = GetRasterBand(panBandMap[i]);
+            if( (nBufXSize < nXSize || nBufYSize < nYSize) &&
+                poBand->GetOverviewCount() )
+            {
+                // Could be improved to select the appropriate overview
+                bUseDatasetRasterIOResampled = FALSE;
+                break;
+            }
+            if( poBand->GetColorTable() != NULL )
+            {
+                bUseDatasetRasterIOResampled = FALSE;
+                break;
+            }
+            GDALDataType eDT = poBand->GetRasterDataType();
+            if( GDALDataTypeIsComplex( eDT ) )
+            {
+                bUseDatasetRasterIOResampled = FALSE;
+                break;
+            }
+            if( i == 0 )
+                eFirstBandDT = eDT;
+            else if( eDT != eFirstBandDT )
+            {
+                bUseDatasetRasterIOResampled = FALSE;
+                break;
+            }
+            int nMaskFlags = poBand->GetMaskFlags();
+            if( (nMaskFlags & GMF_PER_DATASET) == 0 && nMaskFlags != GMF_ALL_VALID )
+            {
+                bUseDatasetRasterIOResampled = FALSE;
+                break;
+            }
+        }
+        if( bUseDatasetRasterIOResampled )
+        {
+            return RasterIOResampled( eRWFlag, nXOff, nYOff, nXSize, nYSize, 
+                                   pData, nBufXSize, nBufYSize,
+                                   eBufType, nBandCount, panBandMap,
+                                   nPixelSpace, nLineSpace, nBandSpace,
+                                   psExtraArg );
+        }
 
+    }
+        
+    return BandBasedRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize, 
+                                   pData, nBufXSize, nBufYSize,
+                                   eBufType, nBandCount, panBandMap,
+                                   nPixelSpace, nLineSpace, nBandSpace,
+                                   psExtraArg );
+}
+
+/************************************************************************/
+/*                         BandBasedRasterIO()                          */
+/*                                                                      */
+/*      Pass the request off to each band objects rasterio methods with */
+/*      appropriate arguments.                                          */
+/************************************************************************/
+
+CPLErr GDALDataset::BandBasedRasterIO( GDALRWFlag eRWFlag,
+                               int nXOff, int nYOff, int nXSize, int nYSize,
+                               void * pData, int nBufXSize, int nBufYSize,
+                               GDALDataType eBufType, 
+                               int nBandCount, int *panBandMap,
+                               GSpacing nPixelSpace, GSpacing nLineSpace,
+                               GSpacing nBandSpace,
+                               GDALRasterIOExtraArg* psExtraArg )
+    
+{
+    int iBandIndex; 
+    CPLErr eErr = CE_None;
+    
     GDALProgressFunc  pfnProgressGlobal = psExtraArg->pfnProgress;
     void             *pProgressDataGlobal = psExtraArg->pProgressData;
 
@@ -1785,21 +1877,29 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
         nBandSpace = nLineSpace * nBufYSize;
     }
 
+    int anBandMap[] = { 1, 2, 3, 4 };
     if( panBandMap == NULL )
     {
-        panBandMap = (int *) VSIMalloc2(sizeof(int), nBandCount);
-        if (panBandMap == NULL)
+        if( nBandCount > 4 )
         {
-            ReportError( CE_Failure, CPLE_OutOfMemory,
-                      "Out of memory while allocating band map array" );
-            return CE_Failure;
-        }
-        for( i = 0; i < nBandCount; i++ )
-            panBandMap[i] = i+1;
+            panBandMap = (int *) VSIMalloc2(sizeof(int), nBandCount);
+            if (panBandMap == NULL)
+            {
+                ReportError( CE_Failure, CPLE_OutOfMemory,
+                          "Out of memory while allocating band map array" );
+                return CE_Failure;
+            }
 
-        bNeedToFreeBandMap = TRUE;
+            for( i = 0; i < nBandCount; i++ )
+                panBandMap[i] = i+1;
+
+            bNeedToFreeBandMap = TRUE;
+        }
+        else
+            panBandMap = anBandMap;
     }
 
+    int bCallLeaveReadWrite = EnterReadWrite(eRWFlag);
 
 /* -------------------------------------------------------------------- */
 /*      We are being forced to use cached IO instead of a driver        */
@@ -1827,6 +1927,8 @@ CPLErr GDALDataset::RasterIO( GDALRWFlag eRWFlag,
                        nPixelSpace, nLineSpace, nBandSpace,
                        psExtraArg );
     }
+
+    if( bCallLeaveReadWrite ) LeaveReadWrite();
 
 /* -------------------------------------------------------------------- */
 /*      Cleanup                                                         */
@@ -2554,7 +2656,9 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
             oOpenInfo.papszOpenOptions = papszTmpOpenOptions;
         }
 
-        if( poDriver->pfnIdentify && poDriver->pfnIdentify(&oOpenInfo) > 0 )
+        int bIdentifyRes =
+            ( poDriver->pfnIdentify && poDriver->pfnIdentify(&oOpenInfo) > 0 );
+        if( bIdentifyRes )
         {
             GDALValidateOpenOptions( poDriver, oOpenInfo.papszOpenOptions );
         }
@@ -2562,6 +2666,10 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
         if ( poDriver->pfnOpen != NULL )
         {
             poDS = poDriver->pfnOpen( &oOpenInfo );
+            // If we couldn't determine for sure with Identify() (it returned -1)
+            // but that Open() managed to open the file, post validate options.
+            if( poDS != NULL && poDriver->pfnIdentify && !bIdentifyRes )
+                GDALValidateOpenOptions( poDriver, oOpenInfo.papszOpenOptions );
         }
         else if( poDriver->pfnOpenWithDriverArg != NULL )
         {
@@ -2579,6 +2687,8 @@ GDALDatasetH CPL_STDCALL GDALOpenEx( const char* pszFilename,
 
         if( poDS != NULL )
         {
+            poDS->nOpenFlags = nOpenFlags;
+
             if( strlen(poDS->GetDescription()) == 0 )
                 poDS->SetDescription( pszFilename );
 
@@ -3373,7 +3483,7 @@ OGRLayer *GDALDataset::CreateLayer( const char * pszName,
         !poLayer->TestCapability(OLCCurveGeometries) )
     {
         CPLError( CE_Warning, CPLE_AppDefined,
-                  "Inconsistant driver: Layer geometry type is non-linear, but "
+                  "Inconsistent driver: Layer geometry type is non-linear, but "
                   "TestCapability(OLCCurveGeometries) returns FALSE." );
     }
 #endif
@@ -3525,7 +3635,7 @@ OGRLayerH GDALDatasetCopyLayer( GDALDatasetH hDS,
  @param hSpatialFilter geometry which represents a spatial filter. Can be NULL.
  @param pszDialect allows control of the statement dialect. If set to NULL, the
 OGR SQL engine will be used, except for RDBMS drivers that will use their dedicated SQL engine,
-unless OGRSQL is explicitely passed as the dialect. Starting with OGR 1.10, the SQLITE dialect
+unless OGRSQL is explicitly passed as the dialect. Starting with OGR 1.10, the SQLITE dialect
 can also be used.
 
  @return an OGRLayer containing the results of the query.  Deallocate with
@@ -3786,7 +3896,9 @@ OGRLayer *GDALDataset::ICreateLayer( const char * pszName,
  @param poSrcLayer source layer.
  @param pszNewName the name of the layer to create.
  @param papszOptions a StringList of name=value options.  Options are driver
-                     specific.
+                     specific. There is a common option to set output layer
+                     spatial reference: DST_SRSWKT. The option shoulde be in
+                     WKT format.
 
  @return an handle to the layer, or NULL if an error occurs.
 */
@@ -3809,6 +3921,9 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
         return NULL;
     }
 
+    const char* pszSRSWKT = CSLFetchNameValue(papszOptions, "DST_SRSWKT");
+    OGRSpatialReference oDstSpaRef(pszSRSWKT);
+
     CPLErrorReset();
     if( poSrcDefn->GetGeomFieldCount() > 1 &&
         TestCapability(ODsCCreateGeomFieldAfterCreateLayer) )
@@ -3817,8 +3932,19 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
     }
     else
     {
+        if(NULL == pszSRSWKT)
+        {
         poDstLayer =ICreateLayer( pszNewName, poSrcLayer->GetSpatialRef(),
                                   poSrcDefn->GetGeomType(), papszOptions );
+    }
+        else
+        {
+            // remove DST_WKT from option list to prevent WARNINfrom driver
+            int nSRSPos = CSLFindName(papszOptions, "DST_SRSWKT");
+            papszOptions = CSLRemoveStrings(papszOptions, nSRSPos, 1, NULL);
+            poDstLayer = ICreateLayer( pszNewName, &oDstSpaRef,
+                                  poSrcDefn->GetGeomType(), papszOptions );
+        }
     }
     
     if( poDstLayer == NULL )
@@ -3880,15 +4006,42 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
     }
 
 /* -------------------------------------------------------------------- */
+    OGRCoordinateTransformation *poCT = NULL;
+    OGRSpatialReference *sourceSRS = poSrcLayer->GetSpatialRef();
+    if (sourceSRS != NULL && pszSRSWKT != NULL &&
+            sourceSRS->IsSame(&oDstSpaRef) == FALSE)
+    {
+        poCT = (OGRCoordinateTransformation*)OGRCreateCoordinateTransformation(sourceSRS, &oDstSpaRef);
+        if(NULL == poCT)
+        {
+            CPLError( CE_Failure, CPLE_NotSupported,
+                      "This input/output spatial reference is not supported." );
+            CPLFree(panMap);
+            return NULL;
+        }
+    }
 /*      Create geometry fields.                                         */
 /* -------------------------------------------------------------------- */
-    if( poSrcDefn->GetGeomFieldCount() > 1 &&
+/*      Create geometry fields.                                         */
+/* -------------------------------------------------------------------- */
+    int nSrcGeomFieldCount = poSrcDefn->GetGeomFieldCount();
+    if( nSrcGeomFieldCount > 1 &&
         TestCapability(ODsCCreateGeomFieldAfterCreateLayer) )
     {
-        int nSrcGeomFieldCount = poSrcDefn->GetGeomFieldCount();
+
         for( iField = 0; iField < nSrcGeomFieldCount; iField++ )
         {
+            if(NULL == pszSRSWKT)
+        {
             poDstLayer->CreateGeomField( poSrcDefn->GetGeomFieldDefn(iField) );
+        }
+            else
+            {
+                OGRGeomFieldDefn* pDstGeomFieldDefn =
+                        poSrcDefn->GetGeomFieldDefn(iField);
+                pDstGeomFieldDefn->SetSpatialRef(&oDstSpaRef);
+                poDstLayer->CreateGeomField(pDstGeomFieldDefn);
+            }
         }
     }
 
@@ -3928,7 +4081,32 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
                       poFeature->GetFID(), poSrcDefn->GetName() );
             OGRFeature::DestroyFeature( poFeature );
             CPLFree(panMap);
+            if(NULL != poCT)
+                OCTDestroyCoordinateTransformation((OGRCoordinateTransformationH)poCT);
             return poDstLayer;
+        }
+
+        if(NULL != poCT)
+        {
+            for( iField = 0; iField < nSrcGeomFieldCount; iField++ )
+            {
+                OGRGeometry* pGeom = poDstFeature->GetGeomFieldRef(iField);
+                if(NULL != pGeom)
+                {
+                    OGRErr eErr = pGeom->transform(poCT);
+                    if(eErr != OGRERR_NONE)
+                    {
+                        CPLError( CE_Failure, CPLE_AppDefined,
+                                  "Unable to transform geometry " CPL_FRMT_GIB
+                                  " from layer %s.\n",
+                                  poFeature->GetFID(), poSrcDefn->GetName() );
+                        OGRFeature::DestroyFeature( poFeature );
+                        CPLFree(panMap);
+                        OCTDestroyCoordinateTransformation((OGRCoordinateTransformationH)poCT);
+                        return poDstLayer;
+                    }
+                }
+            }
         }
 
         poDstFeature->SetFID( poFeature->GetFID() );
@@ -3940,6 +4118,8 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
         {
             OGRFeature::DestroyFeature( poDstFeature );
             CPLFree(panMap);
+            if(NULL != poCT)
+                OCTDestroyCoordinateTransformation((OGRCoordinateTransformationH)poCT);
             return poDstLayer;
         }
 
@@ -3982,6 +4162,28 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
                 break;
             }
 
+            if(NULL != poCT)
+            {
+                for( iField = 0; iField < nSrcGeomFieldCount; iField++ )
+                {
+                    OGRGeometry* pGeom = papoDstFeature[nFeatCount]->GetGeomFieldRef(iField);
+                    if(NULL != pGeom)
+                    {
+                        OGRErr eErr = pGeom->transform(poCT);
+                        if(eErr != OGRERR_NONE)
+                        {
+                            CPLError( CE_Failure, CPLE_AppDefined,
+                                      "Unable to transform geometry " CPL_FRMT_GIB
+                                      " from layer %s.\n",
+                                      poFeature->GetFID(), poSrcDefn->GetName() );
+                            OGRFeature::DestroyFeature( poFeature );
+                            bStopTransfer = TRUE;
+                            break;
+                        }
+                    }
+                }
+            }
+
             papoDstFeature[nFeatCount]->SetFID( poFeature->GetFID() );
 
             OGRFeature::DestroyFeature( poFeature );
@@ -4014,6 +4216,9 @@ OGRLayer *GDALDataset::CopyLayer( OGRLayer *poSrcLayer,
       }
       CPLFree(papoDstFeature);
     }
+
+    if(NULL != poCT)
+        OCTDestroyCoordinateTransformation((OGRCoordinateTransformationH)poCT);
 
     CPLFree(panMap);
 
@@ -4883,7 +5088,7 @@ OGRErr GDALDataset::ProcessSQLAlterTableAlterColumn( const char *pszSQLCommand )
  @param poSpatialFilter geometry which represents a spatial filter. Can be NULL.
  @param pszDialect allows control of the statement dialect. If set to NULL, the
 OGR SQL engine will be used, except for RDBMS drivers that will use their dedicated SQL engine,
-unless OGRSQL is explicitely passed as the dialect. Starting with OGR 1.10, the SQLITE dialect
+unless OGRSQL is explicitly passed as the dialect. Starting with OGR 1.10, the SQLITE dialect
 can also be used.
 
  @return an OGRLayer containing the results of the query.  Deallocate with
@@ -5549,7 +5754,7 @@ int GDALDataset::TestCapability( CPL_UNUSED const char * pszCap )
  
  By default, when bForce is set to FALSE, only "efficient" transactions will be
  attempted. Some drivers may offer an emulation of transactions, but sometimes
- with significant overhead, in which case the user must explicitely allow for such
+ with significant overhead, in which case the user must explicitly allow for such
  an emulation by setting bForce to TRUE. Drivers that offer emulated transactions
  should advertize the ODsCEmulatedTransactions capability (and not ODsCTransactions).
  
@@ -5599,7 +5804,7 @@ OGRErr GDALDataset::StartTransaction(CPL_UNUSED int bForce)
 
  By default, when bForce is set to FALSE, only "efficient" transactions will be
  attempted. Some drivers may offer an emulation of transactions, but sometimes
- with significant overhead, in which case the user must explicitely allow for such
+ with significant overhead, in which case the user must explicitly allow for such
  an emulation by setting bForce to TRUE. Drivers that offer emulated transactions
  should advertize the ODsCEmulatedTransactions capability (and not ODsCTransactions).
 
@@ -5724,4 +5929,52 @@ OGRErr GDALDatasetRollbackTransaction(GDALDatasetH hDS)
 #endif
 
     return ((GDALDataset*) hDS)->RollbackTransaction();
+}
+
+/************************************************************************/
+/*                          EnterReadWrite()                            */
+/************************************************************************/
+
+int GDALDataset::EnterReadWrite(GDALRWFlag eRWFlag)
+{
+    if( eAccess == GA_Update && (eRWFlag == GF_Write || m_hMutex != NULL) )
+    {
+        // There should be no race related to creating this mutex since
+        // it should be first created through IWriteBlock() / IRasterIO()
+        // and then GDALRasterBlock might call it from another thread
+        if( m_hMutex == NULL )
+            m_hMutex = CPLCreateMutex();
+        else
+            CPLAcquireMutex(m_hMutex, 1000.0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/************************************************************************/
+/*                         LeaveReadWrite()                             */
+/************************************************************************/
+
+void GDALDataset::LeaveReadWrite()
+{
+    CPLReleaseMutex(m_hMutex);
+}
+
+
+/************************************************************************/
+/*                           AcquireMutex()                             */
+/************************************************************************/
+
+int GDALDataset::AcquireMutex()
+{
+    return CPLCreateOrAcquireMutex(&m_hMutex, 1000.0);
+}
+
+/************************************************************************/
+/*                          ReleaseMutex()                              */
+/************************************************************************/
+
+void GDALDataset::ReleaseMutex()
+{
+    CPLReleaseMutex(m_hMutex);
 }

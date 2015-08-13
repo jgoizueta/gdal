@@ -55,7 +55,8 @@ GDALRasterBandH MEMCreateRasterBand( GDALDataset *poDS, int nBand,
 MEMRasterBand::MEMRasterBand( GDALDataset *poDS, int nBand,
                               GByte *pabyDataIn, GDALDataType eTypeIn, 
                               GSpacing nPixelOffsetIn, GSpacing nLineOffsetIn,
-                              int bAssumeOwnership, const char * pszPixelType)
+                              int bAssumeOwnership, const char * pszPixelType) :
+                                                      GDALPamRasterBand(FALSE)
 
 {
     //CPLDebug( "MEM", "MEMRasterBand(%p)", this );
@@ -83,6 +84,7 @@ MEMRasterBand::MEMRasterBand( GDALDataset *poDS, int nBand,
     pabyData = pabyDataIn;
 
     bNoDataSet  = FALSE;
+    dfNoData = 0.0;
 
     poColorTable = NULL;
     
@@ -324,6 +326,13 @@ CPLErr MEMDataset::IRasterIO( GDALRWFlag eRWFlag,
         }
     }
     
+    if( nBufXSize != nXSize || nBufYSize != nYSize )
+        return GDALDataset::IRasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize, 
+                                   pData, nBufXSize, nBufYSize,
+                                   eBufType, nBandCount, panBandMap,
+                                   nPixelSpaceBuf, nLineSpaceBuf, nBandSpaceBuf,
+                                   psExtraArg );
+    
     GDALProgressFunc  pfnProgressGlobal = psExtraArg->pfnProgress;
     void             *pProgressDataGlobal = psExtraArg->pProgressData;
 
@@ -386,6 +395,18 @@ CPLErr MEMRasterBand::SetNoDataValue( double dfNewValue )
 {
     dfNoData = dfNewValue;
     bNoDataSet = TRUE;
+
+    return CE_None;
+}
+
+/************************************************************************/
+/*                         DeleteNoDataValue()                          */
+/************************************************************************/
+
+CPLErr MEMRasterBand::DeleteNoDataValue()
+{
+    dfNoData = 0.0;
+    bNoDataSet = FALSE;
 
     return CE_None;
 }
@@ -641,7 +662,7 @@ MEMRasterBand::GetDefaultHistogram( double *pdfMin, double *pdfMax,
 /*                            MEMDataset()                             */
 /************************************************************************/
 
-MEMDataset::MEMDataset()
+MEMDataset::MEMDataset() : GDALDataset(FALSE)
 
 {
     pszProjection = NULL;
@@ -670,6 +691,25 @@ MEMDataset::~MEMDataset()
     GDALDeinitGCPs( nGCPCount, pasGCPs );
     CPLFree( pasGCPs );
 }
+
+#if 0
+/************************************************************************/
+/*                          EnterReadWrite()                            */
+/************************************************************************/
+
+int MEMDataset::EnterReadWrite(CPL_UNUSED GDALRWFlag eRWFlag)
+{
+    return TRUE;
+}
+
+/************************************************************************/
+/*                         LeaveReadWrite()                             */
+/************************************************************************/
+
+void MEMDataset::LeaveReadWrite()
+{
+}
+#endif
 
 /************************************************************************/
 /*                          GetProjectionRef()                          */
@@ -859,13 +899,13 @@ CPLErr MEMDataset::AddBand( GDALDataType eType, char **papszOptions )
     if( pszOption == NULL )
         nPixelOffset = nPixelSize;
     else
-        nPixelOffset = CPLScanUIntBig(pszOption, strlen(pszOption));
+        nPixelOffset = CPLAtoGIntBig(pszOption);
 
     pszOption = CSLFetchNameValue(papszOptions,"LINEOFFSET");
     if( pszOption == NULL )
         nLineOffset = GetRasterXSize() * (size_t)nPixelOffset;
     else
-        nLineOffset = CPLScanUIntBig(pszOption, strlen(pszOption));
+        nLineOffset = CPLAtoGIntBig(pszOption);
 
     SetBand( nBandId,
              new MEMRasterBand( this, nBandId, pData, eType, 

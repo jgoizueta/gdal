@@ -246,6 +246,8 @@ class JP2OpenJPEGDataset : public GDALJP2AbstractDataset
     int         PreloadBlocks( JP2OpenJPEGRasterBand* poBand,
                                int nXOff, int nYOff, int nXSize, int nYSize,
                                int nBandCount, int *panBandMap );
+
+    static void JP2OpenJPEGReadBlockInThread(void* userdata);
 };
 
 /************************************************************************/
@@ -374,24 +376,16 @@ CPLErr JP2OpenJPEGRasterBand::IRasterIO( GDALRWFlag eRWFlag,
     if( (nBufXSize < nXSize || nBufYSize < nYSize)
         && GetOverviewCount() > 0 && eRWFlag == GF_Read )
     {
-        int         nOverview;
-        GDALRasterIOExtraArg sExtraArg;
-    
-        GDALCopyRasterIOExtraArg(&sExtraArg, psExtraArg);
-
-        nOverview =
-            GDALBandGetBestOverviewLevel2(this, nXOff, nYOff, nXSize, nYSize,
-                                        nBufXSize, nBufYSize, &sExtraArg);
-        if (nOverview >= 0)
-        {
-            GDALRasterBand* poOverviewBand = GetOverview(nOverview);
-            if (poOverviewBand == NULL)
-                return CE_Failure;
-
-            return poOverviewBand->RasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
-                                            pData, nBufXSize, nBufYSize, eBufType,
-                                            nPixelSpace, nLineSpace, &sExtraArg );
-        }
+        int bTried;
+        CPLErr eErr = TryOverviewRasterIO( eRWFlag,
+                                    nXOff, nYOff, nXSize, nYSize,
+                                    pData, nBufXSize, nBufYSize,
+                                    eBufType,
+                                    nPixelSpace, nLineSpace,
+                                    psExtraArg,
+                                    &bTried );
+        if( bTried )
+            return eErr;
     }
 
     poGDS->bEnoughMemoryToLoadOtherBands = poGDS->PreloadBlocks(this, nXOff, nYOff, nXSize, nYSize, 0, NULL);
@@ -441,7 +435,7 @@ public:
     int                *panBandMap;
 };
 
-static void JP2OpenJPEGReadBlockInThread(void* userdata)
+void JP2OpenJPEGDataset::JP2OpenJPEGReadBlockInThread(void* userdata)
 {
     int nPair;
     JobStruct* poJob = (JobStruct*) userdata;
@@ -461,8 +455,10 @@ static void JP2OpenJPEGReadBlockInThread(void* userdata)
     {
         int nBlockXOff = poJob->oPairs[nPair].first;
         int nBlockYOff = poJob->oPairs[nPair].second;
+        poGDS->AcquireMutex();
         GDALRasterBlock* poBlock = poGDS->GetRasterBand(nBand)->
                 GetLockedBlockRef(nBlockXOff,nBlockYOff, TRUE);
+        poGDS->ReleaseMutex();
         if (poBlock == NULL)
             break;
 
@@ -527,7 +523,7 @@ int JP2OpenJPEGDataset::PreloadBlocks(JP2OpenJPEGRasterBand* poBand,
             CPLJoinableThread** pahThreads = (CPLJoinableThread**) CPLMalloc( sizeof(CPLJoinableThread*) * nThreads );
             int i;
 
-            CPLDebug("OPENJPEG", "%d blocks to load", nBlocksToLoad);
+            CPLDebug("OPENJPEG", "%d blocks to load (%d threads)", nBlocksToLoad, nThreads);
 
             JobStruct oJob;
             oJob.poGDS = this;
@@ -600,22 +596,18 @@ CPLErr  JP2OpenJPEGDataset::IRasterIO( GDALRWFlag eRWFlag,
     if( (nBufXSize < nXSize || nBufYSize < nYSize)
         && poBand->GetOverviewCount() > 0 && eRWFlag == GF_Read )
     {
-        int         nOverview;
-        GDALRasterIOExtraArg sExtraArg;
-    
-        GDALCopyRasterIOExtraArg(&sExtraArg, psExtraArg);
-
-        nOverview =
-            GDALBandGetBestOverviewLevel2(poBand, nXOff, nYOff, nXSize, nYSize,
-                                          nBufXSize, nBufYSize, &sExtraArg);
-        if (nOverview >= 0)
-        {
-            return papoOverviewDS[nOverview]->RasterIO( eRWFlag, nXOff, nYOff, nXSize, nYSize,
-                                                        pData, nBufXSize, nBufYSize, eBufType,
-                                                        nBandCount, panBandMap,
-                                                        nPixelSpace, nLineSpace, nBandSpace,
-                                                        &sExtraArg);
-        }
+        int bTried;
+        CPLErr eErr = TryOverviewRasterIO( eRWFlag,
+                                    nXOff, nYOff, nXSize, nYSize,
+                                    pData, nBufXSize, nBufYSize,
+                                    eBufType,
+                                    nBandCount, panBandMap,
+                                    nPixelSpace, nLineSpace,
+                                    nBandSpace,
+                                    psExtraArg,
+                                    &bTried );
+        if( bTried )
+            return eErr;
     }
 
     bEnoughMemoryToLoadOtherBands = PreloadBlocks(poBand, nXOff, nYOff, nXSize, nYSize, nBandCount, panBandMap);
@@ -753,16 +745,19 @@ CPLErr JP2OpenJPEGDataset::ReadBlock( int nBand, VSILFILE* fp,
             pDstBuffer = pImage;
         else
         {
+            AcquireMutex();
             poBlock = ((JP2OpenJPEGRasterBand*)GetRasterBand(iBand))->
                 TryGetLockedBlockRef(nBlockXOff,nBlockYOff);
             if (poBlock != NULL)
             {
+                ReleaseMutex();
                 poBlock->DropLock();
                 continue;
             }
 
             poBlock = GetRasterBand(iBand)->
                 GetLockedBlockRef(nBlockXOff,nBlockYOff, TRUE);
+            ReleaseMutex();
             if (poBlock == NULL)
             {
                 continue;
@@ -2412,7 +2407,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
         (GDALGetDataTypeSize(eDataType) == 32 && (nBits <= 16 || nBits > 32)) )
     {
         CPLError(CE_Warning, CPLE_NotSupported,
-                 "Inconsistant NBITS value with data type. Using %d",
+                 "Inconsistent NBITS value with data type. Using %d",
                  GDALGetDataTypeSize(eDataType));
     }
 
@@ -2484,7 +2479,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
         !bGeoreferencingCompatOfGMLJP2 && nGMLJP2Version == 1 )
     {
         CPLError(CE_Warning, CPLE_AppDefined,
-                 "GMLJP2 box was explicitely required but cannot be written due "
+                 "GMLJP2 box was explicitly required but cannot be written due "
                  "to lack of georeferencing and/or unsupported georeferencing for GMLJP2");
     }
 
@@ -2492,7 +2487,7 @@ GDALDataset * JP2OpenJPEGDataset::CreateCopy( const char * pszFilename,
         !bGeoreferencingCompatOfGeoJP2 )
     {
         CPLError(CE_Warning, CPLE_AppDefined,
-                 "GeoJP2 box was explicitely required but cannot be written due "
+                 "GeoJP2 box was explicitly required but cannot be written due "
                  "to lack of georeferencing");
     }
     int bGeoBoxesAfter = CSLFetchBoolean(papszOptions, "GEOBOXES_AFTER_JP2C",

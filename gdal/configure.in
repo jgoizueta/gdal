@@ -161,6 +161,27 @@ AC_LANG_POP(C++)
 
 AC_CHECK_FUNC(setlocale)
 
+AC_MSG_CHECKING([for uselocale])
+AC_TRY_COMPILE(
+  [
+#define _XOPEN_SOURCE 700
+#include <locale.h>
+  ], [
+    locale_t alocale = newlocale (LC_NUMERIC_MASK, "C", 0);
+    locale_t oldlocale = uselocale(alocale);
+    uselocale(oldlocale);
+    freelocale(alocale);
+    return 0;
+  ],
+  [
+    AC_MSG_RESULT([yes])
+    AC_DEFINE_UNQUOTED(HAVE_USELOCALE, 1,
+          [Define to 1 if you have the `uselocale' function.])
+  ], [
+    AC_MSG_RESULT([no])
+])
+
+
 OPT_GDAL_FORMATS=
 EXTRA_INCLUDES=
 
@@ -207,7 +228,7 @@ dnl ---------------------------------------------------------------------------
 AC_MSG_CHECKING([whether GCC 4.1 atomic builtins are available])
 
 rm -f atomicbuiltins.c
-echo 'int main(int argc, char* argv[]) { int i; __sync_add_and_fetch(&i, 1); __sync_sub_and_fetch(&i, 1); return 0; } ' > atomicbuiltins.c
+echo 'int main(int argc, char* argv[]) { int i; __sync_add_and_fetch(&i, 1); __sync_sub_and_fetch(&i, 1); __sync_bool_compare_and_swap(&i, 0, 1); return 0; } ' > atomicbuiltins.c
 if test -z "`${CC} atomicbuiltins.c -o atomicbuiltins 2>&1`" ; then
     HAVE_GCC_ATOMIC_BUILTINS=yes
     AC_MSG_RESULT([yes])
@@ -257,7 +278,7 @@ if test "$with_sse" = "yes" -o "$with_sse" = ""; then
 
     dnl On Solaris, the presence of SSE instructions is flagged in the binary
     dnl and prevent it to run on non SSE hardware even if the instructions are
-    dnl not executed. So if the user did not explicitely requires SSE, test that
+    dnl not executed. So if the user did not explicitly requires SSE, test that
     dnl we can run SSE binaries
     if test "$HAVE_SSE_AT_COMPILE_TIME" = "yes"; then
        case $host_os in
@@ -270,7 +291,7 @@ if test "$with_sse" = "yes" -o "$with_sse" = ""; then
              if test "$with_sse" = "yes"; then
                echo "Caution: the generated binaries will not run on this system."
              else
-               echo "Disabling SSE as it is not explicitely required"
+               echo "Disabling SSE as it is not explicitly required"
                HAVE_SSE_AT_COMPILE_TIME=""
                SSEFLAGS=""
              fi
@@ -324,7 +345,7 @@ if test "$with_avx" = "yes" -o "$with_avx" = ""; then
 
     dnl On Solaris, the presence of AVX instructions is flagged in the binary
     dnl and prevent it to run on non AVX hardware even if the instructions are
-    dnl not executed. So if the user did not explicitely requires AVX, test that
+    dnl not executed. So if the user did not explicitly requires AVX, test that
     dnl we can run AVX binaries
     if test "$HAVE_AVX_AT_COMPILE_TIME" = "yes"; then
        case $host_os in
@@ -337,7 +358,7 @@ if test "$with_avx" = "yes" -o "$with_avx" = ""; then
              if test "$with_avx" = "yes"; then
                echo "Caution: the generated binaries will not run on this system."
              else
-               echo "Disabling AVX as it is not explicitely required"
+               echo "Disabling AVX as it is not explicitly required"
                AVXFLAGS=""
                HAVE_AVX_AT_COMPILE_TIME=""
              fi
@@ -1596,6 +1617,78 @@ AC_SUBST(SOSI_LIB, $SOSI_LIB)
 AC_SUBST(SOSI_INC, $SOSI_INC)
 
 dnl ---------------------------------------------------------------------------
+dnl MongoCXX driver
+dnl ---------------------------------------------------------------------------
+
+AC_ARG_WITH(mongocxx,[  --with-mongocxx[=ARG]        Include MongoCXX support (ARG=Path, yes or no)],,)
+
+MONGODB_ENABLED=no
+
+if test "$with_mongocxx" = "no" ; then
+
+  echo "MONGODB support disabled."
+
+elif test "$with_mongocxx" = "yes" -o "$with_mongocxx" = "" ; then
+
+    AC_MSG_CHECKING([for MongoCXX])
+
+    rm -f testmongocxx.*
+    rm -f testmongocxx
+    echo "#include <mongo/client/dbclient.h>" > testmongocxx.cpp
+    echo "using namespace mongo;" >> testmongocxx.cpp
+    echo "int main() { client::initialize(client::Options()); return 0; }" >> testmongocxx.cpp
+    if test -z "`${CXX} ${CPPFLAGS} testmongocxx.cpp -lmongoclient -lboost_system -lboost_thread -lboost_regex -o testmongocxx 2>&1`" ; then
+        AC_MSG_RESULT([MongoCXX found])
+        MONGODB_ENABLED="yes"
+        MONGODB_LIB=" -lmongoclient -lboost_system -lboost_thread -lboost_regex"
+    else
+        if test "$with_mongocxx" = "yes"; then
+            AC_MSG_ERROR([MongoCXX not found.])
+        else
+            AC_MSG_RESULT([MongoCXX not found.])
+        fi
+    fi
+    rm -f testmongocxx.*
+    rm -f testmongocxx
+
+else
+
+  AC_ARG_WITH(boost-lib-path,
+          [  --with-boost-lib-path=ARG   Path to boost libraries for mongocxx client],,,)
+
+  AC_MSG_CHECKING([for libmongoclient.so in in $with_mongocxx/lib])
+  MONGODB_ENABLED=yes
+  if test -r $with_mongocxx/lib/libmongoclient.so; then
+    AC_MSG_RESULT([found.])
+    MONGODB_LIB="-L$with_mongocxx/lib -lmongoclient"
+  elif test -r $with_mongocxx/lib/libmongoclient.dylib; then
+    AC_MSG_RESULT([found.])
+    MONGODB_LIB="-L$with_mongocxx/lib -lmongoclient"
+  else
+    AC_MSG_ERROR([not found.])
+  fi
+
+  if test "$with_boost_lib_path" = "" ; then
+    MONGODB_LIB="$MONGODB_LIB -lboost_system -lboost_thread -lboost_regex"
+  else
+    MONGODB_LIB="$MONGODB_LIB -L$with_boost_lib_path -lboost_system -lboost_thread -lboost_regex"
+  fi
+
+  AC_MSG_CHECKING([for mongo/client/dbclient.h in $with_mongocxx/include])
+  if test -r $with_mongocxx/include/mongo/client/dbclient.h ; then  
+    AC_MSG_RESULT([found.])
+    MONGODB_INC="-I$with_mongocxx/include"
+  else
+    AC_MSG_ERROR([not found.])
+  fi
+
+fi
+
+AC_SUBST(MONGODB_ENABLED, $MONGODB_ENABLED)
+AC_SUBST(MONGODB_LIB, $MONGODB_LIB)
+AC_SUBST(MONGODB_INC, $MONGODB_INC)
+
+dnl ---------------------------------------------------------------------------
 dnl Select an HDF4 Library to use, or disable driver.
 dnl
 dnl We assume the user will have libjpeg and libz from other sources when
@@ -1671,7 +1764,7 @@ dnl Not found... again, with -lsz.
     fi
 
     dnl HDF4 library newer than 4.2.5 has a SDreset_maxopenfiles/SDget_maxopenfiles interface
-    dnl which allows to open many HDF files simultaneously (the max number of files was previously
+    dnl which allows opening many HDF files simultaneously (the max number of files was previously
     dnl hardcoded and too low, smth. like 32). Search for it and use if available.
     AC_CHECK_LIB(mfhdfalt,SDget_maxopenfiles,HDF4_HAS_MAXOPENFILES=yes,HDF4_HAS_MAXOPENFILES=no,$HDF_LIB_NAME)
     if test "$HDF4_HAS_MAXOPENFILES" = "no" ; then
@@ -2589,6 +2682,24 @@ fi
 AC_SUBST(OGR_ENABLED,$OGR_ENABLED)
 
 dnl ---------------------------------------------------------------------------
+
+GNM_ENABLED=no
+
+AC_ARG_WITH(gnm,[  --with-gnm            Build GNM into shared library],,)
+
+if test "$with_gnm" = "" ; then
+  GNM_ENABLED=no
+  echo "GNM support disabled."
+elif test "$with_gnm" = "yes"; then
+  echo checking for GNM ... enabled
+  GNM_ENABLED=yes
+else
+  echo checking for GNM ... disabled by user
+  GNM_ENABLED=no
+fi
+AC_SUBST(GNM_ENABLED,$GNM_ENABLED)
+
+dnl ---------------------------------------------------------------------------
 dnl Select an MySQL Library to use, or disable driver.
 dnl ---------------------------------------------------------------------------
 
@@ -2921,7 +3032,7 @@ if test "$CURL_SETTING" = "yes" ; then
   
   CURL_INC=`$LIBCURL_CONFIG --cflags`
   CURL_LIB=`$LIBCURL_CONFIG --libs`
-  OPT_GDAL_FORMATS="wcs wms plmosaic $OPT_GDAL_FORMATS"
+  OPT_GDAL_FORMATS="wcs wms plmosaic wmts $OPT_GDAL_FORMATS"
 
 fi
 
@@ -3334,6 +3445,48 @@ if test "${HAVE_GEOS}" = "yes" ; then
 fi
 
 dnl ---------------------------------------------------------------------------
+dnl Check if QHull library is available.
+dnl ---------------------------------------------------------------------------
+
+AC_ARG_WITH(qhull,[  --with-qhull[=ARG]     Include QHull support (ARG=no, yes, internal)],,)
+
+QHULL_SETTING=no
+
+if test "$with_qhull" = "no" ; then
+
+  AC_MSG_NOTICE([QHull support disabled.])
+
+elif test "$with_qhull" = "yes" -o "$with_qhull" = "" ; then
+
+  # Only qhull 2012 is reliable on certain datasets. Older Ubuntu have
+  # qhull/qhull.h
+  AC_CHECK_HEADERS([qhull/libqhull.h])
+  if test "$ac_cv_header_qhull_libqhull_h" = "yes"; then
+    AC_CHECK_LIB(qhull,qh_new_qhull,QHULL_SETTING=yes,QHULL_SETTING=no,)
+    if test "$QHULL_SETTING" = "yes"; then
+        QHULL_SETTING=external
+        if test -f /usr/include/qhull/libqhull.h; then
+            EXTRA_INCLUDES="-I/usr/include/qhull $EXTRA_INCLUDES"
+        else
+            EXTRA_INCLUDES="-I/usr/include/local/qhull $EXTRA_INCLUDES"
+        fi
+        LIBS="-lqhull $LIBS"
+    fi
+  fi
+  if test "$QHULL_SETTING" = "no" ; then
+    if test "$with_qhull" = "yes"; then
+        AC_MSG_ERROR([--with-qhull requested, but library not found!])
+    else
+        QHULL_SETTING=internal
+    fi
+  fi
+else
+  QHULL_SETTING=internal
+fi
+
+AC_SUBST([QHULL_SETTING],$QHULL_SETTING)
+
+dnl ---------------------------------------------------------------------------
 dnl Check if opencl library is available.
 dnl ---------------------------------------------------------------------------
 
@@ -3704,7 +3857,9 @@ if test "$with_podofo" != "no" -a "$with_podofo" != ""; then
         rm -f testpodofo.*
         echo '#include <podofo.h>' > testpodofo.cpp
         echo 'int main(int argc, char** argv) { PoDoFo::PdfError::EnableDebug( 0 ); return 0; } ' >> testpodofo.cpp
-        if test -z "`${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${PODOFO_LIB}  2>&1`" ; then
+        ${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${PODOFO_LIB} 2>/dev/null
+        RETVAL=$?
+        if test $RETVAL -eq 0; then
             HAVE_PODOFO=yes
             LIBS="${PODOFO_LIB} ${LIBS}"
             PODOFO_INC=$TEST_PODOFO_INC
@@ -3734,7 +3889,9 @@ if test "$with_podofo" != "no" -a "$with_podofo" != ""; then
         rm -f testpodofo.*
         echo '#include <podofo.h>' > testpodofo.cpp
         echo 'int main(int argc, char** argv) { PoDoFo::PdfError::EnableDebug( 0 ); return 0; } ' >> testpodofo.cpp
-        if test -z "`${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${TEST_PODOFO_LIB} 2>&1`" ; then
+        ${CXX} testpodofo.cpp -o testpodofo ${TEST_PODOFO_INC} ${TEST_PODOFO_LIB} 2>/dev/null
+        RETVAL=$?
+        if test $RETVAL -eq 0; then
             HAVE_PODOFO=yes
             LIBS="${PODOFO_LIB} ${LIBS}"
             PODOFO_INC=$TEST_PODOFO_INC
@@ -4482,12 +4639,14 @@ LOC_MSG([  SpatiaLite support:        ${HAVE_SPATIALITE}])
 LOC_MSG([  DWGdirect support          ${HAVE_DWGDIRECT}])
 LOC_MSG([  INFORMIX DataBlade support:${HAVE_IDB}])
 LOC_MSG([  GEOS support:              ${HAVE_GEOS_RESULT}])
+LOC_MSG([  QHull support:             ${QHULL_SETTING}])
 LOC_MSG([  Poppler support:           ${HAVE_POPPLER}])
 LOC_MSG([  Podofo support:            ${HAVE_PODOFO}])
 LOC_MSG([  OpenCL support:            ${OPENCL_SETTING}])
 LOC_MSG([  Armadillo support:         ${HAVE_ARMADILLO}])
 LOC_MSG([  FreeXL support:            ${HAVE_FREEXL}])
 LOC_MSG([  SOSI support:              ${SOSI_ENABLED}])
+LOC_MSG([  MongoDB support:           ${MONGODB_ENABLED}])
 LOC_MSG()
 if test ! -z "`uname | grep Darwin`" ; then
   LOC_MSG([  Mac OS X Framework :       ${MACOSX_FRAMEWORK}])
@@ -4502,6 +4661,7 @@ LOC_MSG([  SWIG Bindings:             ${WHAT_BINDINGS}])
 LOC_MSG()
 LOC_MSG([  Statically link PROJ.4:    ${PROJ_STATIC}])
 LOC_MSG([  enable OGR building:       ${OGR_ENABLED}])
+LOC_MSG([  enable GNM building:       ${GNM_ENABLED}])
 LOC_MSG([  enable pthread support:    ${PTHREAD_ENABLED}])
 LOC_MSG([  enable POSIX iconv support:${am_cv_func_iconv}])
 LOC_MSG([  hide internal symbols:     ${HAVE_HIDE_INTERNAL_SYMBOLS}])

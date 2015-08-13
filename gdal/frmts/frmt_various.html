@@ -30,7 +30,7 @@ same format as the band data.
 
 <p>By default, the datatype returned for AAIGRID datasets by GDAL is autodetected,
 and set to Float32 for grid with floating point values or Int32 otherwise. This is
-done by analysing the format of the NODATA value and the first 100k bytes of data of the
+done by analysing the format of the NODATA value and, if needed, the data of the
 grid. From GDAL 1.8.0, you can explictely specify the datatype by setting the
 AAIGRID_DATATYPE configuration option (Int32, Float32 and Float64 values are
 supported currently)</p>
@@ -664,6 +664,28 @@ Most of the metadata is read.
 <p>Vaisala provides information about the format and software at <a href="http://www.vaisala.com/en/defense/products/weatherradar/Pages/IRIS.aspx">http://www.vaisala.com/en/defense/products/weatherradar/Pages/IRIS.aspx</a>.</p>
 
 <p>NOTE: Implemented as <tt>gdal/frmts/iris/irisdataset.cpp</tt>.</p>
+
+<!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
+
+<h2><a name="ISCE">ISCE</a></h2>
+
+<p>Driver for the image formats used in the JPL's Interferometric synthetic 
+aperture radar Scientific Computing Environment (ISCE). Only images with
+data types mappable to GDAL data types are supported.</p>
+
+<p>Image properties are stored under the ISCE metadata domain, but there is
+currently no support to access underlying components elements and their 
+properties. Likewise, ISCE domain metadata will be saved as properties
+in the image XML file.</p>
+
+<p>Georeferencing is not yet implemented.</p>
+
+<p>The ACCESS_MODE property is not currently honored.</p>
+
+<p>The only creation option currently is SCHEME, which value (BIL, BIP, BSQ)
+determine the interleaving (default is BIP).</p>
+
+<p>NOTE: Implemented as <tt>gdal/frmts/raw/iscedataset.cpp</tt>.<p>
 
 <!-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -->
 

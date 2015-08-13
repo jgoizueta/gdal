@@ -488,17 +488,17 @@ int OGRGMLDataSource::Open( GDALOpenInfo* poOpenInfo )
                         strstr(szPtr, " gml:id='") != NULL;
         bExposeFid = strstr(szPtr, " fid=\"") != NULL ||
                         strstr(szPtr, " fid='") != NULL;
-        
-        const char* pszExposeGMLId = CSLFetchNameValueDef(poOpenInfo->papszOpenOptions,
-            "EXPOSE_GML_ID", CPLGetConfigOption("GML_EXPOSE_GML_ID", NULL));
-        if (pszExposeGMLId)
-            bExposeGMLId = CSLTestBoolean(pszExposeGMLId);
-
-        const char* pszExposeFid = CSLFetchNameValueDef(poOpenInfo->papszOpenOptions,
-            "EXPOSE_FID", CPLGetConfigOption("GML_EXPOSE_FID", NULL));
-        if (pszExposeFid)
-            bExposeFid = CSLTestBoolean(pszExposeFid);
     }
+
+    const char* pszExposeGMLId = CSLFetchNameValueDef(poOpenInfo->papszOpenOptions,
+        "EXPOSE_GML_ID", CPLGetConfigOption("GML_EXPOSE_GML_ID", NULL));
+    if (pszExposeGMLId)
+        bExposeGMLId = CSLTestBoolean(pszExposeGMLId);
+
+    const char* pszExposeFid = CSLFetchNameValueDef(poOpenInfo->papszOpenOptions,
+        "EXPOSE_FID", CPLGetConfigOption("GML_EXPOSE_FID", NULL));
+    if (pszExposeFid)
+        bExposeFid = CSLTestBoolean(pszExposeFid);
 
     bHintConsiderEPSGAsURN = strstr(szPtr, "xmlns:fme=\"http://www.safe.com/gml/fme\"") != NULL;
 
@@ -1421,7 +1421,7 @@ OGRGMLLayer *OGRGMLDataSource::TranslateGMLSchema( GMLFeatureClass *poClass )
         }
     }
 
-    /* Report a COMPD_CS only if GML_REPORT_COMPD_CS is explicitely set to TRUE */
+    /* Report a COMPD_CS only if GML_REPORT_COMPD_CS is explicitly set to TRUE */
     if( poSRS != NULL &&
         !CSLTestBoolean(CPLGetConfigOption("GML_REPORT_COMPD_CS", "FALSE")) )
     {

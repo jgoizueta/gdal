@@ -4,6 +4,7 @@
 
 /*! 
 \page gdal_utilities GDAL Utilities
+\brief A collection of GDAL related programs.
 
 The following utility programs are distributed with GDAL. 
 
@@ -34,6 +35,7 @@ The following utility programs are distributed with GDAL.
 <li> \ref gdalmove - Transform the coordinate system of a file (GDAL >= 1.10)
 <li> \ref gdal_edit - Edit in place various information of an existing GDAL dataset (projection, geotransform, nodata, metadata)
 <li> \ref gdal_calc - Command line raster calculator with numpy syntax
+<li> \ref gdal_pansharpen - Perform a pansharpen operation.
 <li> \ref gdal-config - Get options required to build software using GDAL.
 <li> \ref gdalmanage - Identify, copy, rename and delete raster.
 <li> \ref gdalcompare - Compare two images and report on differences.
@@ -946,8 +948,8 @@ burns vector geometries into a raster
 Usage: gdal_rasterize [-b band]* [-i] [-at]
        [-burn value]* | [-a attribute_name] [-3d]
        [-l layername]* [-where expression] [-sql select_statement]
-       [-of format] [-a_srs srs_def] [-co "NAME=VALUE"]*
-       [-a_nodata value] [-init value]*
+       [-dialect dialect] [-of format] [-a_srs srs_def]
+       [-co "NAME=VALUE"]* [-a_nodata value] [-init value]*
        [-te xmin ymin xmax ymax] [-tr xres yres] [-tap] [-ts width height]
        [-ot {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/
              CInt16/CInt32/CFloat32/CFloat64}] [-q]
@@ -960,8 +962,8 @@ This program burns vector geometries (points, lines, and polygons) into the
 raster band(s) of a raster image.  Vectors are read from OGR supported vector 
 formats. 
 
-Note that the vector data must be in the same coordinate system as the
-raster data; on the fly reprojection is not provided.
+Note that on the refly reprojection of vector data to the coordinate system of the
+raster data is only supported since GDAL 2.1.0.
 
 Since GDAL 1.8.0, the target GDAL file can be created by gdal_rasterize. Either
 the -tr or -ts option must be used in that case.
@@ -1008,6 +1010,12 @@ to burn in from the input layer(s). </dd>
 <dt> <b>-sql</b> <em>select_statement</em>: </dt><dd> 
 An SQL statement to be evaluated against the datasource to produce a
 virtual layer of features to be burned in.</dd>
+
+<dt> <b>-dialect</b> <em>dialect</em>: </dt><dd>
+(starting with GDAL 2.1) The SQL dialect. In some cases can be used to use
+(unoptimized) OGR SQL instead of the native SQL of an RDBMS by passing OGRSQL.
+Starting with GDAL 1.10, the "SQLITE" dialect can also be used with any
+datasource.</dd>
 
 <dt> <b>-of</b> <i>format</i>:</dt><dd> (GDAL >= 1.8.0)
 Select the output format.  The default is GeoTIFF (GTiff).  Use the short format
@@ -1863,6 +1871,25 @@ non-zero). Default is 0.</dd>
 0.0).</dd>
 </dl>
 
+\subsection gdal_grid_algorithms_invdist_nearest_neighbor invdistnn
+
+(Since GDAL 2.1) Inverse distance to a power with nearest neighbor searching, ideal when 
+max_points is used. It has following parameters:
+
+<dl>
+<dt><i>power</i>:</dt> <dd>Weighting power (default 2.0).</dd>
+<dt><i>radius</i>:</dt> <dd>The radius of the search circle, which should be 
+non-zero. Default is 1.0.</dd>
+<dt><i>max_points</i>:</dt> <dd>Maximum number of data points to use. Do not
+search for more points than this number. Found points will be ranked from 
+nearest to furthest distance when weighting. Default is 12.</dd>
+<dt><i>min_points</i>:</dt> <dd>Minimum number of data points to use. If less
+amount of points found the grid node is considered empty and will be filled 
+with NODATA marker. Default is 0.</dd>
+<dt><i>nodata</i>:</dt> <dd>NODATA marker to fill empty points (default
+0.0).</dd>
+</dl>
+
 \subsection gdal_grid_algorithms_average average
 
 Moving average algorithm. It has following parameters:
@@ -1899,6 +1926,28 @@ of search ellipse. Set this parameter to zero to use whole point array.
 Default is 0.0.</dd>
 <dt><i>angle</i>:</dt> <dd>Angle of search ellipse rotation in degrees
 (counter clockwise, default 0.0).</dd>
+<dt><i>nodata</i>:</dt> <dd>NODATA marker to fill empty points (default
+0.0).</dd>
+</dl>
+
+\subsection gdal_grid_algorithms_linear linear
+
+(Since GDAL 2.1) Linear interpolation algorithm.
+
+The Linear method performs linear interpolation by compution a Delaunay
+triangulation of the point cloud, finding in which triangle of the triangulation
+the point is, and by doing linear interpolation from its barycentric coordinates
+within the triangle.
+If the point is not in any triangle, depending on the radius, the
+algorithm will use the value of the nearest point or the nodata value.
+
+It has following parameters:
+
+<dl>
+<dt><i>radius</i>:</dt> <dd>In case the point to be interpolated does not fit
+into a triangle of the Delaunay triangulation, use that maximum distance to search a nearest
+neighbour, or use nodata otherwise. If set to -1, the search distance is infinite.
+If set to 0, nodata value will be always used. Default is -1.</dd>
 <dt><i>nodata</i>:</dt> <dd>NODATA marker to fill empty points (default
 0.0).</dd>
 </dl>
@@ -2517,5 +2566,105 @@ gdalmanage delete NE1_50M_SR_W.tif
 \if man
 \section gdalmanage_author AUTHORS
 Tyler Mitchell <spatialguru@shaw.ca>
+\endif
+*/
+
+*******************************************************************************
+/*! \page gdal_pansharpen gdal_pansharpen.py
+
+Perform a pansharpen operation.
+
+(Since GDAL 2.1)
+
+\section gdal_pansharpen_synopsis SYNOPSIS
+
+\verbatim
+gdal_pansharpen [--help-general] pan_dataset {spectral_dataset[,band=num]}+ out_dataset
+                [-of format] [-b band]* [-w weight_val]*
+                [-r {nearest,bilinear,cubic,cubicspline,lanczos,average}]
+                [-threads {ALL_CPUS|number}] [-bitdepth val] [-nodata val]
+                [-spat_adjust {union,intersection,none,nonewithoutwarning}]
+                [-co NAME=VALUE]* [-q]
+\endverbatim
+
+\section gdal_pansharpen_description DESCRIPTION
+
+The gdal_pansharpen.py script performs a pansharpening operation. It can create
+a "classic" output dataset (such as GeoTIFF), or a VRT dataset describing the
+pansharpening operation.
+
+More details can be found in the <a href="gdal_vrttut.html#gdal_vrttut_pansharpen">VRT tutorial</a>.
+
+<dl>
+<dt> <b>-of</b> <i>format</i>:</dt><dd> Select the output format.  The default
+is GeoTIFF (GTiff). "VRT" can also be used. Use the short format name.</dd>
+<dt> <b>-b</b> <i>band</i>:</dt><dd> Select band <i>band</i> from the input spectral
+bands for output. Bands are numbered from 1 in the order spectral bands are specified.
+Multiple <b>-b</b> switches may be used.
+When no -b switch is used, all input spectral bands are set for output.</dd>
+<dt> <b>-w</b> <i>weight_val</i>:</dt><dd>Specify a weight for the computation of the
+pseudo panchromatic value. There must be as many -w switches as input spectral bands.</dd>
+<dt> <b>-r</b>
+<i>{nearest,bilinear,cubic (default),cubicspline,lanczos,average}</i>:</dt><dd>
+Select a resampling algorithm.</dd>
+<dt> <b>-threads</b> <i>{ALL_CPUS,number}</i>:</dt><dd>
+Specify number of threads to use to do the resampling and pansharpening itself.
+Can be an integer number or ALL_CPUS.</dd>
+<dt> <b>-bitdepth</b> <i>val</i>:</dt><dd>
+Specify the bit depth of the panchromatic and
+spectral bands (e.g. 12). If not specified, the NBITS metadata item from the
+panchromatic band will be used if it exists.</dd>
+<dt> <b>-nodata</b> <i>val</i>:</dt><dd>
+Specify nodata value for bands. Used for the resampling and pansharpening computation
+itself. If not set, deduced from the input bands, provided they have a consistent
+setting.</dd>
+<dt> <b>-spat_adjust</b>
+<i>{union (default),intersection,none,nonewithoutwarning}</i>:</dt><dd>
+Select behaviour when bands have not the same extent. See <i>SpatialExtentAdjustment</i>
+documentation in  <a href="gdal_vrttut.html#gdal_vrttut_pansharpen">VRT tutorial</a></dd>
+<dt> <b>-co</b> <i>"NAME=VALUE"</i>:</dt><dd> Passes a creation option to the
+output format driver.  Multiple <b>-co</b> options may be listed.  See format 
+specific documentation for legal creation options for each format.</dd>
+<dt> <b>-q</b>:</dt><dd> Suppress progress monitor and other non-error
+output.</dd>
+<dt> <i>pan_dataset</i></dt><dd> Dataset with panchromatic band (first band will be used).</dd>
+<dt> <i>spectral_dataset[,band=num]</i></dt><dd> Dataset with one or several spectral bands. If
+the band option is not specified, all bands of the datasets are taken into account. Otherwise,
+only the specified (num)th band. The same dataset can be repeated several times.</dd>
+<dt> <i>out_dataset</i></dt><dd> Output dataset</dd>
+</dl>
+
+Bands should be in the same projection.
+
+\section gdal_pansharpen_example EXAMPLE
+
+With spectral bands in a single dataset :
+\verbatim
+gdal_pansharpen.py panchro.tif multispectral.tif pansharpened_out.tif
+\endverbatim
+
+With a few spectral bands from a single dataset, reordered :
+\verbatim
+gdal_pansharpen.py panchro.tif multispectral.tif,band=3 multispectral.tif,band=2 multispectral.tif,band=1 pansharpened_out.tif
+\endverbatim
+
+With spectral bands in several datasets :
+\verbatim
+gdal_pansharpen.py panchro.tif band1.tif band2.tif band3.tif pansharpened_out.tif
+\endverbatim
+
+Specify weights:
+\verbatim
+gdal_pansharpen.py -w 0.7 -w 0.2 -w 0.1 panchro.tif multispectral.tif pansharpened_out.tif
+\endverbatim
+
+Specify RGB bands from a RGBNir multispectral dataset while computing the pseudo panchromatic intensity on the 4 RGBNir bands:
+\verbatim
+gdal_pansharpen.py -b 1 -b 2 -b 3 panchro.tif rgbnir.tif pansharpened_out.tif
+\endverbatim
+
+\if man
+\section gdal_pansharpen_author AUTHORS
+Even Rouault <even.rouault at spatialys.com>
 \endif
 */

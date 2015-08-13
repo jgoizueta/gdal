@@ -60,8 +60,8 @@ static void Usage()
         "Usage: gdal_rasterize [-b band]* [-i] [-at]\n"
         "       [-burn value]* | [-a attribute_name] [-3d] [-add]\n"
         "       [-l layername]* [-where expression] [-sql select_statement]\n"
-        "       [-of format] [-a_srs srs_def] [-co \"NAME=VALUE\"]*\n"
-        "       [-a_nodata value] [-init value]*\n"
+        "       [-dialect dialect] [-of format] [-a_srs srs_def]\n"
+        "       [-co \"NAME=VALUE\"]* [-a_nodata value] [-init value]*\n"
         "       [-te xmin ymin xmax ymax] [-tr xres yres] [-tap] [-ts width height]\n"
         "       [-ot {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/\n"
         "             CInt16/CInt32/CFloat32/CFloat64}] [-q]\n"
@@ -153,6 +153,7 @@ static void ProcessLayer(
 /*      Checkout that SRS are the same.                                 */
 /*      If -a_srs is specified, skip the test                           */
 /* -------------------------------------------------------------------- */
+    OGRCoordinateTransformationH hCT = NULL;
     if (!bSRSIsSet)
     {
         OGRSpatialReferenceH  hDstSRS = NULL;
@@ -175,9 +176,13 @@ static void ProcessLayer(
         {
             if( OSRIsSame(hSrcSRS, hDstSRS) == FALSE )
             {
-                fprintf(stderr,
+                hCT = OCTNewCoordinateTransformation(hSrcSRS, hDstSRS);
+                if( hCT == NULL )
+                {
+                    fprintf(stderr,
                         "Warning : the output raster dataset and the input vector layer do not have the same SRS.\n"
-                        "Results might be incorrect (no on-the-fly reprojection of input data).\n");
+                        "And reprojection of input data did not work. Results might be incorrect.\n");
+                }
             }
         }
         else if( hDstSRS != NULL && hSrcSRS == NULL )
@@ -213,6 +218,8 @@ static void ProcessLayer(
             printf( "Failed to find field %s on layer %s, skipping.\n",
                     pszBurnAttribute, 
                     OGR_FD_GetName( OGR_L_GetLayerDefn( hSrcLayer ) ) );
+            if( hCT != NULL )
+                OCTDestroyCoordinateTransformation(hCT);
             return;
         }
     }
@@ -238,6 +245,15 @@ static void ProcessLayer(
         }
 
         hGeom = OGR_G_Clone( OGR_F_GetGeometryRef( hFeat ) );
+        if( hCT != NULL )
+        {
+            if( OGR_G_Transform(hGeom, hCT) != OGRERR_NONE )
+            {
+                OGR_F_Destroy( hFeat );
+                OGR_G_DestroyGeometry(hGeom);
+                continue;
+            }
+        }
         ahGeometries.push_back( hGeom );
 
         for( unsigned int iBand = 0; iBand < anBandList.size(); iBand++ )
@@ -265,6 +281,9 @@ static void ProcessLayer(
         
         OGR_F_Destroy( hFeat );
     }
+    
+    if( hCT != NULL )
+        OCTDestroyCoordinateTransformation(hCT);
 
 /* -------------------------------------------------------------------- */
 /*      If we are in inverse mode, we add one extra ring around the     */
@@ -340,11 +359,9 @@ GDALDatasetH CreateOutputDataset(std::vector<OGRLayerH> ahLayers,
                 exit(2);
             }
 
-            /* When rasterizing point layers and that the bounds have */
-            /* not been explicitly set, voluntary increase the extent by */
-            /* a half-pixel size to avoid missing points on the border */
-            if (wkbFlatten(OGR_L_GetGeomType(hLayer)) == wkbPoint &&
-                !bTargetAlignedPixels && dfXRes != 0 && dfYRes != 0)
+            /* Voluntarily increase the extent by a half-pixel size to avoid */
+            /* missing points on the border */
+            if (!bTargetAlignedPixels && dfXRes != 0 && dfYRes != 0)
             {
                 sLayerEnvelop.MinX -= dfXRes / 2;
                 sLayerEnvelop.MaxX += dfXRes / 2;
@@ -471,6 +488,7 @@ int main( int argc, char ** argv )
     const char *pszDstFilename = NULL;
     char **papszLayers = NULL;
     const char *pszSQL = NULL;
+    const char *pszDialect = NULL;
     const char *pszBurnAttribute = NULL;
     const char *pszWHERE = NULL;
     std::vector<int> anBandList;
@@ -614,6 +632,10 @@ int main( int argc, char ** argv )
         else if( EQUAL(argv[i],"-sql") && i < argc-1 )
         {
             pszSQL = argv[++i];
+        }
+        else if( EQUAL(argv[i],"-dialect") && i < argc-1 )
+        {
+            pszDialect = argv[++i];
         }
         else if( EQUAL(argv[i],"-of") && i < argc-1 )
         {
@@ -763,6 +785,11 @@ int main( int argc, char ** argv )
         Usage();
     }
 
+    if( pszDialect != NULL && pszWHERE != NULL && pszSQL == NULL )
+    {
+        printf( "Warning: -dialect is ignored with -where. Use -sql instead" );
+    }
+
     if( bCreateOutput )
     {
         if( dfXRes == 0 && dfYRes == 0 && nXSize == 0 && nYSize == 0 )
@@ -887,7 +914,7 @@ int main( int argc, char ** argv )
     {
         OGRLayerH hLayer;
 
-        hLayer = OGR_DS_ExecuteSQL( hSrcDS, pszSQL, NULL, NULL ); 
+        hLayer = OGR_DS_ExecuteSQL( hSrcDS, pszSQL, NULL, pszDialect ); 
         if( hLayer != NULL )
         {
             if (bCreateOutput)

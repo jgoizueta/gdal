@@ -240,12 +240,14 @@ class CPL_DLL GDALPamRasterBand : public GDALRasterBand
 
   public:
                 GDALPamRasterBand();
+                GDALPamRasterBand(int bForceCachedIO);
     virtual     ~GDALPamRasterBand();
 
     virtual void        SetDescription( const char * );
 
     virtual CPLErr SetNoDataValue( double );
     virtual double GetNoDataValue( int *pbSuccess = NULL );
+    virtual CPLErr DeleteNoDataValue();
 
     virtual CPLErr SetColorTable( GDALColorTable * ); 
     virtual GDALColorTable *GetColorTable();

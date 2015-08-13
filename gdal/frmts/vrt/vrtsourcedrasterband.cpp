@@ -126,6 +126,39 @@ CPLErr VRTSourcedRasterBand::IRasterIO( GDALRWFlag eRWFlag,
     int         iSource;
     CPLErr      eErr = CE_None;
 
+    // If resampling with non-nearest neighbour, we need to be carefull
+    // if the VRT band exposes a nodata value, but the sources do not have it
+    if (eRWFlag == GF_Read &&
+        (nXSize != nBufXSize || nYSize != nBufYSize) &&
+        psExtraArg->eResampleAlg != GRIORA_NearestNeighbour &&
+        bNoDataValueSet )
+    {
+        for( int i = 0; i < nSources; i++ )
+        {
+            int bFallbackToBase = FALSE;
+            if( !papoSources[i]->IsSimpleSource() )
+                bFallbackToBase = TRUE;
+            else
+            {
+                VRTSimpleSource* poSource = (VRTSimpleSource*)papoSources[i];
+                int bSrcHasNoData = FALSE;
+                double dfSrcNoData = poSource->GetBand()->GetNoDataValue(&bSrcHasNoData);
+                if( !bSrcHasNoData || dfSrcNoData != dfNoDataValue )
+                    bFallbackToBase = TRUE;
+            }
+            if( bFallbackToBase )
+            {
+                return GDALRasterBand::IRasterIO( eRWFlag,
+                                                nXOff, nYOff, nXSize, nYSize,
+                                                pData, nBufXSize, nBufYSize,
+                                                eBufType,
+                                                nPixelSpace,
+                                                nLineSpace,
+                                                psExtraArg );
+            }
+        }
+    }
+
     if( eRWFlag == GF_Write )
     {
         CPLError( CE_Failure, CPLE_AppDefined, 
@@ -674,6 +707,13 @@ CPLErr VRTSourcedRasterBand::AddSource( VRTSource *poNewSource )
     papoSources[nSources-1] = poNewSource;
 
     ((VRTDataset *)poDS)->SetNeedsFlush();
+    
+    if( poNewSource->IsSimpleSource() &&
+        GetMetadataItem("NBITS", "IMAGE_STRUCTURE") != NULL)
+    {
+        ((VRTSimpleSource*)poNewSource)->SetMaxValue(
+                (1 << atoi(GetMetadataItem("NBITS", "IMAGE_STRUCTURE")))-1);
+    }
 
     return CE_None;
 }
@@ -1258,8 +1298,8 @@ CPLErr VRTSourcedRasterBand::SetMetadataItem( const char *pszName,
                                               const char *pszDomain )
 
 {
-    CPLDebug( "VRT", "VRTSourcedRasterBand::SetMetadataItem(%s,%s,%s)\n",
-              pszName, pszValue, pszDomain );
+    //CPLDebug( "VRT", "VRTSourcedRasterBand::SetMetadataItem(%s,%s,%s)\n",
+    //          pszName, pszValue, pszDomain );
               
     if( pszDomain != NULL
         && EQUAL(pszDomain,"new_vrt_sources") )

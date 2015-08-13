@@ -47,11 +47,51 @@ OGRMultiPoint::OGRMultiPoint()
 }
 
 /************************************************************************/
+/*                OGRMultiPoint( const OGRMultiPoint& )                 */
+/************************************************************************/
+
+/**
+ * \brief Copy constructor.
+ * 
+ * Note: before GDAL 2.1, only the default implementation of the constructor
+ * existed, which could be unsafe to use.
+ * 
+ * @since GDAL 2.1
+ */
+
+OGRMultiPoint::OGRMultiPoint( const OGRMultiPoint& other ) :
+    OGRGeometryCollection(other)
+{
+}
+
+/************************************************************************/
 /*                          ~OGRMultiPoint()                            */
 /************************************************************************/
 
 OGRMultiPoint::~OGRMultiPoint()
 {
+}
+
+/************************************************************************/
+/*                  operator=( const OGRMultiPoint&)                    */
+/************************************************************************/
+
+/**
+ * \brief Assignment operator.
+ * 
+ * Note: before GDAL 2.1, only the default implementation of the operator
+ * existed, which could be unsafe to use.
+ * 
+ * @since GDAL 2.1
+ */
+
+OGRMultiPoint& OGRMultiPoint::operator=( const OGRMultiPoint& other )
+{
+    if( this != &other)
+    {
+        OGRGeometryCollection::operator=( other );
+    }
+    return *this;
 }
 
 /************************************************************************/
@@ -306,7 +346,10 @@ OGRErr OGRMultiPoint::importFromWkt_Bracketed( char ** ppszInput, int bHasM, int
             poGeom->empty();
             eErr = addGeometryDirectly( poGeom );
             if( eErr != OGRERR_NONE )
+            {
+                delete poGeom;
                 return eErr;
+            }
 
             pszInput = pszNext;
 
@@ -334,7 +377,10 @@ OGRErr OGRMultiPoint::importFromWkt_Bracketed( char ** ppszInput, int bHasM, int
 
         eErr = addGeometryDirectly( poGeom );
         if( eErr != OGRERR_NONE )
+        {
+            delete poGeom;
             return eErr;
+        }
     }
 
 /* -------------------------------------------------------------------- */

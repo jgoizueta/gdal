@@ -284,6 +284,11 @@ GDALDriverManager::~GDALDriverManager()
     CPLCleanupSetlocaleMutex();
 
 /* -------------------------------------------------------------------- */
+/*      Cleanup QHull mutex                                             */
+/* -------------------------------------------------------------------- */
+    GDALTriangulationTerminate();
+
+/* -------------------------------------------------------------------- */
 /*      Cleanup the master CPL mutex, which governs the creation        */
 /*      of all other mutexes.                                           */ 
 /* -------------------------------------------------------------------- */
@@ -435,11 +440,12 @@ int GDALDriverManager::RegisterDriver( GDALDriver * poDriver )
         poDriver->SetMetadataItem( GDAL_DCAP_CREATECOPY, "YES" );
 
     /* Backward compability for GDAL raster out-of-tree drivers: */
-    /* if a driver hasn't explicitely set a vector capability, assume it is */
+    /* if a driver hasn't explicitly set a vector capability, assume it is */
     /* a raster driver (legacy OGR drivers will have DCAP_VECTOR set before */
     /* calling RegisterDriver() ) */
     if( poDriver->GetMetadataItem( GDAL_DCAP_RASTER ) == NULL &&
-        poDriver->GetMetadataItem( GDAL_DCAP_VECTOR ) == NULL )
+        poDriver->GetMetadataItem( GDAL_DCAP_VECTOR ) == NULL &&
+        poDriver->GetMetadataItem( GDAL_DCAP_GNM ) == NULL )
     {
         CPLDebug("GDAL", "Assuming DCAP_RASTER for driver %s. Please fix it.",
                  poDriver->GetDescription() );

@@ -2506,6 +2506,9 @@ GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, int nOptions )
                 if( nOptions == GDAL_OF_VECTOR &&
                     !CSLFetchBoolean( papszMD, GDAL_DCAP_VECTOR, FALSE ) )
                     continue;
+                if( nOptions == GDAL_OF_GNM &&
+                    !CSLFetchBoolean( papszMD, GDAL_DCAP_GNM, FALSE ) )
+                    continue;
 
                 if( CSLFetchBoolean( papszMD, GDAL_DCAP_OPEN, FALSE ) )
                     pszRFlag = "r";
@@ -2534,6 +2537,8 @@ GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, int nOptions )
                     pszKind = "raster";
                 else if( CSLFetchBoolean( papszMD, GDAL_DCAP_VECTOR, FALSE ) )
                     pszKind = "vector";
+                else if( CSLFetchBoolean( papszMD, GDAL_DCAP_GNM, FALSE ) )
+                    pszKind = "geography network";
                 else
                     pszKind = "unknown kind";
 
@@ -2585,6 +2590,8 @@ GDALGeneralCmdLineProcessor( int nArgc, char ***ppapszArgv, int nOptions )
                 printf( "  Supports: Raster\n" );
             if( CSLFetchBoolean( papszMD, GDAL_DCAP_VECTOR, FALSE ) )
                 printf( "  Supports: Vector\n" );
+            if( CSLFetchBoolean( papszMD, GDAL_DCAP_GNM, FALSE ) )
+                printf( "  Supports: Geography Network\n" );
 
             const char* pszExt = CSLFetchNameValue( papszMD, GDAL_DMD_EXTENSIONS );
             if( pszExt != NULL )
@@ -2871,7 +2878,10 @@ GDALDataset *GDALFindAssociatedAuxFile( const char *pszBasename,
             /* Avoid causing failure in opening of main file from SWIG bindings */
             /* when auxiliary file cannot be opened (#3269) */
             CPLTurnFailureIntoWarning(TRUE);
-            poODS = (GDALDataset *) GDALOpenShared( osAuxFilename, eAccess );
+            if( poDependentDS != NULL && poDependentDS->GetShared() )
+                poODS = (GDALDataset *) GDALOpenShared( osAuxFilename, eAccess );
+            else
+                poODS = (GDALDataset *) GDALOpen( osAuxFilename, eAccess );
             CPLTurnFailureIntoWarning(FALSE);
         }
         VSIFCloseL( fp );
@@ -2965,7 +2975,10 @@ GDALDataset *GDALFindAssociatedAuxFile( const char *pszBasename,
                 /* Avoid causing failure in opening of main file from SWIG bindings */
                 /* when auxiliary file cannot be opened (#3269) */
                 CPLTurnFailureIntoWarning(TRUE);
-                poODS = (GDALDataset *) GDALOpenShared( osAuxFilename, eAccess );
+                if( poDependentDS != NULL && poDependentDS->GetShared() )
+                    poODS = (GDALDataset *) GDALOpenShared( osAuxFilename, eAccess );
+                else
+                    poODS = (GDALDataset *) GDALOpen( osAuxFilename, eAccess );
                 CPLTurnFailureIntoWarning(FALSE);
             }
             VSIFCloseL( fp );
@@ -3347,6 +3360,36 @@ GDALRIOResampleAlg GDALRasterIOGetResampleAlg(const char* pszResampling)
         CPLError(CE_Warning, CPLE_NotSupported,
                 "GDAL_RASTERIO_RESAMPLING = %s not supported", pszResampling);
     return eResampleAlg;
+}
+
+/************************************************************************/
+/*                    GDALRasterIOGetResampleAlgStr()                   */
+/************************************************************************/
+
+const char* GDALRasterIOGetResampleAlg(GDALRIOResampleAlg eResampleAlg)
+{
+    switch(eResampleAlg)
+    {
+        case GRIORA_NearestNeighbour:
+            return "NearestNeighbour";
+        case GRIORA_Bilinear:
+            return "Bilinear";
+        case GRIORA_Cubic:
+            return "Cubic";
+        case GRIORA_CubicSpline:
+            return "CubicSpline";
+        case GRIORA_Lanczos:
+            return "Lanczos";
+        case GRIORA_Average:
+            return "Average";
+        case GRIORA_Mode:
+            return "Mode";
+        case GRIORA_Gauss:
+            return "Gauss";
+        default:
+            CPLAssert(FALSE);
+            return "Unknown";
+    }
 }
 
 /************************************************************************/

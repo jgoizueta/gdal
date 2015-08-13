@@ -514,9 +514,7 @@ def jp2openjpeg_15():
     src_ds = gdal.GetDriverByName('MEM').Create('', 256,256)
     src_ds.GetRasterBand(1).Fill(255)
     data = src_ds.ReadRaster()
-    gdal.SetConfigOption('GDAL_NUM_THREADS', '2')
     ds = gdaltest.jp2openjpeg_drv.CreateCopy('/vsimem/jp2openjpeg_15.jp2', src_ds, options = ['BLOCKXSIZE=32', 'BLOCKYSIZE=32'])
-    gdal.SetConfigOption('GDAL_NUM_THREADS', None)
     src_ds = None
     got_data = ds.ReadRaster()
     ds = None
@@ -1280,7 +1278,6 @@ def jp2openjpeg_27():
     # Test optimization in GDALCopyWholeRasterGetSwathSize()
     # Not sure how we can check that except looking at logs with CPL_DEBUG=GDAL
     # for "GDAL: GDALDatasetCopyWholeRaster(): 2048*2048 swaths, bInterleave=1"
-
     src_ds = gdal.GetDriverByName('MEM').Create('', 2049, 2049, 4)
     out_ds = gdaltest.jp2openjpeg_drv.CreateCopy('/vsimem/jp2openjpeg_27.jp2', src_ds, options = ['RESOLUTIONS=1','BLOCKXSIZE=2048', 'BLOCKYSIZE=2048'])
     src_ds = None

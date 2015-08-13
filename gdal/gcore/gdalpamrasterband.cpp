@@ -48,6 +48,17 @@ GDALPamRasterBand::GDALPamRasterBand()
 }
 
 /************************************************************************/
+/*                         GDALPamRasterBand()                          */
+/************************************************************************/
+
+GDALPamRasterBand::GDALPamRasterBand(int bForceCachedIO) : GDALRasterBand(bForceCachedIO)
+
+{
+    psPam = NULL;
+    SetMOFlags( GetMOFlags() | GMO_PAM_CLASS );
+}
+
+/************************************************************************/
 /*                         ~GDALPamRasterBand()                         */
 /************************************************************************/
 
@@ -682,6 +693,26 @@ CPLErr GDALPamRasterBand::SetNoDataValue( double dfNewValue )
     }
     else
         return GDALRasterBand::SetNoDataValue( dfNewValue );
+}
+
+/************************************************************************/
+/*                          DeleteNoDataValue()                         */
+/************************************************************************/
+
+CPLErr GDALPamRasterBand::DeleteNoDataValue()
+
+{
+    PamInitialize();
+
+    if( psPam )
+    {
+        psPam->bNoDataValueSet = FALSE;
+        psPam->dfNoDataValue = 0.0;
+        psPam->poParentDS->MarkPamDirty();
+        return CE_None;
+    }
+    else
+        return GDALRasterBand::DeleteNoDataValue();
 }
 
 /************************************************************************/
