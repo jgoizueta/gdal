@@ -8,7 +8,7 @@
 	dh $@
 
 override_dh_auto_configure:
-	dh_auto_configure -- --without-ld-shared --disable-shared --enable-static --with-ogdi=no
+	dh_auto_configure -- --without-ld-shared --disable-shared --enable-static --with-ogdi=no --with-spatialite=yes
 
 override_dh_auto_build:
 	dh_auto_build -- apps-target

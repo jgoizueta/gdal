@@ -1,3 +1,10 @@
+ogr2ogr2 (2.1.0+svn.29639-precise1) precise; urgency=medium
+
+  * drv_csv: X_POSSIBLE_NAMES and other open options
+  * Many other changes from upstream
+
+ -- Rafa de la Torre <rtorre@cartodb.com>  Thu, 13 Aug 2015 16:57:23 +0200
+
 ogr2ogr2 (2.0.0+svn.29247c-precise1ubuntu1) precise; urgency=high
 
   * Fix heavy queries on system tables for pg
