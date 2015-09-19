@@ -957,6 +957,20 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
         anFieldPrecision.resize(nFieldCount);
         int nStringFieldCount = 0;
 
+        // piConstantWidth will be used to determine which fields have always
+        // the same width. For each field iField we keep its width in
+        // piConstantWidth[iField] with -1 meaning it hasn't been initialized
+        // and 0 meaning width varies in the visited field instances.
+        int* piConstantWidth = (int*) VSIMalloc( nFieldCount*sizeof(int) );
+        for( iField = 0; iField < nFieldCount; iField++ )
+        {
+            piConstantWidth[iField] = -1;
+        }
+        // This should probably be parameterized somehow: it's the+
+        // mininumum width (should always be greater than 0) to consider
+        // a field 'constant-width' avoid considering it an integer.
+        const int minimum_constant_width = 4;
+
         while( !VSIFEofL(fpMem) )
         {
             char** papszTokens = OGRCSVReadParseLineL( fpMem, chDelimiter, FALSE,
@@ -1005,6 +1019,12 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                     }
                 }
 
+                /* Keep track of constant width fields */
+                if( piConstantWidth[iField] == -1 )
+                    piConstantWidth[iField] = strlen(papszTokens[iField]);
+                else if( piConstantWidth[iField] != strlen(papszTokens[iField]) )
+                    piConstantWidth[iField] = 0;
+
                 OGRFieldType eOGRFieldType;
                 int bIsBoolean = FALSE;
                 if( eType == CPL_VALUE_INTEGER )
@@ -1027,6 +1047,10 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                         }
                         if( allDigits && papszTokens[iField][0] == '0' )
                             isAlphanumeric = TRUE;
+                        /* Fields character other than digits (e.g. a sign) */
+                        /* won't be regarded as 'constant-widt' fields. */
+                        if( !allDigits )
+                            piConstantWidth[iField] = 0;
                     }
 
                     if( isAlphanumeric )
@@ -1160,6 +1184,15 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
             if( nStringFieldCount == nFieldCount && bAutodetectWidth )
                 break;
         }
+
+        /* Now we will regard integer constant field fields as strings */
+        for( iField = 0; iField < nFieldCount; iField++ )
+        {
+            if( aeFieldType[iField] == OFTInteger || aeFieldType[iField] == OFTInteger64 )
+                if( piConstantWidth[iField] >= minimum_constant_width )
+                    aeFieldType[iField] = OFTString;
+        }
+        VSIFree(piConstantWidth);
 
         papszFieldTypes = (char**) CPLCalloc( nFieldCount + 1, sizeof(char*) );
         for(iField = 0; iField < nFieldCount; iField ++ )
