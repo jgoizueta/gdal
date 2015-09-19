@@ -1045,10 +1045,8 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                                  break;
                             }
                         }
-                        if( allDigits && papszTokens[iField][0] == '0' )
-                            isAlphanumeric = TRUE;
-                        /* Fields character other than digits (e.g. a sign) */
-                        /* won't be regarded as 'constant-widt' fields. */
+                        /* Fields with characters other than digits (e.g. a sign) */
+                        /* won't be regarded as 'constant-width' fields. */
                         if( !allDigits )
                             piConstantWidth[iField] = 0;
                     }
