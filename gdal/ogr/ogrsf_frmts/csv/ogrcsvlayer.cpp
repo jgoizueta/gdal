@@ -1009,11 +1009,36 @@ char** OGRCSVLayer::AutodetectFieldTypes(char** papszOpenOptions, int nFieldCoun
                 int bIsBoolean = FALSE;
                 if( eType == CPL_VALUE_INTEGER )
                 {
-                    GIntBig nVal = CPLAtoGIntBig(papszTokens[iField]);
-                    if( (GIntBig)(int)nVal != nVal )
-                        eOGRFieldType = OFTInteger64;
+                    // Integral data with a sign or with leading zeros will be
+                    // and 'alphanumeric code' and treated as OFTString, since
+                    // those zeros could be a significant part of
+                    // a code (e.g. a zipcode)
+                    int isAlphanumeric = FALSE;
+                    if( strlen(papszTokens[iField]) > 1 )
+                    {
+                        int allDigits = TRUE;
+                        for ( const char* pszTmp = papszTokens[iField]; *pszTmp != '\0'; pszTmp++ )
+                        {
+                            if( !isdigit(*pszTmp) )
+                            {
+                                 allDigits = FALSE;
+                                 break;
+                            }
+                        }
+                        if( allDigits && papszTokens[iField][0] == '0' )
+                            isAlphanumeric = TRUE;
+                    }
+
+                    if( isAlphanumeric )
+                      eOGRFieldType = OFTString;
                     else
-                        eOGRFieldType = OFTInteger;
+                    {
+                        GIntBig nVal = CPLAtoGIntBig(papszTokens[iField]);
+                        if( (GIntBig)(int)nVal != nVal )
+                            eOGRFieldType = OFTInteger64;
+                        else
+                            eOGRFieldType = OFTInteger;
+                    }
                 }
                 else if( eType == CPL_VALUE_REAL )
                 {
